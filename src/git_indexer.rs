@@ -7,9 +7,9 @@ use git2::{Delta, DiffFindOptions, DiffOptions, Repository, Sort};
 use serde::Serialize;
 
 /// A single changed-file entry within a commit's diff against its (first) parent.
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Debug)]
 #[serde(tag = "status", rename_all = "lowercase")]
-enum FileChange {
+pub enum FileChange {
     Added { path: String },
     Deleted { path: String },
     Modified { path: String },
@@ -21,24 +21,35 @@ enum FileChange {
     Other { path: String, kind: String },
 }
 
-#[derive(Serialize)]
-struct CommitInfo {
-    sha: String,
-    short_sha: String,
-    author_name: String,
-    author_email: String,
+#[derive(Serialize, Clone, Debug)]
+pub struct CommitInfo {
+    pub sha: String,
+    pub short_sha: String,
+    pub author_name: String,
+    pub author_email: String,
     /// First line of the commit message.
-    summary: String,
+    pub summary: String,
     /// Full commit message, including body.
-    message: String,
+    pub message: String,
     /// RFC3339 timestamp of the commit, using the commit's own timezone offset.
-    timestamp: String,
-    files_changed: Vec<FileChange>,
+    pub timestamp: String,
+    pub files_changed: Vec<FileChange>,
 }
 
 /// Walks the full commit history reachable from HEAD (newest first, matching
 /// `git log`'s default order) and prints it as a JSON array to stdout.
 pub fn run(path: &str) -> Result<()> {
+    let commits = walk_commits(path)?;
+    let json = serde_json::to_string_pretty(&commits)
+        .context("failed to serialize commit history to JSON")?;
+    println!("{json}");
+    Ok(())
+}
+
+/// Walks the full commit history reachable from HEAD (newest first) and
+/// returns it as structured data — reusable by the graph builder (milestone 4)
+/// as well as the CLI's own JSON-printing `run()` above.
+pub fn walk_commits(path: &str) -> Result<Vec<CommitInfo>> {
     let repo = Repository::open(path)
         .with_context(|| format!("failed to open Git repository at '{path}'"))?;
 
@@ -105,11 +116,7 @@ pub fn run(path: &str) -> Result<()> {
         });
     }
 
-    let json = serde_json::to_string_pretty(&commits)
-        .context("failed to serialize commit history to JSON")?;
-    println!("{json}");
-
-    Ok(())
+    Ok(commits)
 }
 
 /// Diffs `commit` against its first parent (or against an empty tree, for a
