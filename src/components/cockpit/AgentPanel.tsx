@@ -17,7 +17,25 @@ type GraphState =
   | { status: "error"; message: string }
   | { status: "ready"; projectPath: string };
 
-export function AgentPanel() {
+interface AgentPanelProps {
+  projectPath: string | null;
+}
+
+/** Best-effort detection of "this folder isn't a Git repository" so we can
+ * show an honest, specific message instead of the raw backend error text —
+ * refresh_project_graph fails this way for any real, non-Git folder the
+ * user might now pick via Open Project. The backend wraps git2::Repository
+ * ::open's failure with anyhow context "failed to open Git repository at
+ * '<path>'" (see crates/core/src/git_indexer.rs::walk_commits); note that
+ * anyhow's `.to_string()` — used when converting to the String error type
+ * these Tauri commands return — only surfaces that top-level context, not
+ * the underlying libgit2 message, so we match on the context text itself.
+ * Falls back to showing the raw message for every other failure mode. */
+function isMissingGitRepoError(message: string): boolean {
+  return message.toLowerCase().includes("failed to open git repository");
+}
+
+export function AgentPanel({ projectPath }: AgentPanelProps) {
   const [graph, setGraph] = useState<GraphState>({ status: "loading" });
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
@@ -25,23 +43,29 @@ export function AgentPanel() {
   const nextId = useRef(0);
 
   useEffect(() => {
+    if (!projectPath) {
+      return;
+    }
+
     let cancelled = false;
+    setGraph({ status: "loading" });
+    setMessages([]);
 
     async function prepare() {
       try {
-        const projectPath = await invoke<string>("get_default_project_path");
         // Builds the graph if it doesn't exist yet, or is a no-op if it's
         // already current — same idempotent logic verified in Phase 0/1.
         await invoke("refresh_project_graph", { projectPath });
         if (!cancelled) {
-          setGraph({ status: "ready", projectPath });
+          setGraph({ status: "ready", projectPath: projectPath! });
         }
       } catch (err) {
         if (!cancelled) {
-          setGraph({
-            status: "error",
-            message: err instanceof Error ? err.message : String(err),
-          });
+          const raw = err instanceof Error ? err.message : String(err);
+          const message = isMissingGitRepoError(raw)
+            ? "This folder isn't a Git repository yet — the project graph needs Git history to build from."
+            : raw;
+          setGraph({ status: "error", message });
         }
       }
     }
@@ -50,7 +74,7 @@ export function AgentPanel() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [projectPath]);
 
   function addMessage(from: Message["from"], text: string) {
     setMessages((prev) => [...prev, { id: nextId.current++, from, text }]);

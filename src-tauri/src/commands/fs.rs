@@ -90,6 +90,32 @@ pub fn write_file(path: String, contents: String) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// `list_directory` has no Git dependency at all (see its implementation
+    /// above — plain `std::fs::read_dir`), so it must keep working fine for
+    /// a folder a user picks via the new Open Project dialog that isn't a
+    /// Git repository — unlike `refresh_project_graph`, which genuinely
+    /// needs `.git` history and fails for such folders (see
+    /// commands/project.rs's non-git-folder test).
+    #[test]
+    fn lists_a_plain_non_git_folder_just_fine() {
+        let dir = std::env::temp_dir().join(format!(
+            "infinabox-fs-non-git-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "hello").unwrap();
+        std::fs::write(dir.join("b.txt"), "world").unwrap();
+
+        let entries = list_directory(dir.to_string_lossy().into_owned())
+            .expect("a plain, non-Git folder should list just fine");
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"a.txt"));
+        assert!(names.contains(&"b.txt"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn lists_the_hollow_meridian_fixture_and_skips_git() {
         let entries = list_directory(get_default_project_path()).expect("fixture should exist");

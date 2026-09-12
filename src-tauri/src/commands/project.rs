@@ -144,6 +144,36 @@ pub fn ask_question(app: tauri::AppHandle, project_path: String, question: Strin
 mod tests {
     use super::*;
 
+    /// Confirms `refresh_project_graph_impl` fails cleanly (rather than
+    /// panicking) against a real non-Git folder, and that the surfaced
+    /// error text is the stable "failed to open Git repository" context
+    /// message the frontend's `isMissingGitRepoError` (AgentPanel.tsx)
+    /// pattern-matches on to show an honest, specific error instead of a
+    /// cryptic raw one.
+    #[test]
+    fn refresh_project_graph_fails_cleanly_against_a_non_git_folder() {
+        let dir = std::env::temp_dir().join(format!(
+            "infinabox-non-git-folder-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "hello").unwrap();
+
+        let data_dir = temp_data_dir("non-git-folder");
+        let result = refresh_project_graph_impl(&data_dir, &dir.to_string_lossy());
+
+        match result {
+            Ok(_) => panic!("a plain folder with no .git should fail to build a graph"),
+            Err(err) => assert!(
+                err.to_lowercase().contains("failed to open git repository"),
+                "expected the stable 'failed to open Git repository' context message, got: {err}"
+            ),
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// Real fixture repo used across the project's milestones: a genuine
     /// Godot-shaped Git repo with 8 commits, including a rename
     /// (scripts/elevator_logic.gd -> scripts/ElevatorLogic.gd) that the

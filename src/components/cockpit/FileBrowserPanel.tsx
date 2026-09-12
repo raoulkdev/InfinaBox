@@ -10,22 +10,28 @@ type LoadState =
   | { status: "ready"; entries: FileEntry[] };
 
 interface FileBrowserPanelProps {
+  projectPath: string | null;
   selectedPath?: string | null;
   onSelectFile?: (entry: FileEntry) => void;
 }
 
 export function FileBrowserPanel({
+  projectPath,
   selectedPath,
   onSelectFile,
 }: FileBrowserPanelProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
   useEffect(() => {
+    if (!projectPath) {
+      return;
+    }
+
     let cancelled = false;
+    setState({ status: "loading" });
 
     async function load() {
       try {
-        const projectPath = await invoke<string>("get_default_project_path");
         const entries = await invoke<FileEntry[]>("list_directory", {
           path: projectPath,
         });
@@ -47,7 +53,7 @@ export function FileBrowserPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [projectPath]);
 
   return (
     <div className="flex h-full w-[240px] shrink-0 flex-col border border-border bg-card">
