@@ -9,7 +9,15 @@ type LoadState =
   | { status: "error"; message: string }
   | { status: "ready"; entries: FileEntry[] };
 
-export function FileBrowserPanel() {
+interface FileBrowserPanelProps {
+  selectedPath?: string | null;
+  onSelectFile?: (entry: FileEntry) => void;
+}
+
+export function FileBrowserPanel({
+  selectedPath,
+  onSelectFile,
+}: FileBrowserPanelProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
   useEffect(() => {
@@ -60,7 +68,13 @@ export function FileBrowserPanel() {
               {state.message}
             </p>
           )}
-          {state.status === "ready" && <FileTree entries={state.entries} />}
+          {state.status === "ready" && (
+            <FileTree
+              entries={state.entries}
+              selectedPath={selectedPath}
+              onSelectFile={onSelectFile}
+            />
+          )}
         </div>
       </ScrollArea>
     </div>
