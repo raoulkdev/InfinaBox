@@ -338,12 +338,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "infinabox_core"
+name = "infinabox-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "infinabox-core",
+ "serde_json",
+]
+
+[[package]]
+name = "infinabox-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "clap",
  "git2",
  "notify",
  "rusqlite",

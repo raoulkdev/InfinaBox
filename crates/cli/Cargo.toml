@@ -1,0 +1,11 @@
+[package]
+name = "infinabox-cli"
+version = "0.1.0"
+edition = "2024"
+default-run = "infinabox-cli"
+
+[dependencies]
+infinabox-core = { path = "../core" }
+anyhow = "1.0.104"
+clap = { version = "4.6.6", features = ["derive"] }
+serde_json = "1.0.151"

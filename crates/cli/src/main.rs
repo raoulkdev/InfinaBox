@@ -1,11 +1,6 @@
-mod ask;
-mod git_indexer;
-mod graph;
-mod mcp_client;
-mod watcher;
-
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use infinabox_core::{ask, git_indexer, graph, mcp_client, watcher};
 
 #[derive(Parser)]
 #[command(name = "infinabox-core")]
