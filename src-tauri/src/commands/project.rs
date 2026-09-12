@@ -180,10 +180,18 @@ mod tests {
     fn refresh_is_idempotent_and_ask_is_grounded_against_real_fixture() {
         let data_dir = temp_data_dir("hollow-meridian");
 
+        // Read the real, current commit count rather than hardcoding it — the
+        // fixture is a living "real project" that gains commits over time
+        // (e.g. milestone 6 added a docs/gdd commit), so a hardcoded number
+        // here would go stale for a reason that isn't a real bug.
+        let total_commits = infinabox_core::git_indexer::walk_commits(FIXTURE_REPO)
+            .expect("fixture repo should be readable")
+            .len();
+
         // First build: fresh database, every commit is new.
         let first = refresh_project_graph_impl(&data_dir, FIXTURE_REPO)
             .expect("first refresh_project_graph_impl call should succeed");
-        assert_eq!(first.commits_indexed, 8, "fresh db should index all 8 fixture commits");
+        assert_eq!(first.commits_indexed, total_commits, "fresh db should index every fixture commit");
         assert_eq!(first.commits_skipped, 0);
 
         // Second build against the SAME resolved db path: nothing new to do.
@@ -192,7 +200,7 @@ mod tests {
         let second = refresh_project_graph_impl(&data_dir, FIXTURE_REPO)
             .expect("second refresh_project_graph_impl call should succeed");
         assert_eq!(second.commits_indexed, 0, "second run should index nothing new");
-        assert_eq!(second.commits_skipped, 8, "second run should skip all 8 already-indexed commits");
+        assert_eq!(second.commits_skipped, total_commits, "second run should skip every already-indexed commit");
 
         // Grounded question-answering over the now-persisted graph, through
         // the rename: the fixture's known-correct answer names commit

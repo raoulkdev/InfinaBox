@@ -70,6 +70,22 @@ pub fn get_default_project_path() -> String {
     "/Users/raoulkaleba/Developer/hollow-meridian-test".to_string()
 }
 
+/// Phase 1, milestone 6: reads a file's contents so the GDD editor can open
+/// a real markdown file from the project's docs folder.
+#[tauri::command]
+pub fn read_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("failed to read '{path}': {e}"))
+}
+
+/// Writes `contents` to `path`, overwriting it — the GDD editor's Save.
+/// The file already being a real, Git-tracked file in the project is what
+/// makes "save it, see a normal Git diff" true; this command does nothing
+/// Git-specific itself, on purpose.
+#[tauri::command]
+pub fn write_file(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents).map_err(|e| format!("failed to write '{path}': {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,5 +115,34 @@ mod tests {
             !script_names.contains(&"elevator_logic.gd"),
             "old pre-rename name should not exist on disk anymore"
         );
+    }
+
+    #[test]
+    fn reads_a_real_gdd_doc_from_the_fixture() {
+        let path = format!("{}/docs/gdd/sector-3-verticality.md", get_default_project_path());
+        let contents = read_file(path).expect("real GDD doc should be readable");
+
+        assert!(contents.contains("status: in-progress"), "frontmatter should survive intact");
+        assert!(contents.contains("[[scripts/ElevatorLogic.gd]]"), "wiki-link syntax should survive intact");
+        assert!(contents.contains("# Sector 3 — Verticality"));
+    }
+
+    #[test]
+    fn write_then_read_round_trips_and_only_touches_the_given_path() {
+        let dir = std::env::temp_dir().join(format!("infinabox-fs-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("scratch.md").to_string_lossy().into_owned();
+
+        write_file(path.clone(), "# Draft\n\nSome content.".to_string())
+            .expect("write should succeed");
+        let round_tripped = read_file(path.clone()).expect("read after write should succeed");
+        assert_eq!(round_tripped, "# Draft\n\nSome content.");
+
+        // Overwrite, confirm the new content replaces the old rather than appending.
+        write_file(path.clone(), "# Revised".to_string()).expect("overwrite should succeed");
+        let revised = read_file(path).expect("read after overwrite should succeed");
+        assert_eq!(revised, "# Revised");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
