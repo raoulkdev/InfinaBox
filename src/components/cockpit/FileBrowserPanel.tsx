@@ -11,15 +11,11 @@ type LoadState =
 
 interface FileBrowserPanelProps {
   projectPath: string | null;
-  selectedPath?: string | null;
-  onSelectFile?: (entry: FileEntry) => void;
 }
 
-export function FileBrowserPanel({
-  projectPath,
-  selectedPath,
-  onSelectFile,
-}: FileBrowserPanelProps) {
+/** A pure file browser — glances at the project's real files, doesn't open
+ * or edit anything. Editing GDD docs happens in the Design section instead. */
+export function FileBrowserPanel({ projectPath }: FileBrowserPanelProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
   useEffect(() => {
@@ -74,13 +70,7 @@ export function FileBrowserPanel({
               {state.message}
             </p>
           )}
-          {state.status === "ready" && (
-            <FileTree
-              entries={state.entries}
-              selectedPath={selectedPath}
-              onSelectFile={onSelectFile}
-            />
-          )}
+          {state.status === "ready" && <FileTree entries={state.entries} />}
         </div>
       </ScrollArea>
     </div>
