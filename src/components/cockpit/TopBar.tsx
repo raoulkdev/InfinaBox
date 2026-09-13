@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
   DropdownMenu,
@@ -106,7 +105,6 @@ export function TopBar({
       </div>
 
       <div className="flex items-center gap-2">
-        <Badge variant="outline">3 agents</Badge>
         <Button size="sm">
           <Plus />
           New task

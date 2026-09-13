@@ -4,7 +4,7 @@ import { TopBar, type Section } from "@/components/cockpit/TopBar";
 import { FileBrowserPanel } from "@/components/cockpit/FileBrowserPanel";
 import { ViewportPanel } from "@/components/cockpit/ViewportPanel";
 import { SectionOverlay } from "@/components/cockpit/SectionOverlay";
-import { AgentPanel } from "@/components/cockpit/AgentPanel";
+import { TerminalPanel } from "@/components/cockpit/TerminalPanel";
 import { ConsoleDock } from "@/components/cockpit/ConsoleDock";
 
 function App() {
@@ -15,10 +15,10 @@ function App() {
   const [activeSection, setActiveSection] = useState<Section | null>(null);
 
   // The currently open project folder — shared by FileBrowserPanel, the
-  // Design section, and AgentPanel (and shown in TopBar). Seeded from
-  // get_default_project_path on mount so the app still opens showing the
-  // familiar test project by default; from then on it's real, user-driven
-  // state set via the TopBar's project picker.
+  // Design section, and the terminal's starting directory (shown in
+  // TopBar). Seeded from get_default_project_path on mount so the app
+  // still opens showing the familiar test project by default; from then on
+  // it's real, user-driven state set via the TopBar's project picker.
   const [projectPath, setProjectPath] = useState<string | null>(null);
 
   useEffect(() => {
@@ -58,7 +58,7 @@ function App() {
         ) : (
           <ViewportPanel />
         )}
-        <AgentPanel projectPath={projectPath} />
+        <TerminalPanel projectPath={projectPath} />
       </div>
       <ConsoleDock />
     </div>
