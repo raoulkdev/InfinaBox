@@ -171,4 +171,26 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn read_file_error_message_for_binary_content_contains_expected_substring() {
+        let dir = std::env::temp_dir().join(format!(
+            "infinabox-fs-binary-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("not_text.bin").to_string_lossy().into_owned();
+
+        // Invalid UTF-8 byte sequence — 0xFF is never valid as a UTF-8
+        // continuation or lead byte.
+        std::fs::write(&path, [0xFFu8, 0xFE, 0xFD, 0x00]).unwrap();
+
+        let err = read_file(path).expect_err("reading binary content as a string should fail");
+        assert!(
+            err.to_lowercase().contains("stream did not contain valid utf-8"),
+            "expected the standard library's UTF-8 error text, got: {err}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
