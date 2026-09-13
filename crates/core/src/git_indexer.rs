@@ -191,3 +191,36 @@ fn diff_files_for_commit(
 
     Ok(files)
 }
+
+/// Returns the short name of the repository's current branch (e.g. "main"),
+/// resolved the same way `git branch --show-current` does.
+pub fn current_branch(path: &str) -> Result<String> {
+    let repo = Repository::open(path)
+        .with_context(|| format!("failed to open Git repository at '{path}'"))?;
+    let head = repo.head().context("failed to read repository HEAD")?;
+    head.shorthand()
+        .map(|s| s.to_string())
+        .context("HEAD's branch name is not valid UTF-8")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn current_branch_matches_real_git() {
+        let path = "/Users/raoulkaleba/Developer/hollow-meridian-test";
+        let branch = current_branch(path).expect("fixture should have a valid current branch");
+
+        let output = std::process::Command::new("git")
+            .args(["-C", path, "branch", "--show-current"])
+            .output()
+            .expect("git should be runnable on this machine");
+        let expected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        assert_eq!(
+            branch, expected,
+            "current_branch should match `git branch --show-current`"
+        );
+    }
+}
