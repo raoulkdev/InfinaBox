@@ -1,6 +1,7 @@
 mod commands;
 
 use commands::fs::{get_default_project_path, list_directory, read_file, write_file};
+use commands::overview::{current_branch, list_recent_commits};
 use commands::project::{ask_question, refresh_project_graph};
 use commands::terminal::{resize_terminal, spawn_terminal, write_to_terminal, TerminalState};
 
@@ -20,6 +21,8 @@ pub fn run() {
             spawn_terminal,
             write_to_terminal,
             resize_terminal,
+            current_branch,
+            list_recent_commits,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
