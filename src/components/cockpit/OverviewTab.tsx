@@ -10,10 +10,12 @@ interface OverviewTabProps {
 type GitState =
   | { status: "loading" }
   | { status: "not-git" }
+  | { status: "error"; message: string }
   | { status: "ready"; branch: string; commitCount: number; lastCommit: CommitInfo | null };
 
 type FileCountState =
   | { status: "loading" }
+  | { status: "empty" }
   | { status: "error"; message: string }
   | { status: "ready"; count: number };
 
@@ -36,6 +38,10 @@ function relativeTime(iso: string): string {
   return `${Math.round(diffHr / 24)}d ago`;
 }
 
+function isMissingGitRepoError(message: string): boolean {
+  return message.toLowerCase().includes("failed to open git repository");
+}
+
 function StatRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between border-b border-border px-3 py-2 last:border-b-0">
@@ -54,7 +60,7 @@ export function OverviewTab({ projectPath }: OverviewTabProps) {
   useEffect(() => {
     if (!projectPath) {
       setGit({ status: "not-git" });
-      setFiles({ status: "error", message: "No project open." });
+      setFiles({ status: "empty" });
       return;
     }
 
@@ -76,10 +82,15 @@ export function OverviewTab({ projectPath }: OverviewTabProps) {
             lastCommit: commits[0] ?? null,
           });
         }
-      } catch {
-        // Either command fails the same way for a non-Git folder — a real,
-        // expected case now that any folder can be opened.
-        if (!cancelled) setGit({ status: "not-git" });
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (isMissingGitRepoError(message)) {
+            setGit({ status: "not-git" });
+          } else {
+            setGit({ status: "error", message });
+          }
+        }
       }
     }
 
@@ -116,6 +127,9 @@ export function OverviewTab({ projectPath }: OverviewTabProps) {
             This folder isn't a Git repository yet.
           </p>
         )}
+        {git.status === "error" && (
+          <p className="px-3 py-2 text-sm text-destructive">{git.message}</p>
+        )}
         {git.status === "ready" && (
           <>
             <StatRow label="Branch" value={git.branch} />
@@ -132,6 +146,9 @@ export function OverviewTab({ projectPath }: OverviewTabProps) {
       <div>
         {files.status === "loading" && (
           <p className="px-3 py-2 text-sm text-muted-foreground">loading…</p>
+        )}
+        {files.status === "empty" && (
+          <p className="px-3 py-2 text-sm text-muted-foreground">No project open.</p>
         )}
         {files.status === "error" && (
           <p className="px-3 py-2 text-sm text-destructive">{files.message}</p>
