@@ -223,4 +223,47 @@ mod tests {
             "current_branch should match `git branch --show-current`"
         );
     }
+
+    /// Wire-contract test: confirms `CommitInfo`/`FileChange`'s actual JSON
+    /// shape matches what the frontend's TypeScript types (src/types/git.ts)
+    /// assume — a `renamed` file change serializes with a lowercase
+    /// `"status"` tag and `"from"`/`"to"` fields (not `"path"`). This does
+    /// not re-test rename detection itself (covered elsewhere); it only
+    /// guards the serde representation other tests don't look at.
+    #[test]
+    fn commit_info_serializes_renamed_file_change_in_the_shape_the_frontend_expects() {
+        let path = "/Users/raoulkaleba/Developer/hollow-meridian-test";
+        let commits = walk_commits(path).expect("fixture repo should be readable");
+
+        let rename_commit = commits
+            .iter()
+            .find(|c| c.summary.contains("naming consistency"))
+            .expect("fixture should contain the known rename commit");
+
+        let json = serde_json::to_value(rename_commit)
+            .expect("CommitInfo should serialize to JSON");
+
+        let files_changed = json
+            .get("files_changed")
+            .and_then(|v| v.as_array())
+            .expect("files_changed should serialize as a JSON array");
+
+        let renamed_entry = files_changed
+            .iter()
+            .find(|entry| entry.get("status").and_then(|s| s.as_str()) == Some("renamed"))
+            .unwrap_or_else(|| {
+                panic!("expected a file change with status \"renamed\", got: {files_changed:#?}")
+            });
+
+        assert_eq!(
+            renamed_entry.get("from").and_then(|v| v.as_str()),
+            Some("scripts/elevator_logic.gd"),
+            "renamed entry's \"from\" field should hold the old path, got: {renamed_entry:#?}"
+        );
+        assert_eq!(
+            renamed_entry.get("to").and_then(|v| v.as_str()),
+            Some("scripts/ElevatorLogic.gd"),
+            "renamed entry's \"to\" field should hold the new path, got: {renamed_entry:#?}"
+        );
+    }
 }

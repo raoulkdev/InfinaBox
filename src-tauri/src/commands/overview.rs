@@ -5,12 +5,12 @@
 
 use infinabox_core::git_indexer::{self, CommitInfo};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn current_branch(path: String) -> Result<String, String> {
     git_indexer::current_branch(&path).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_recent_commits(path: String) -> Result<Vec<CommitInfo>, String> {
     git_indexer::walk_commits(&path).map_err(|e| e.to_string())
 }

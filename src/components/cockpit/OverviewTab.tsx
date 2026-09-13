@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { isEmptyRepoError, isMissingGitRepoError } from "@/lib/backend-errors";
 import type { CommitInfo } from "@/types/git";
 import type { FileEntry } from "@/types/fs";
 
@@ -9,7 +10,9 @@ interface OverviewTabProps {
 
 type GitState =
   | { status: "loading" }
+  | { status: "empty" }
   | { status: "not-git" }
+  | { status: "empty-repo" }
   | { status: "error"; message: string }
   | { status: "ready"; branch: string; commitCount: number; lastCommit: CommitInfo | null };
 
@@ -38,10 +41,6 @@ function relativeTime(iso: string): string {
   return `${Math.round(diffHr / 24)}d ago`;
 }
 
-function isMissingGitRepoError(message: string): boolean {
-  return message.toLowerCase().includes("failed to open git repository");
-}
-
 function StatRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between border-b border-border px-3 py-2 last:border-b-0">
@@ -59,7 +58,7 @@ export function OverviewTab({ projectPath }: OverviewTabProps) {
 
   useEffect(() => {
     if (!projectPath) {
-      setGit({ status: "not-git" });
+      setGit({ status: "empty" });
       setFiles({ status: "empty" });
       return;
     }
@@ -87,6 +86,8 @@ export function OverviewTab({ projectPath }: OverviewTabProps) {
           const message = err instanceof Error ? err.message : String(err);
           if (isMissingGitRepoError(message)) {
             setGit({ status: "not-git" });
+          } else if (isEmptyRepoError(message)) {
+            setGit({ status: "empty-repo" });
           } else {
             setGit({ status: "error", message });
           }
@@ -122,9 +123,17 @@ export function OverviewTab({ projectPath }: OverviewTabProps) {
         {git.status === "loading" && (
           <p className="px-3 py-2 text-sm text-muted-foreground">loading…</p>
         )}
+        {git.status === "empty" && (
+          <p className="px-3 py-2 text-sm text-muted-foreground">No project open.</p>
+        )}
         {git.status === "not-git" && (
           <p className="px-3 py-2 text-sm text-muted-foreground">
             This folder isn't a Git repository yet.
+          </p>
+        )}
+        {git.status === "empty-repo" && (
+          <p className="px-3 py-2 text-sm text-muted-foreground">
+            This repository has no commits yet.
           </p>
         )}
         {git.status === "error" && (

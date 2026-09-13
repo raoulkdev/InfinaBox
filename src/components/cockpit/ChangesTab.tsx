@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { isEmptyRepoError, isMissingGitRepoError } from "@/lib/backend-errors";
 import { cn } from "@/lib/utils";
 import type { CommitInfo, FileChange } from "@/types/git";
 
@@ -13,6 +14,7 @@ type ChangesState =
   | { status: "empty" }
   | { status: "loading" }
   | { status: "not-git" }
+  | { status: "error"; message: string }
   | { status: "ready"; commits: CommitInfo[] };
 
 function fileChangeLabel(change: FileChange): string {
@@ -79,8 +81,18 @@ export function ChangesTab({ projectPath }: ChangesTabProps) {
           path: projectPath,
         });
         if (!cancelled) setState({ status: "ready", commits });
-      } catch {
-        if (!cancelled) setState({ status: "not-git" });
+      } catch (err) {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        if (isMissingGitRepoError(message)) {
+          setState({ status: "not-git" });
+        } else if (isEmptyRepoError(message)) {
+          // A real Git repo with zero commits genuinely has no commits —
+          // render it the same way a repo that fetched zero commits would.
+          setState({ status: "ready", commits: [] });
+        } else {
+          setState({ status: "error", message });
+        }
       }
     }
 
@@ -102,6 +114,9 @@ export function ChangesTab({ projectPath }: ChangesTabProps) {
         <p className="px-3 py-2 text-sm text-muted-foreground">
           This folder isn't a Git repository yet.
         </p>
+      )}
+      {state.status === "error" && (
+        <p className="px-3 py-2 text-sm text-destructive">{state.message}</p>
       )}
       {state.status === "ready" && state.commits.length === 0 && (
         <p className="px-3 py-2 text-sm text-muted-foreground">No commits yet.</p>
