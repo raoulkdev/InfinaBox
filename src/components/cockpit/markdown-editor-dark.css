@@ -1,0 +1,105 @@
+/* MDXEditor ships light-themed CSS by default (see
+ * @mdxeditor/editor/style.css, ._editorRoot_* — most notably a hardcoded
+ * `--basePageBg: white` that Radix's `.dark`/`.dark-theme` scale overrides
+ * never touch). This app is permanently dark (see the `.dark` block in
+ * src/index.css — there's no light-mode toggle), so rather than lean on
+ * MDXEditor's generic Radix slate/blue dark palette, we map its semantic
+ * theme variables directly onto this app's own shadcn/ui tokens so the
+ * editor reads as part of the app rather than a foreign widget.
+ *
+ * `.dark-editor` is a plain class we pass via `className` on `<MDXEditor>`
+ * (alongside `dark-theme`, which switches MDXEditor's own Radix color
+ * scales — see its theming docs). Selector specificity here (two classes)
+ * beats the single-class `._editorRoot_*` rule that sets `--basePageBg`,
+ * so import order relative to MDXEditor's stylesheet doesn't matter. */
+.dark-editor.mdxeditor {
+  --basePageBg: var(--background);
+  --baseBase: var(--card);
+  --baseBgSubtle: var(--muted);
+  --baseBg: var(--accent);
+  --baseBgHover: var(--accent);
+  --baseBgActive: var(--accent);
+  --baseLine: var(--border);
+  --baseBorder: var(--border);
+  --baseBorderHover: var(--muted-foreground);
+  --baseSolid: var(--muted-foreground);
+  --baseSolidHover: var(--foreground);
+  --baseText: var(--muted-foreground);
+  --baseTextContrast: var(--foreground);
+
+  --font-body: var(--font-sans);
+
+  color: var(--foreground);
+}
+
+/* The toolbar and content area both key off --basePageBg, which is what we
+ * just repointed at the app background — this keeps the editor's "page"
+ * flush with the rest of the near-black UI instead of a white card. */
+.dark-editor.mdxeditor .mdxeditor-toolbar {
+  background-color: var(--card);
+  padding: 8px 12px;
+}
+
+/* The embedded CodeMirror instance used for fenced code blocks ships with
+ * its own light theme (cm6-theme-basic-light, bundled by MDXEditor) unless
+ * we override it — handled in MarkdownEditor.tsx by passing
+ * `codeMirrorExtensions: [basicDark]` (from cm6-theme-basic-dark) to
+ * codeMirrorPlugin. This just squares up the surrounding chrome. */
+.dark-editor.mdxeditor .cm-editor {
+  background-color: var(--muted);
+  border-radius: var(--radius-base);
+}
+
+/* MDXEditor's Lexical theme (see @mdxeditor/editor's lexicalTheme.js) only
+ * assigns CSS classes for inline marks (bold/italic/code/strikethrough),
+ * blockquotes, and list items — headings and list markers are left as bare
+ * `<h1>`-`<h6>`/`<ul>`/`<ol>` with no styling of their own, on the
+ * assumption that the host page's own typographic CSS covers them. This
+ * app's Tailwind preflight (via `@import "tailwindcss"` in index.css)
+ * strips default browser heading sizes and list bullets/padding, so
+ * without these rules headings render as plain paragraphs and list items
+ * lose their bullets entirely. Sizes roughly follow the scale the old
+ * CodeMirror live-preview mode used (see the now-removed
+ * markdownLivePreview.ts). */
+.mdx-editor-content h1 {
+  font-size: 1.5em;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 0.6em 0 0.3em;
+}
+.mdx-editor-content h2 {
+  font-size: 1.25em;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 0.6em 0 0.3em;
+}
+.mdx-editor-content h3 {
+  font-size: 1.1em;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 0.6em 0 0.3em;
+}
+.mdx-editor-content h4,
+.mdx-editor-content h5,
+.mdx-editor-content h6 {
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+}
+.mdx-editor-content ul {
+  list-style: disc;
+  padding-inline-start: 1.5em;
+}
+.mdx-editor-content ol {
+  list-style: decimal;
+  padding-inline-start: 1.5em;
+}
+.mdx-editor-content a {
+  color: var(--accentText);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mdx-editor-content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}

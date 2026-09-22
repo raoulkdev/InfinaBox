@@ -107,7 +107,7 @@
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --radius: 0rem;
+    --radius: 0.625rem;
     --sidebar: #0A0A0A;
     --sidebar-foreground: #F2F2F2;
     --sidebar-primary: #F2F2F2;
@@ -128,4 +128,15 @@
   html {
     @apply font-sans;
     }
+}
+
+/* xterm.js's own stylesheet hardcodes the scroll-viewport element (a
+   separate layer behind the text-rendering canvas) to pure black —
+   TerminalPanel's `theme.background` option only colors the canvas, not
+   this element, so without this override the viewport shows through as a
+   visibly different black wherever the canvas doesn't fully cover it. Kept
+   in sync with TerminalPanel's `theme.background` (both track --card, the
+   same block background every other panel uses). */
+.xterm .xterm-viewport {
+  background-color: var(--card) !important;
 }

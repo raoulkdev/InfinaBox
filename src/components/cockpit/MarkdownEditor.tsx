@@ -1,81 +1,112 @@
-import { useEffect, useRef } from "react";
-import { EditorView, keymap } from "@codemirror/view";
-import { EditorState } from "@codemirror/state";
-import { markdown } from "@codemirror/lang-markdown";
-import { basicSetup } from "codemirror";
+import {
+  BlockTypeSelect,
+  BoldItalicUnderlineToggles,
+  CodeToggle,
+  codeBlockPlugin,
+  codeMirrorPlugin,
+  CreateLink,
+  headingsPlugin,
+  InsertCodeBlock,
+  InsertTable,
+  InsertThematicBreak,
+  linkDialogPlugin,
+  linkPlugin,
+  listsPlugin,
+  ListsToggle,
+  markdownShortcutPlugin,
+  MDXEditor,
+  quotePlugin,
+  Separator,
+  tablePlugin,
+  thematicBreakPlugin,
+  toolbarPlugin,
+  UndoRedo,
+} from "@mdxeditor/editor";
+import { basicDark } from "cm6-theme-basic-dark";
+import "@mdxeditor/editor/style.css";
+import "@/components/cockpit/markdown-editor-dark.css";
 
 interface MarkdownEditorProps {
   /** Initial document text. Only read on mount — give this component a
-   * `key` (e.g. the file path) to force a remount when switching files. */
+   * `key` (e.g. the file path) to force a remount when switching files.
+   * MDXEditor treats its own `markdown` prop the same way (read once, on
+   * mount), so this uncontrolled/remount-on-key contract carries over
+   * unchanged from the CodeMirror implementation. */
   initialValue: string;
   onChange: (value: string) => void;
   /** Called for Cmd+S / Ctrl+S while the editor has focus. */
   onSave: () => void;
 }
 
-/** Wraps a CodeMirror 6 EditorView as an uncontrolled component. CodeMirror
- * owns the DOM and its own document state; we only listen for changes and
- * push text out via `onChange`, rather than fighting it for control on
- * every keystroke. */
+function toolbarContents() {
+  return (
+    <>
+      <UndoRedo />
+      <Separator />
+      <BlockTypeSelect />
+      <Separator />
+      <BoldItalicUnderlineToggles />
+      <CodeToggle />
+      <Separator />
+      <ListsToggle />
+      <Separator />
+      <CreateLink />
+      <InsertTable />
+      <InsertThematicBreak />
+      <InsertCodeBlock />
+    </>
+  );
+}
+
+/** WYSIWYG markdown editor backed by MDXEditor. Renders real headings,
+ * lists, bold/italic, links, blockquotes, code blocks, and tables inline —
+ * replacing the old CodeMirror "live preview" hide/reveal trick with an
+ * actual rich-text surface, while still round-tripping to a plain markdown
+ * string via `onChange`. */
 export function MarkdownEditor({
   initialValue,
   onChange,
   onSave,
 }: MarkdownEditorProps) {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const viewRef = useRef<EditorView | null>(null);
-  // Refs so the keymap/updateListener closures always call the latest
-  // callback without needing to tear down and rebuild the EditorView.
-  const onChangeRef = useRef(onChange);
-  const onSaveRef = useRef(onSave);
-  onChangeRef.current = onChange;
-  onSaveRef.current = onSave;
-
-  useEffect(() => {
-    const state = EditorState.create({
-      doc: initialValue,
-      extensions: [
-        basicSetup,
-        markdown(),
-        EditorView.lineWrapping,
-        keymap.of([
-          {
-            key: "Mod-s",
-            run: () => {
-              onSaveRef.current();
-              return true;
-            },
-            preventDefault: true,
-          },
-        ]),
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            onChangeRef.current(update.state.doc.toString());
-          }
-        }),
-        EditorView.theme({
-          "&": { height: "100%", fontSize: "13px" },
-          ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-sans)" },
-          "&.cm-focused": { outline: "none" },
-        }),
-      ],
-    });
-
-    const view = new EditorView({
-      state,
-      parent: hostRef.current!,
-    });
-    viewRef.current = view;
-
-    return () => {
-      view.destroy();
-      viewRef.current = null;
-    };
-    // Intentionally only re-run when the host element identity changes
-    // (i.e. never, for a mounted component) — callers remount this
-    // component with a `key` when the underlying file changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return <div ref={hostRef} className="h-full min-h-0 w-full" />;
+  return (
+    <div
+      className="h-full min-h-0 w-full overflow-auto p-2"
+      onKeyDown={(event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+          event.preventDefault();
+          onSave();
+        }
+      }}
+    >
+      <MDXEditor
+        markdown={initialValue}
+        onChange={(markdown, initialMarkdownNormalize) => {
+          // MDXEditor fires onChange once up front to report the markdown
+          // it normalized the initial value into (bullet style, spacing,
+          // etc.) — not a real edit. Ignoring it keeps a freshly opened
+          // file from immediately showing as "unsaved".
+          if (initialMarkdownNormalize) return;
+          onChange(markdown);
+        }}
+        className="dark-theme dark-editor"
+        contentEditableClassName="mdx-editor-content"
+        plugins={[
+          headingsPlugin(),
+          listsPlugin(),
+          quotePlugin(),
+          thematicBreakPlugin(),
+          linkPlugin(),
+          linkDialogPlugin(),
+          tablePlugin(),
+          codeBlockPlugin({ defaultCodeBlockLanguage: "" }),
+          codeMirrorPlugin({
+            codeBlockLanguages: { "": "Plain text", js: "JavaScript", ts: "TypeScript", tsx: "TSX", jsx: "JSX", json: "JSON", bash: "Bash", sh: "Shell", css: "CSS", html: "HTML", rust: "Rust", python: "Python", sql: "SQL", yaml: "YAML", md: "Markdown" },
+            codeMirrorExtensions: [basicDark],
+          }),
+          markdownShortcutPlugin(),
+          toolbarPlugin({ toolbarContents }),
+        ]}
+      />
+    </div>
+  );
 }

@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { AlertCircle } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isEmptyRepoError, isMissingGitRepoError } from "@/lib/backend-errors";
+import { onProjectFilesChanged } from "@/lib/fs-watch";
 import type { CommitInfo } from "@/types/git";
 import type { FileEntry } from "@/types/fs";
 
@@ -43,11 +48,14 @@ function relativeTime(iso: string): string {
 
 function StatRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between border-b border-border px-3 py-2 last:border-b-0">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="max-w-[60%] truncate text-sm text-foreground/90" title={value}>
-        {value}
-      </span>
+    <div className="flex min-w-0 items-center justify-between border-b border-border px-3 py-2 last:border-b-0">
+      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="min-w-0 max-w-[60%] truncate text-sm text-foreground/90">{value}</span>
+        </TooltipTrigger>
+        <TooltipContent>{value}</TooltipContent>
+      </Tooltip>
     </div>
   );
 }
@@ -55,6 +63,16 @@ function StatRow({ label, value }: { label: string; value: string }) {
 export function OverviewTab({ projectPath }: OverviewTabProps) {
   const [git, setGit] = useState<GitState>({ status: "loading" });
   const [files, setFiles] = useState<FileCountState>({ status: "loading" });
+  const [refreshToken, setRefreshToken] = useState(0);
+
+  // Branch/commit/file counts all come from the filesystem (git's own
+  // state lives under `.git`, which a commit made in the embedded terminal
+  // changes just like any other write) — a change anywhere in the project
+  // re-fetches both, the same way this effect already does on mount.
+  useEffect(() => {
+    if (!projectPath) return;
+    return onProjectFilesChanged(() => setRefreshToken((t) => t + 1));
+  }, [projectPath]);
 
   useEffect(() => {
     if (!projectPath) {
@@ -115,13 +133,17 @@ export function OverviewTab({ projectPath }: OverviewTabProps) {
     return () => {
       cancelled = true;
     };
-  }, [projectPath]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshToken is an intentional manual re-fetch trigger (see the effect above), not a value read by this one.
+  }, [projectPath, refreshToken]);
 
   return (
-    <div className="flex flex-1 flex-col overflow-y-auto">
+    <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <div className="border-b border-border">
         {git.status === "loading" && (
-          <p className="px-3 py-2 text-sm text-muted-foreground">loading…</p>
+          <div className="flex flex-col gap-2 p-3">
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-1/3" />
+          </div>
         )}
         {git.status === "empty" && (
           <p className="px-3 py-2 text-sm text-muted-foreground">No project open.</p>
@@ -137,7 +159,10 @@ export function OverviewTab({ projectPath }: OverviewTabProps) {
           </p>
         )}
         {git.status === "error" && (
-          <p className="px-3 py-2 text-sm text-destructive">{git.message}</p>
+          <Alert variant="destructive" className="m-3 w-auto">
+            <AlertCircle />
+            <AlertDescription>{git.message}</AlertDescription>
+          </Alert>
         )}
         {git.status === "ready" && (
           <>
@@ -154,13 +179,18 @@ export function OverviewTab({ projectPath }: OverviewTabProps) {
       </div>
       <div>
         {files.status === "loading" && (
-          <p className="px-3 py-2 text-sm text-muted-foreground">loading…</p>
+          <div className="p-3">
+            <Skeleton className="h-4 w-1/3" />
+          </div>
         )}
         {files.status === "empty" && (
           <p className="px-3 py-2 text-sm text-muted-foreground">No project open.</p>
         )}
         {files.status === "error" && (
-          <p className="px-3 py-2 text-sm text-destructive">{files.message}</p>
+          <Alert variant="destructive" className="m-3 w-auto">
+            <AlertCircle />
+            <AlertDescription>{files.message}</AlertDescription>
+          </Alert>
         )}
         {files.status === "ready" && <StatRow label="Files" value={String(files.count)} />}
       </div>

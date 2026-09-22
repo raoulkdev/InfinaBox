@@ -23,3 +23,13 @@ export function isEmptyRepoError(message: string): boolean {
     lower.includes("failed to read repository head")
   );
 }
+
+/**
+ * True when `message` is the error `list_directory` produces (see
+ * src-tauri/src/commands/fs.rs) for a path that doesn't exist yet — the
+ * normal first-run state for a folder like `.ibproject/docs` that a
+ * project hasn't adopted yet, not a real error worth alarming over.
+ */
+export function isMissingDirectoryError(message: string): boolean {
+  return message.toLowerCase().includes("is not a directory");
+}
