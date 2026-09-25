@@ -373,6 +373,12 @@ Why this split:
 - **Generation stays BYO on Pro.** Pro unlocks the integrations; the user's own provider accounts still pay for the generations.
 - **$12/month** sits below the AI subscription most users will already pay (~$20/month), so the combined cost stays reasonable. The annual price gives roughly two months free.
 
+### 15.1a Validating the prices
+The launch prices are $12/month and $99/year. They are checked during the closed beta (Phase C–D) before public release:
+- **Price survey:** beta testers answer a standard four-question willingness-to-pay survey (Van Westendorp: too cheap, a bargain, getting expensive, too expensive) after they've used Pro for at least a week.
+- **Founding-member offer:** beta testers who subscribe get $8/month (or $69/year) locked in for life. How many take it is the first real conversion signal.
+- **Decision rule:** keep $12 if it falls inside the survey's acceptable range and at least 20% of active beta testers convert to paid; otherwise adjust the price (not the Free/Pro split) and re-test. Revisit the split only if Free users report hitting the project limit before they've finished a single game.
+
 ### 15.2 Trial
 - Every new account gets a **14-day Pro trial, no card required**, long enough to try 3D templates, generation, and a playtest share.
 - When the trial ends, the account drops to Free automatically. Nothing is deleted.
@@ -393,6 +399,8 @@ InfinaBox has no accounts, payments, or license checks today. The plan uses Stri
 - **Source of truth:** Stripe webhooks update the backend's record of each account's plan. The backend issues a **signed entitlement token** (plan + expiry) that the app verifies locally.
 - **Offline use:** the app caches the token and keeps Pro features working offline for a grace period (e.g. 7 days past token expiry) before falling back to Free. Free features never require being online, apart from connecting the user's AI.
 - **Privacy:** the backend stores only the account email, Stripe customer ID, and plan. No project content, chat, or code is ever sent to InfinaBox servers.
+
+**Hosting (proposed):** Cloudflare Workers for the backend code, with Cloudflare D1 (SQLite) for the three stored fields per account. The job is small (sign-in, Stripe webhooks, token signing), Workers is inexpensive at this scale with no servers to manage, and InfinaBox already depends on Cloudflare for image generation. Email for sign-in links goes through a transactional email service (e.g. Resend or Postmark).
 
 Scheduling: accounts, Stripe integration, and entitlement checks are built alongside Phase B so they are ready before public release. Tier gating is added to each feature as it ships.
 
@@ -442,6 +450,7 @@ Resolved (2026-09-25):
 6. No existing user projects need migration (§9).
 7. The project knowledge model is named **Context** (§7.2).
 
+8. Pricing is validated in the closed beta with a price survey, a founding-member offer, and a fixed decision rule (§15.1a).
+
 Still open:
-1. **Pricing validation**: the $12/month and $99/year Pro prices and the Free/Pro split in §15.1 are hypotheses to test with real users before launch.
-2. **Backend hosting**: where the small accounts/entitlements backend runs.
+1. **Backend hosting**: Cloudflare Workers + D1 is proposed (§15.4), pending confirmation.
