@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Home,
+  Sparkles,
   Hammer,
   FileText,
   Workflow,
@@ -57,6 +58,7 @@ function FadeLabel({ show, children }: { show: boolean; children: ReactNode }) {
 
 export type Section =
   | "home"
+  | "studio"
   | "build"
   | "design"
   | "graphs"
@@ -76,9 +78,16 @@ interface SectionItem {
   icon: LucideIcon;
 }
 
-// Home is pinned above the grouped list, unrelated to any discipline
-// grouping — it's the landing page, not part of "making" anything.
-const PINNED: SectionItem[] = [{ id: "home", label: "Home", icon: Home }];
+// Home and Studio are pinned above the grouped list, unrelated to any
+// discipline grouping — Home is the landing page, and Studio (chat, the
+// running game, and its history) is where an open project is made now, so
+// it sits above Build instead of inside "Make". The full move to the
+// spec's 6-entry sidebar (§11) is Phase B; until then everything below
+// stays as it was.
+const PINNED: SectionItem[] = [
+  { id: "home", label: "Home", icon: Home },
+  { id: "studio", label: "Studio", icon: Sparkles },
+];
 
 // Everything else grouped by discipline category. A flat icon-only rail
 // stopped scaling once Design/QA/Business/Live Ops grew into a dozen
@@ -189,7 +198,7 @@ function SectionRow({
 }
 
 // Replaces the old top bar's "Open Project" button — now that there's no
-// dedicated header, it lives right under Home instead, in every section
+// dedicated header, it lives right under the pinned Home/Studio rows instead, in every section
 // that shows the sidebar (Home itself never renders the sidebar; its own
 // dashboard has its own project picker).
 function ProjectButtonRow({
