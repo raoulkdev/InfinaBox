@@ -593,6 +593,10 @@ Pin the Godot version in a constant during this task: the latest stable 4.x rele
   - The window hint puts the game window beside the InfinaBox window, computed from the main window's position and size, falling back to no hint.
   - Emits `game-state`, `game-output`, and `game-error`.
   - Exposes `restart_if_running()` for Task G.
+- [ ] **Findings from Task C to handle here:**
+  - `godot --path` does not import newly added assets (a new `icon.png` fails with `No loader found for resource`). Call `godot::validate::import_assets` before `GameProcess::start` when project files changed since the last import (at least after every AI turn that changed files); it takes a few seconds, so report it as the `starting` state.
+  - An error block is only known to be complete when the next stderr line arrives. Call the parser's `finish()` when stderr has been quiet briefly (check `has_pending()`) and always from `on_exit`, so the last error of a running game isn't held back.
+  - `--import` output contains ANSI colour codes even when piped; strip them before storing output lines.
 - [ ] **`godot_install`:** runs `godot::install` on a background thread with the app data dir, emits progress, and returns the final status. `godot_status` is a thin wrapper.
 - [ ] **`bridge.rs`:**
   - `start(app)` binds `127.0.0.1:0`, generates a token (`rand`), and stores the address and token in `BridgeState`.
