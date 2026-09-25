@@ -388,19 +388,21 @@ The launch prices are $12/month and $99/year. They are checked during the closed
 - Dropping to Free with more than one project: the user picks which project stays active; the others open read-only in InfinaBox (still browsable, still exportable manually) until the user upgrades or switches which one is active.
 - Pro-only content already in a project (a 3D template, generated assets) stays in the project. Only the Pro *actions* stop.
 
-### 15.4 Billing and licensing with Stripe
-InfinaBox has no accounts, payments, or license checks today. The plan uses Stripe for everything payment-related and keeps InfinaBox's own backend as small as possible:
+### 15.4 Accounts, billing, and licensing (Supabase + Stripe)
+InfinaBox has no accounts, payments, or license checks today. The plan uses **Supabase** as InfinaBox's backend and **Stripe** for everything payment-related, keeping the backend as small as possible:
 
-- **Accounts:** email sign-in (magic link) on a small InfinaBox backend. The desktop app signs in through the system browser and returns via a deep link (Tauri deep-link plugin).
+- **Accounts:** Supabase Auth with email sign-in (magic link). The desktop app signs in through the system browser and returns via a deep link (Tauri deep-link plugin), using Supabase's PKCE flow so no long-lived secret sits in the app. Sign-in emails go through Supabase Auth with a custom SMTP provider configured for production (Supabase's built-in email sender is rate-limited and meant for development).
 - **Checkout:** Stripe Checkout hosted pages for upgrading, opened in the system browser. No card details ever touch the desktop app.
 - **Managing billing:** Stripe Customer Portal for plan changes, invoices, payment methods, and cancellation.
 - **Subscriptions:** Stripe Billing products and prices for Pro monthly and annual; trials handled by Stripe without collecting a card.
 - **Taxes:** Stripe Tax for VAT/sales tax.
-- **Source of truth:** Stripe webhooks update the backend's record of each account's plan. The backend issues a **signed entitlement token** (plan + expiry) that the app verifies locally.
+- **Source of truth:** a Supabase Edge Function receives Stripe webhooks (verifying Stripe's signature) and updates the account's row in Supabase Postgres. A second Edge Function issues a **signed entitlement token** (plan + expiry) that the app verifies locally with a public key bundled in the app.
+- **Secrets:** the Stripe secret key, the Stripe webhook secret, and the token-signing private key live only in Supabase Edge Function secrets. The desktop app ships only the Supabase URL, the public anon key, and the token-verification public key.
+- **Database access:** one `accounts` table (user ID from Supabase Auth, Stripe customer ID, plan, plan expiry) with Row Level Security enabled. Users can read their own row; only the Edge Functions (service role) can write plan fields, so a user can never grant themselves Pro.
 - **Offline use:** the app caches the token and keeps Pro features working offline for a grace period (e.g. 7 days past token expiry) before falling back to Free. Free features never require being online, apart from connecting the user's AI.
-- **Privacy:** the backend stores only the account email, Stripe customer ID, and plan. No project content, chat, or code is ever sent to InfinaBox servers.
+- **Privacy:** Supabase stores only the account email (in Supabase Auth), Stripe customer ID, and plan. No project content, chat, or code is ever sent to InfinaBox's backend.
 
-**Hosting (proposed):** Cloudflare Workers for the backend code, with Cloudflare D1 (SQLite) for the three stored fields per account. The job is small (sign-in, Stripe webhooks, token signing), Workers is inexpensive at this scale with no servers to manage, and InfinaBox already depends on Cloudflare for image generation. Email for sign-in links goes through a transactional email service (e.g. Resend or Postmark).
+**Hosting:** Supabase (Auth, Postgres, Edge Functions). It is also the default home for any future InfinaBox-hosted services listed in §15 (e.g. hosted backup, playtest feedback collection), so the product keeps one backend.
 
 Scheduling: accounts, Stripe integration, and entitlement checks are built alongside Phase B so they are ready before public release. Tier gating is added to each feature as it ships.
 
@@ -426,6 +428,7 @@ InfinaBox has no telemetry today; any measurement must be **opt-in**, and the pr
 | Embedding the Godot window is hard cross-platform | Phase 1 uses a managed separate window; embedding is a research item |
 | Committed chat history leaks secrets or private text | Redaction before write, warning before first push to a remote, deletable threads |
 | Subscription feels unfair on top of paying for AI | Clear "we never touch your AI bill" messaging, a useful Free tier, a 14-day no-card Pro trial, no lock-in of project files |
+| Backend outage blocks paying users | Entitlement token verified locally, so a Supabase outage only affects sign-in and upgrades, not using the app |
 | Licensing breaks offline or blocks work | Signed entitlement token cached locally with an offline grace period; Free features never need a server |
 | Asset licensing mistakes | License recorded per asset, pre-launch license check, generated credits |
 | Competition from engine-native AI and web "game generators" | Differentiate on ownership (real Godot project), full lifecycle, and teaching |
@@ -452,5 +455,6 @@ Resolved (2026-09-25):
 
 8. Pricing is validated in the closed beta with a price survey, a founding-member offer, and a fixed decision rule (§15.1a).
 
-Still open:
-1. **Backend hosting**: Cloudflare Workers + D1 is proposed (§15.4), pending confirmation.
+9. InfinaBox's backend (accounts, Stripe webhooks, entitlement tokens) runs on Supabase (§15.4).
+
+No open questions remain at the product-direction level. The next step is an implementation plan for Phase A (§14).
