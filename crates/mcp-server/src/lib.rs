@@ -9,7 +9,12 @@
 //! The server reads its project and bridge location from the environment:
 //! `INFINABOX_PROJECT`, `INFINABOX_BRIDGE_ADDR`, `INFINABOX_BRIDGE_TOKEN`.
 
+pub mod bridge_client;
 pub mod bridge_protocol;
+pub mod context;
+pub mod server;
+
+use rmcp::ServiceExt;
 
 /// Environment variable names shared with the app (which sets them when it
 /// launches the agent).
@@ -22,7 +27,18 @@ pub const ENV_BRIDGE_TOKEN: &str = "INFINABOX_BRIDGE_TOKEN";
 pub const MCP_SERVER_FLAG: &str = "--mcp-server";
 
 /// Serves MCP over stdin/stdout until the client disconnects. Blocks.
-/// Phase A Task B fills this in.
+///
+/// stdout carries the protocol, so nothing else may print to it; failures
+/// go to stderr (the agent CLI shows or logs that).
 pub fn run_stdio() -> anyhow::Result<()> {
-    anyhow::bail!("not implemented yet: infinabox_mcp_server::run_stdio")
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        let service = server::InfinaBoxServer::from_env()
+            .serve(rmcp::transport::stdio())
+            .await?;
+        service.waiting().await?;
+        anyhow::Ok(())
+    })
 }
