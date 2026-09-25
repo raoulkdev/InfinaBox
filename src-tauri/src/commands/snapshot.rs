@@ -74,10 +74,18 @@ fn emit_changed(app: &AppHandle) {
 /// onto the restored files. A failed restart doesn't undo the restore
 /// (which already happened and is what the user asked for), so it's only
 /// logged — the game's own `game-state`/`game-error` events report it.
+///
+/// `restart_if_running` blocks (it may re-import assets for several
+/// seconds, and waits for any start already in progress), so it runs on
+/// its own thread: restore/undo return as soon as the history change is
+/// done, and the Play panel follows the restart through its events.
 fn restart_game(app: &AppHandle) {
-    if let Err(e) = crate::commands::godot::restart_if_running(app) {
-        eprintln!("snapshot: restarting the game after going back failed: {e}");
-    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = crate::commands::godot::restart_if_running(&app) {
+            eprintln!("snapshot: restarting the game after going back failed: {e}");
+        }
+    });
 }
 
 #[tauri::command(async)]
