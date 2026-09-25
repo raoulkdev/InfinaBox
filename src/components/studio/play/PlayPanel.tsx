@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import {
   gameRecentErrors,
   gameRun,
+  gameStatus,
   gameStop,
   godotStatus,
   onGameError,
@@ -77,12 +78,11 @@ function mergeErrors(prev: ErrorEntry[], incoming: GameError[]): ErrorEntry[] {
 
 export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
   const [godot, setGodot] = useState<GodotLoad>({ status: "loading" });
-  // There's no "current game state" query in the Phase A contract, only
-  // the `game-state` event, so this starts at "stopped" until the first
-  // event. Studio mounts once per open project and stays mounted, so in
-  // practice it's listening before anything starts a game; a run that
-  // somehow began earlier shows up at its next state change (and its
-  // errors through the `gameRecentErrors` seeding below).
+  // Starts at "stopped" only until `gameStatus()` (seeded on mount below)
+  // or the first `game-state` event says otherwise — so a panel mounted
+  // while a game is already running (e.g. one the AI started through the
+  // bridge) shows the truth. A run's errors from before mount come through
+  // the `gameRecentErrors` seeding below.
   const [gameState, setGameState] = useState<GameState>("stopped");
   const [errors, setErrors] = useState<ErrorEntry[]>([]);
   // Set by any live `game-state`/`game-error` event; once set, the one-off
@@ -143,6 +143,26 @@ export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
       offState();
       offError();
       cancelFrame();
+    };
+  }, []);
+
+  // Seed the state with the game's real current state (`game-state` only
+  // reports changes). Same rule as the error seed below: a live event that
+  // arrives first is newer, so the seed never overwrites it. Best-effort:
+  // if the query fails, the state stays "stopped" until the next event.
+  useEffect(() => {
+    let cancelled = false;
+    gameStatus()
+      .then((state) => {
+        if (!cancelled && !liveEventSeen.current) setGameState(state);
+      })
+      .catch((err) => {
+        // Not shown in the UI (the next `game-state` event corrects it),
+        // but logged so a broken `game_status` is visible in devtools.
+        console.warn("PlayPanel: couldn't read the game's current state:", err);
+      });
+    return () => {
+      cancelled = true;
     };
   }, []);
 
