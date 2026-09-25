@@ -4,6 +4,8 @@ A Tauri v2 + React 19 + TypeScript desktop app for indie game developers. This f
 
 ## What this is
 
+> **Direction change (2026-09-25):** `docs/superpowers/specs/2026-09-25-ai-game-studio-product-spec.md` repositions InfinaBox as an AI game studio for novices, with a chat panel as the primary interface and the terminal moved to an Advanced mode. It supersedes the "no chat panel" stance below. The code has not been migrated yet, so the rest of this section still describes what exists today; read that spec before starting new product work.
+
 InfinaBox is a **workspace cockpit around the user's own terminal-based coding agent** (`claude`, `codex`, or whatever CLI they already have installed and authenticated). It is explicitly **not a chat-panel product** — there is no custom AI chat UI anywhere in this app, and reviving one is a known anti-pattern here (see `src/components/cockpit/TerminalPanel.tsx`'s own comment and the project's `agent_auth_model` memory). The embedded terminal (`portable-pty` + `xterm.js`) just runs a real shell in the project's real working directory; whatever agent CLI the user runs there is already authenticated outside this app, with zero InfinaBox-managed credentials.
 
 The stated product discipline, from `docs/superpowers/specs/2026-09-12-workspace-redesign-design.md`:
