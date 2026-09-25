@@ -73,7 +73,10 @@ pub fn create_project(parent_dir: &Path, name: &str) -> Result<PathBuf> {
             .next()
             .is_some();
         if non_empty {
-            bail!("{} already exists and isn't empty; choose a new folder", project.display());
+            bail!(
+                "{} already exists and isn't empty; choose a new folder",
+                project.display()
+            );
         }
     } else {
         fs::create_dir_all(&project).with_context(|| format!("creating {}", project.display()))?;
@@ -83,13 +86,32 @@ pub fn create_project(parent_dir: &Path, name: &str) -> Result<PathBuf> {
         Ok(()) => Ok(project),
         Err(err) => {
             // Everything inside is ours: the folder was missing or empty a
-            // moment ago. Put it back the way it was.
-            let _ = fs::remove_dir_all(&project);
+            // moment ago. Put it back the way it was. A folder that already
+            // existed is kept itself (it may be a symlink, or have its own
+            // permissions); only what we put in it goes.
             if existed {
-                let _ = fs::create_dir(&project);
+                remove_children(&project);
+            } else {
+                let _ = fs::remove_dir_all(&project);
             }
             Err(err)
         }
+    }
+}
+
+/// Best-effort removal of everything inside `dir`, keeping `dir` itself.
+fn remove_children(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_real_dir = fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir());
+        let _ = if is_real_dir {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
     }
 }
 
@@ -101,24 +123,46 @@ pub fn create_project(parent_dir: &Path, name: &str) -> Result<PathBuf> {
 /// a no-op. The addon ships the `.uid` files the Godot editor would
 /// otherwise generate next to its scripts on first open, so opening the
 /// project in the editor doesn't leave uncommitted changes behind.
+///
+/// The `InfinaBox` autoload name is reserved for the addon: if
+/// `project.godot` already has an `InfinaBox` autoload pointing anywhere
+/// else, it is replaced. Other autoloads and enabled editor plugins are
+/// kept. `project.godot` is edited in place (same line endings, other
+/// lines untouched) and written atomically. If its `[editor_plugins]`
+/// value can't be parsed safely, this refuses rather than rewriting it.
 pub fn ensure_addon(project: &Path) -> Result<bool> {
     let project_file = project.join("project.godot");
     let original = fs::read_to_string(&project_file)
         .with_context(|| format!("reading {}", project_file.display()))?;
 
+    // Work out the new project.godot before touching anything on disk, so
+    // a refusal leaves the project as it was.
+    let mut updated = set_setting(&original, "autoload", AUTOLOAD_NAME, AUTOLOAD_VALUE)?;
+    let plugins = get_setting(&updated, "editor_plugins", "enabled")?;
+    let enabled = with_plugin_enabled(plugins.as_deref(), PLUGIN_CFG_RES_PATH)?;
+    updated = set_setting(&updated, "editor_plugins", "enabled", &enabled)?;
+
     let mut changed = write_dir(&ADDON, &project.join(ADDON_DIR), None)?;
-
-    let mut updated = set_setting(&original, "autoload", AUTOLOAD_NAME, AUTOLOAD_VALUE);
-    let plugins = get_setting(&updated, "editor_plugins", "enabled");
-    let enabled = with_plugin_enabled(plugins.as_deref(), PLUGIN_CFG_RES_PATH);
-    updated = set_setting(&updated, "editor_plugins", "enabled", &enabled);
-
     if updated != original {
-        fs::write(&project_file, updated)
-            .with_context(|| format!("writing {}", project_file.display()))?;
+        write_atomically(&project_file, &updated)?;
         changed = true;
     }
     Ok(changed)
+}
+
+/// Writes via a temp file in the same folder plus a rename, so a crash or
+/// full disk never leaves a half-written file behind.
+fn write_atomically(path: &Path, contents: &str) -> Result<()> {
+    let file_name = path
+        .file_name()
+        .context("path has no file name")?
+        .to_string_lossy();
+    let tmp = path.with_file_name(format!(".{file_name}.infinabox-tmp"));
+    fs::write(&tmp, contents).with_context(|| format!("writing {}", tmp.display()))?;
+    fs::rename(&tmp, path).with_context(|| {
+        let _ = fs::remove_file(&tmp);
+        format!("replacing {}", path.display())
+    })
 }
 
 /// Everything `create_project` does after the target folder is ready.
@@ -143,8 +187,8 @@ fn write_project_files(project: &Path, name: &str) -> Result<()> {
 
     let project_file = project.join("project.godot");
     let settings = fs::read_to_string(&project_file)?;
-    let settings = set_setting(&settings, "application", "config/name", &godot_string(name));
-    fs::write(&project_file, settings)?;
+    let settings = set_setting(&settings, "application", "config/name", &godot_string(name))?;
+    write_atomically(&project_file, &settings)?;
 
     ensure_addon(project)?;
 
@@ -155,27 +199,46 @@ fn write_project_files(project: &Path, name: &str) -> Result<()> {
         format_version: 2,
         dimension: "2d".to_string(),
     };
-    fs::write(ib.join(".ibx"), serde_json::to_string_pretty(&marker)? + "\n")?;
+    fs::write(
+        ib.join(".ibx"),
+        serde_json::to_string_pretty(&marker)? + "\n",
+    )?;
     // Chat threads are written here by `chat_store`. Git doesn't track empty
     // folders, so it only survives a clone once the first thread exists.
     fs::create_dir_all(ib.join("chat"))?;
     Ok(())
 }
 
-/// A project name becomes a folder name, so it must be one path component.
+/// A project name becomes a folder name, so it must be one path component
+/// that is valid on every OS (projects move between machines), which in
+/// practice means Windows' rules.
 fn validate_name(name: &str) -> Result<()> {
-    let trimmed = name.trim();
-    if trimmed.is_empty() {
+    if name.trim().is_empty() {
         bail!("the project needs a name");
     }
-    if trimmed != name {
+    if name.starts_with(char::is_whitespace) || name.ends_with(char::is_whitespace) {
         bail!("the project name can't start or end with spaces");
     }
-    if name == "." || name == ".." || name.starts_with('.') {
+    if name.starts_with('.') {
         bail!("the project name can't start with a dot");
     }
-    if name.contains(['/', '\\', ':', '\0']) {
-        bail!("the project name can't contain / \\ or :");
+    if name.ends_with('.') {
+        bail!("the project name can't end with a dot");
+    }
+    if name.contains(['/', '\\', ':', '<', '>', '"', '|', '?', '*']) {
+        bail!("the project name can't contain any of / \\ : < > \" | ? *");
+    }
+    if name.chars().any(char::is_control) {
+        bail!("the project name can't contain control characters");
+    }
+    // Windows reserves these device names, with or without an extension.
+    let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.len() == 4
+            && matches!(stem.as_bytes()[3], b'1'..=b'9'));
+    if reserved {
+        bail!("\"{name}\" is a reserved name on Windows; choose another");
     }
     Ok(())
 }
@@ -183,9 +246,16 @@ fn validate_name(name: &str) -> Result<()> {
 /// Writes an embedded directory tree under `dest`, skipping files whose
 /// content is already identical. With `name`, `{{PROJECT_NAME}}` in `.md`
 /// files is replaced by it. Returns true if anything was written.
+///
+/// Skips any `.godot/` folder: `include_dir!` embeds whatever is on disk,
+/// including Godot's cache if someone opened the template in the editor
+/// while developing InfinaBox, and that must never reach a user's project.
 fn write_dir(dir: &Dir<'_>, dest: &Path, name: Option<&str>) -> Result<bool> {
     let mut changed = false;
     for file in dir.files() {
+        if is_godot_cache(file.path()) {
+            continue;
+        }
         let target = dest.join(file.path());
         let is_md = file.path().extension().is_some_and(|ext| ext == "md");
         let contents: Vec<u8> = match (name, is_md, file.contents_utf8()) {
@@ -202,64 +272,148 @@ fn write_dir(dir: &Dir<'_>, dest: &Path, name: Option<&str>) -> Result<bool> {
         changed = true;
     }
     for sub in dir.dirs() {
-        changed |= write_dir(sub, dest, name)?;
+        if !is_godot_cache(sub.path()) {
+            changed |= write_dir(sub, dest, name)?;
+        }
     }
     Ok(changed)
+}
+
+fn is_godot_cache(path: &Path) -> bool {
+    path.components().any(|c| c.as_os_str() == ".godot")
 }
 
 // --- project.godot editing ---------------------------------------------
 //
 // `project.godot` is an INI-like file: optional top-level keys, then
-// `[section]` headers followed by `key=value` lines (a value can span
-// several lines, e.g. input maps, but only its first line starts with
-// `key=`). These helpers touch single lines only and leave everything else
-// — other keys, comments, formatting — exactly as it was.
+// `[section]` headers followed by `key=value` lines. A value can span
+// several lines (input maps, or an array split across lines); it continues
+// until its brackets, parentheses, and braces balance. These helpers
+// replace exactly one setting's lines and leave everything else — other
+// keys, comments, formatting, line endings — as it was.
+
+/// Where a setting sits: its section's body lines and, if the key is
+/// present, the inclusive line range of its (possibly multi-line) value.
+struct SettingSpan {
+    section: (usize, usize),
+    value: Option<(usize, usize)>,
+}
 
 /// The (start, end) line range of a section's body, or None if absent.
-fn section_range(lines: &[&str], section: &str) -> Option<(usize, usize)> {
+fn section_range(lines: &[String], section: &str) -> Option<(usize, usize)> {
     let header = format!("[{section}]");
     let start = lines.iter().position(|line| line.trim() == header)? + 1;
     let end = lines[start..]
         .iter()
-        .position(|line| line.starts_with('[') && line.trim_end().ends_with(']') && !line.contains('='))
+        .position(|line| {
+            line.starts_with('[') && line.trim_end().ends_with(']') && !line.contains('=')
+        })
         .map_or(lines.len(), |offset| start + offset);
     Some((start, end))
 }
 
-fn get_setting(text: &str, section: &str, key: &str) -> Option<String> {
-    let lines: Vec<&str> = text.lines().collect();
-    let (start, end) = section_range(&lines, section)?;
+/// Net bracket depth change over `text`, ignoring anything inside strings.
+fn bracket_depth(text: &str) -> i32 {
+    let (mut depth, mut in_string, mut escaped) = (0, false, false);
+    for c in text.chars() {
+        if in_string {
+            match (escaped, c) {
+                (true, _) => escaped = false,
+                (false, '\\') => escaped = true,
+                (false, '"') => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            _ => {}
+        }
+    }
+    depth
+}
+
+/// `None` if the section is missing. Errors if the value's brackets never
+/// balance within the section, rather than guessing where it ends.
+fn find_setting(lines: &[String], section: &str, key: &str) -> Result<Option<SettingSpan>> {
+    let Some((start, end)) = section_range(lines, section) else {
+        return Ok(None);
+    };
     let prefix = format!("{key}=");
-    lines[start..end]
-        .iter()
-        .find_map(|line| line.strip_prefix(prefix.as_str()).map(str::to_string))
+    let Some(first) = (start..end).find(|&i| lines[i].starts_with(&prefix)) else {
+        return Ok(Some(SettingSpan {
+            section: (start, end),
+            value: None,
+        }));
+    };
+    let mut depth = bracket_depth(&lines[first][prefix.len()..]);
+    let mut last = first;
+    while depth > 0 {
+        last += 1;
+        if last >= end {
+            bail!(
+                "can't read `{key}` in the [{section}] section of project.godot (its brackets \
+                 never close); fix it in Godot and try again"
+            );
+        }
+        depth += bracket_depth(&lines[last]);
+    }
+    Ok(Some(SettingSpan {
+        section: (start, end),
+        value: Some((first, last)),
+    }))
+}
+
+/// The file's lines (without line endings) and the line ending it uses.
+fn split_lines(text: &str) -> (Vec<String>, &'static str) {
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    (text.lines().map(str::to_string).collect(), newline)
+}
+
+/// A setting's raw value; a multi-line value's lines are joined with `\n`.
+fn get_setting(text: &str, section: &str, key: &str) -> Result<Option<String>> {
+    let (lines, _) = split_lines(text);
+    let Some(SettingSpan {
+        value: Some((first, last)),
+        ..
+    }) = find_setting(&lines, section, key)?
+    else {
+        return Ok(None);
+    };
+    let joined = lines[first..=last].join("\n");
+    Ok(Some(joined[key.len() + 1..].to_string()))
 }
 
 /// Sets `key=value` in `[section]`, adding the section and/or key if
-/// missing. Returns the text unchanged if it already has that value.
-fn set_setting(text: &str, section: &str, key: &str, value: &str) -> String {
+/// missing and replacing every line of an existing multi-line value.
+/// Returns the text unchanged if it already has that value.
+fn set_setting(text: &str, section: &str, key: &str, value: &str) -> Result<String> {
+    if get_setting(text, section, key)?.as_deref() == Some(value) {
+        return Ok(text.to_string());
+    }
     let entry = format!("{key}={value}");
-    let prefix = format!("{key}=");
-    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
-    let borrowed: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let (mut lines, newline) = split_lines(text);
 
-    match section_range(&borrowed, section) {
-        Some((start, end)) => {
-            if let Some(offset) = borrowed[start..end].iter().position(|l| l.starts_with(&prefix)) {
-                if lines[start + offset] == entry {
-                    return text.to_string();
-                }
-                lines[start + offset] = entry;
-            } else {
-                // After the section's last non-blank line (Godot leaves one
-                // blank line after the header and before the next section).
-                let last = (start..end).rev().find(|&i| !lines[i].trim().is_empty());
-                match last {
-                    Some(i) => lines.insert(i + 1, entry),
-                    None => {
-                        lines.insert(start, String::new());
-                        lines.insert(start + 1, entry);
-                    }
+    match find_setting(&lines, section, key)? {
+        Some(SettingSpan {
+            value: Some((first, last)),
+            ..
+        }) => {
+            lines.splice(first..=last, [entry]);
+        }
+        Some(SettingSpan {
+            section: (start, end),
+            value: None,
+        }) => {
+            // After the section's last non-blank line (Godot leaves one
+            // blank line after the header and before the next section).
+            match (start..end).rev().find(|&i| !lines[i].trim().is_empty()) {
+                Some(i) => lines.insert(i + 1, entry),
+                None => {
+                    lines.insert(start, String::new());
+                    lines.insert(start + 1, entry);
                 }
             }
         }
@@ -270,23 +424,28 @@ fn set_setting(text: &str, section: &str, key: &str, value: &str) -> String {
             lines.extend([String::new(), format!("[{section}]"), String::new(), entry]);
         }
     }
-    lines.join("\n") + "\n"
+    Ok(lines.join(newline) + newline)
 }
 
-/// `enabled=PackedStringArray(...)` with `plugin` added if it isn't there,
-/// keeping any other enabled plugins.
-fn with_plugin_enabled(current: Option<&str>, plugin: &str) -> String {
-    let mut plugins: Vec<String> = current
-        .map(|value| {
-            let re = regex::Regex::new(r#""((?:[^"\\]|\\.)*)""#).expect("valid regex");
-            re.captures_iter(value).map(|c| c[1].to_string()).collect()
-        })
-        .unwrap_or_default();
+/// `PackedStringArray(...)` with `plugin` added if it isn't there, keeping
+/// any other enabled plugins. Refuses a value it doesn't recognise.
+fn with_plugin_enabled(current: Option<&str>, plugin: &str) -> Result<String> {
+    let mut plugins: Vec<String> = Vec::new();
+    if let Some(value) = current.map(str::trim) {
+        if !(value.starts_with("PackedStringArray(") && value.ends_with(')')) {
+            bail!(
+                "`enabled` in the [editor_plugins] section of project.godot isn't a \
+                 PackedStringArray; fix it in Godot and try again"
+            );
+        }
+        let re = regex::Regex::new(r#""((?:[^"\\]|\\.)*)""#).expect("valid regex");
+        plugins = re.captures_iter(value).map(|c| c[1].to_string()).collect();
+    }
     if !plugins.iter().any(|p| p == plugin) {
         plugins.push(plugin.to_string());
     }
     let quoted: Vec<String> = plugins.iter().map(|p| format!("\"{p}\"")).collect();
-    format!("PackedStringArray({})", quoted.join(", "))
+    Ok(format!("PackedStringArray({})", quoted.join(", ")))
 }
 
 /// A Godot string literal.
@@ -300,6 +459,126 @@ mod tests {
 
     fn read(path: &Path) -> String {
         fs::read_to_string(path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+    }
+
+    fn setting(text: &str, section: &str, key: &str) -> Option<String> {
+        get_setting(text, section, key).unwrap()
+    }
+
+    /// Every file path embedded from `dir`, recursively.
+    fn embedded_paths(dir: &Dir<'_>) -> Vec<PathBuf> {
+        let mut paths: Vec<PathBuf> = dir.files().map(|f| f.path().to_path_buf()).collect();
+        for sub in dir.dirs() {
+            paths.push(sub.path().to_path_buf());
+            paths.extend(embedded_paths(sub));
+        }
+        paths
+    }
+
+    /// `include_dir!` embeds whatever is on disk, so a `.godot/` cache from
+    /// opening the template in the editor would ship to every new project.
+    /// `write_dir` skips it anyway; this catches it at the source.
+    #[test]
+    fn scaffold_embeds_no_godot_cache() {
+        for (label, dir) in [("template", &TEMPLATE_BLANK_2D), ("addon", &ADDON)] {
+            for path in embedded_paths(dir) {
+                assert!(
+                    !is_godot_cache(&path),
+                    "{label} embeds {} — delete that .godot/ folder",
+                    path.display()
+                );
+            }
+        }
+        assert!(is_godot_cache(Path::new(".godot/imported/x.ctex")));
+        assert!(!is_godot_cache(Path::new("addons/infinabox/plugin.cfg")));
+    }
+
+    #[test]
+    fn scaffold_edits_multi_line_settings_whole() {
+        let original = "config_version=5\n\n[editor_plugins]\n\n\
+            enabled=PackedStringArray(\"res://addons/a/plugin.cfg\",\n\"res://addons/b/plugin.cfg\")\n\n\
+            [input]\n\njump={\n\"deadzone\": 0.5,\n\"events\": [Object(InputEventKey,\"keycode\":32)]\n}\n";
+        assert_eq!(
+            setting(original, "editor_plugins", "enabled").as_deref(),
+            Some(
+                "PackedStringArray(\"res://addons/a/plugin.cfg\",\n\"res://addons/b/plugin.cfg\")"
+            )
+        );
+        assert_eq!(
+            setting(original, "input", "jump").as_deref(),
+            Some("{\n\"deadzone\": 0.5,\n\"events\": [Object(InputEventKey,\"keycode\":32)]\n}")
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("project.godot"), original).unwrap();
+        assert!(ensure_addon(tmp.path()).unwrap());
+        let settings = read(&tmp.path().join("project.godot"));
+        assert_eq!(
+            setting(&settings, "editor_plugins", "enabled").as_deref(),
+            Some(
+                "PackedStringArray(\"res://addons/a/plugin.cfg\", \"res://addons/b/plugin.cfg\", \
+                 \"res://addons/infinabox/plugin.cfg\")"
+            )
+        );
+        assert!(
+            !settings.contains("\n\"res://addons/b/plugin.cfg\")"),
+            "left a dangling line:\n{settings}"
+        );
+        assert!(settings.contains("jump={\n\"deadzone\": 0.5,\n"));
+        assert!(!ensure_addon(tmp.path()).unwrap(), "second run is a no-op");
+    }
+
+    #[test]
+    fn scaffold_refuses_settings_it_cannot_parse() {
+        let tmp = tempfile::tempdir().unwrap();
+        let unbalanced =
+            "config_version=5\n\n[editor_plugins]\n\nenabled=PackedStringArray(\"a\",\n\n[input]\n";
+        fs::write(tmp.path().join("project.godot"), unbalanced).unwrap();
+        assert!(ensure_addon(tmp.path()).is_err());
+        // Refused before touching anything.
+        assert_eq!(read(&tmp.path().join("project.godot")), unbalanced);
+        assert!(!tmp.path().join("addons").exists());
+
+        let odd = "config_version=5\n\n[editor_plugins]\n\nenabled=[\"a\"]\n";
+        fs::write(tmp.path().join("project.godot"), odd).unwrap();
+        assert!(ensure_addon(tmp.path()).is_err());
+        assert_eq!(read(&tmp.path().join("project.godot")), odd);
+    }
+
+    #[test]
+    fn scaffold_keeps_crlf_line_endings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let original = "config_version=5\r\n\r\n[application]\r\n\r\nconfig/name=\"Mine\"\r\n";
+        fs::write(tmp.path().join("project.godot"), original).unwrap();
+        assert!(ensure_addon(tmp.path()).unwrap());
+        let settings = read(&tmp.path().join("project.godot"));
+        assert!(settings.starts_with(original));
+        assert!(
+            !settings.replace("\r\n", "").contains('\n'),
+            "mixed line endings:\n{settings:?}"
+        );
+        assert_eq!(
+            setting(&settings, "autoload", "InfinaBox").as_deref(),
+            Some(AUTOLOAD_VALUE)
+        );
+        assert!(!ensure_addon(tmp.path()).unwrap());
+    }
+
+    #[test]
+    fn scaffold_replaces_a_different_infinabox_autoload() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("project.godot"),
+            "[autoload]\n\nInfinaBox=\"*res://mine.gd\"\n",
+        )
+        .unwrap();
+        assert!(ensure_addon(tmp.path()).unwrap());
+        let settings = read(&tmp.path().join("project.godot"));
+        assert_eq!(
+            setting(&settings, "autoload", "InfinaBox").as_deref(),
+            Some(AUTOLOAD_VALUE)
+        );
+        assert!(!settings.contains("mine.gd"));
     }
 
     /// The file layout of a new project, without git (so it doesn't depend
@@ -329,23 +608,38 @@ mod tests {
             assert!(project.join(file).is_file(), "missing {file}");
         }
         assert!(project.join(".ibproject/chat").is_dir());
-        assert!(read(&project.join(".gitignore")).lines().any(|l| l.trim() == ".godot/"));
+        assert!(
+            read(&project.join(".gitignore"))
+                .lines()
+                .any(|l| l.trim() == ".godot/")
+        );
 
-        let marker: ProjectMarker = serde_json::from_str(&read(&project.join(".ibproject/.ibx"))).unwrap();
+        let marker: ProjectMarker =
+            serde_json::from_str(&read(&project.join(".ibproject/.ibx"))).unwrap();
         assert_eq!(marker.name, "Star Hopper");
         assert_eq!(marker.format_version, 2);
         assert_eq!(marker.dimension, "2d");
         chrono::DateTime::parse_from_rfc3339(&marker.created_at).unwrap();
-        let raw: serde_json::Value = serde_json::from_str(&read(&project.join(".ibproject/.ibx"))).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_str(&read(&project.join(".ibproject/.ibx"))).unwrap();
         assert_eq!(raw["formatVersion"], 2);
         assert!(raw["createdAt"].is_string());
 
         let settings = read(&project.join("project.godot"));
-        assert_eq!(get_setting(&settings, "application", "config/name").as_deref(), Some("\"Star Hopper\""));
-        assert_eq!(get_setting(&settings, "application", "run/main_scene").as_deref(), Some("\"res://main.tscn\""));
-        assert_eq!(get_setting(&settings, "autoload", "InfinaBox").as_deref(), Some(AUTOLOAD_VALUE));
         assert_eq!(
-            get_setting(&settings, "editor_plugins", "enabled").as_deref(),
+            setting(&settings, "application", "config/name").as_deref(),
+            Some("\"Star Hopper\"")
+        );
+        assert_eq!(
+            setting(&settings, "application", "run/main_scene").as_deref(),
+            Some("\"res://main.tscn\"")
+        );
+        assert_eq!(
+            setting(&settings, "autoload", "InfinaBox").as_deref(),
+            Some(AUTOLOAD_VALUE)
+        );
+        assert_eq!(
+            setting(&settings, "editor_plugins", "enabled").as_deref(),
             Some("PackedStringArray(\"res://addons/infinabox/plugin.cfg\")")
         );
 
@@ -355,7 +649,10 @@ mod tests {
         assert!(read(&project.join("AGENTS.md")).starts_with("# Star Hopper"));
         assert!(read(&project.join("CLAUDE.md")).contains("@AGENTS.md"));
         for md in ["CLAUDE.md", "AGENTS.md", ".ibproject/context/concept.md"] {
-            assert!(!read(&project.join(md)).contains(NAME_PLACEHOLDER), "{md} kept the placeholder");
+            assert!(
+                !read(&project.join(md)).contains(NAME_PLACEHOLDER),
+                "{md} kept the placeholder"
+            );
         }
     }
 
@@ -380,7 +677,10 @@ mod tests {
         // Everything was committed.
         let repo = git2::Repository::open(&project).unwrap();
         let statuses = repo.statuses(None).unwrap();
-        assert!(statuses.is_empty(), "uncommitted files after create_project");
+        assert!(
+            statuses.is_empty(),
+            "uncommitted files after create_project"
+        );
     }
 
     #[test]
@@ -403,20 +703,89 @@ mod tests {
     #[test]
     fn scaffold_refuses_names_that_are_not_one_folder() {
         let tmp = tempfile::tempdir().unwrap();
-        for name in ["", " padded ", "..", ".hidden", "a/b", "a\\b"] {
-            assert!(create_project(tmp.path(), name).is_err(), "accepted {name:?}");
+        for name in [
+            "",
+            "   ",
+            " padded",
+            "padded ",
+            "..",
+            ".hidden",
+            "trailing.",
+            "a/b",
+            "a\\b",
+            "a:b",
+            "a<b",
+            "a>b",
+            "a\"b",
+            "a|b",
+            "a?b",
+            "a*b",
+            "tab\there",
+            "new\nline",
+            "nul\0",
+            "bell\u{7}",
+            "CON",
+            "con",
+            "Prn",
+            "aux.txt",
+            "NUL.tar.gz",
+            "COM1",
+            "com9",
+            "LPT1",
+            "lpt5.md",
+        ] {
+            assert!(
+                create_project(tmp.path(), name).is_err(),
+                "accepted {name:?}"
+            );
         }
         assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 0);
+
+        for name in [
+            "My Game",
+            "Console",
+            "COM0",
+            "COM10",
+            "LPTX",
+            "aux-game",
+            "v1.2 final",
+            "Ünïcødé 游戏",
+        ] {
+            validate_name(name).unwrap_or_else(|e| panic!("refused {name:?}: {e}"));
+        }
+    }
+
+    /// When creation fails part-way into a folder that already existed
+    /// (empty), what was written goes but the folder itself stays.
+    #[test]
+    fn scaffold_cleanup_keeps_an_existing_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("kept");
+        fs::create_dir(&project).unwrap();
+        fs::write(project.join("project.godot"), "x").unwrap();
+        fs::create_dir_all(project.join("addons/infinabox")).unwrap();
+        remove_children(&project);
+        assert!(project.is_dir());
+        assert_eq!(fs::read_dir(&project).unwrap().count(), 0);
     }
 
     #[test]
     fn scaffold_ensure_addon_is_idempotent() {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path();
-        fs::write(project.join("project.godot"), TEMPLATE_BLANK_2D.get_file("project.godot").unwrap().contents())
-            .unwrap();
+        fs::write(
+            project.join("project.godot"),
+            TEMPLATE_BLANK_2D
+                .get_file("project.godot")
+                .unwrap()
+                .contents(),
+        )
+        .unwrap();
 
-        assert!(ensure_addon(project).unwrap(), "first install changes things");
+        assert!(
+            ensure_addon(project).unwrap(),
+            "first install changes things"
+        );
         let settings = read(&project.join("project.godot"));
         assert!(!ensure_addon(project).unwrap(), "second run is a no-op");
         assert_eq!(read(&project.join("project.godot")), settings);
@@ -428,7 +797,10 @@ mod tests {
         fs::write(project.join("addons/infinabox/extra.txt"), "not ours\n").unwrap();
         assert!(ensure_addon(project).unwrap());
         assert!(read(&runtime).contains("[infinabox] ready"));
-        assert_eq!(read(&project.join("addons/infinabox/extra.txt")), "not ours\n");
+        assert_eq!(
+            read(&project.join("addons/infinabox/extra.txt")),
+            "not ours\n"
+        );
         assert!(!ensure_addon(project).unwrap());
     }
 
@@ -444,11 +816,19 @@ mod tests {
 
         assert!(ensure_addon(project).unwrap());
         let settings = read(&project.join("project.godot"));
-        assert_eq!(get_setting(&settings, "autoload", "Music").as_deref(), Some("\"*res://music.gd\""));
-        assert_eq!(get_setting(&settings, "autoload", "InfinaBox").as_deref(), Some(AUTOLOAD_VALUE));
         assert_eq!(
-            get_setting(&settings, "editor_plugins", "enabled").as_deref(),
-            Some("PackedStringArray(\"res://addons/other/plugin.cfg\", \"res://addons/infinabox/plugin.cfg\")")
+            setting(&settings, "autoload", "Music").as_deref(),
+            Some("\"*res://music.gd\"")
+        );
+        assert_eq!(
+            setting(&settings, "autoload", "InfinaBox").as_deref(),
+            Some(AUTOLOAD_VALUE)
+        );
+        assert_eq!(
+            setting(&settings, "editor_plugins", "enabled").as_deref(),
+            Some(
+                "PackedStringArray(\"res://addons/other/plugin.cfg\", \"res://addons/infinabox/plugin.cfg\")"
+            )
         );
         assert!(settings.contains("jump={\n\"deadzone\": 0.5,\n\"events\": []\n}\n"));
         assert!(settings.contains("config/name=\"Mine\""));
@@ -457,9 +837,17 @@ mod tests {
 
     #[test]
     fn scaffold_addon_versions_agree() {
-        let runtime = ADDON.get_file("infinabox_runtime.gd").unwrap().contents_utf8().unwrap();
+        let runtime = ADDON
+            .get_file("infinabox_runtime.gd")
+            .unwrap()
+            .contents_utf8()
+            .unwrap();
         assert!(runtime.contains(&format!("const VERSION := \"{ADDON_VERSION}\"")));
-        let cfg = ADDON.get_file("plugin.cfg").unwrap().contents_utf8().unwrap();
+        let cfg = ADDON
+            .get_file("plugin.cfg")
+            .unwrap()
+            .contents_utf8()
+            .unwrap();
         assert!(cfg.contains(&format!("version=\"{ADDON_VERSION}\"")));
     }
 
@@ -475,7 +863,8 @@ mod tests {
     #[test]
     #[ignore = "needs Godot (set INFINABOX_GODOT); run with --ignored"]
     fn scaffold_boots_in_real_godot() {
-        let godot = std::env::var("INFINABOX_GODOT").expect("set INFINABOX_GODOT to a Godot 4 binary");
+        let godot =
+            std::env::var("INFINABOX_GODOT").expect("set INFINABOX_GODOT to a Godot 4 binary");
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path().join("Boot Test");
         fs::create_dir(&project).unwrap();
@@ -489,11 +878,17 @@ mod tests {
             .unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(output.status.success(), "godot exited with {}\n{stderr}", output.status);
+        assert!(
+            output.status.success(),
+            "godot exited with {}\n{stderr}",
+            output.status
+        );
         // Godot exits 0 even when scripts fail; stderr is the error signal.
         assert!(stderr.trim().is_empty(), "godot wrote to stderr:\n{stderr}");
         assert!(
-            stdout.lines().any(|l| l == format!("[infinabox] ready {ADDON_VERSION}")),
+            stdout
+                .lines()
+                .any(|l| l == format!("[infinabox] ready {ADDON_VERSION}")),
             "no ready line in stdout:\n{stdout}"
         );
     }
