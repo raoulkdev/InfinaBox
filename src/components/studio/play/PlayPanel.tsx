@@ -156,7 +156,11 @@ export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
       .then((state) => {
         if (!cancelled && !liveEventSeen.current) setGameState(state);
       })
-      .catch(() => {});
+      .catch((err) => {
+        // Not shown in the UI (the next `game-state` event corrects it),
+        // but logged so a broken `game_status` is visible in devtools.
+        console.warn("PlayPanel: couldn't read the game's current state:", err);
+      });
     return () => {
       cancelled = true;
     };

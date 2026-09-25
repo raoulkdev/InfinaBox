@@ -194,7 +194,7 @@ function App() {
             stacked in this one slot, permanently mounted, and only their
             opacity/pointer-events toggle with `section`. The slot itself
             still collapses via `hidden` exactly like every other section
-            when none of the three is active, so it never steals flex
+            when none of the four is active, so it never steals flex
             space from Home or a simple section. (With no project open,
             Studio just renders its own "No project open" card, so there's
             nothing to defer mounting for — unlike Build's terminal.)

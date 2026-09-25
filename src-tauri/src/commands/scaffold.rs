@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn project_create(parent_dir: String, name: String) -> Result<String, String> {
     infinabox_core::scaffold::create_project(Path::new(&parent_dir), &name)
         .map(|project| project.to_string_lossy().into_owned())

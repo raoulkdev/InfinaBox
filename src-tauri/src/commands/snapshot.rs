@@ -8,7 +8,9 @@
 //! an `on_changed` callback and no `AppHandle`, so when they report a
 //! change is directly unit-testable against a real temp repository; the
 //! `#[tauri::command]` wrappers only wire that callback to `app.emit(...)`
-//! and the game restart.
+//! and the game restart. They're `#[tauri::command(async)]` (like
+//! `overview.rs`) so git work, and a game restart that may run a Godot
+//! import, happens off the main thread instead of freezing the window.
 //!
 //! Core's errors are already plain sentences written for users (with their
 //! cause chained on), so they're passed through whole via `{:#}` rather
@@ -78,24 +80,24 @@ fn restart_game(app: &AppHandle) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn snapshot_list(project_path: String, limit: usize) -> Result<Vec<Snapshot>, String> {
     snapshot::list_snapshots(Path::new(&project_path), limit).map_err(user_error)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn snapshot_create(app: AppHandle, project_path: String, title: String) -> Result<Option<Snapshot>, String> {
     create(Path::new(&project_path), &title, || emit_changed(&app))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn snapshot_restore(app: AppHandle, project_path: String, snapshot_id: String) -> Result<Snapshot, String> {
     let restored = restore(Path::new(&project_path), &snapshot_id, || emit_changed(&app))?;
     restart_game(&app);
     Ok(restored)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn snapshot_undo_last(app: AppHandle, project_path: String) -> Result<Option<Snapshot>, String> {
     let undone = undo(Path::new(&project_path), || emit_changed(&app))?;
     if undone.is_some() {
