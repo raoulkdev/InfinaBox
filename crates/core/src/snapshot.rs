@@ -57,6 +57,10 @@ const AUTO_SAVE_TITLE: &str = "Auto-save before going back";
 /// Where chat threads live (see `chat_store`); kept as-is by every restore.
 const CHAT_DIR: [&str; 2] = [".ibproject", "chat"];
 
+/// The project marker (`src/lib/project-picker.ts`): the project's identity,
+/// not game content, so a restore never removes or rewinds it.
+const PROJECT_MARKER: [&str; 2] = [".ibproject", ".ibx"];
+
 /// Ignore rules applied in memory on top of the project's own `.gitignore`
 /// (never written to disk), so a project without one — or with an
 /// incomplete one — doesn't commit Godot's cache, OS clutter, local secrets
@@ -137,12 +141,20 @@ pub fn list_snapshots(project: &Path, limit: usize) -> Result<Vec<Snapshot>> {
 /// Makes the project look like `snapshot_id` again, as a new commit (after
 /// auto-saving any uncommitted work). Returns that commit.
 ///
-/// Two things are deliberately *not* taken from the target:
+/// Three things are deliberately *not* taken from the target:
 /// - `.ibproject/chat/` stays as it is now (chat history is a record, and
 ///   the conversation about going back must survive going back);
+/// - `.ibproject/.ibx` stays as it is now (when HEAD has one), so going
+///   back to before InfinaBox was set up never un-makes the project;
 /// - a file the target has but which currently exists on disk without
 ///   being committed (e.g. an ignored local `config.cfg` or `.env`) is left
 ///   untouched — and left out of the new commit, so history matches disk.
+///   Such skipped paths are not reported back to the caller (the
+///   `Snapshot` contract has no field for them).
+///
+/// Only paths that actually differ between HEAD and the restored tree are
+/// written, so anything else — notably a chat append that lands while this
+/// runs — is never overwritten.
 ///
 /// If nothing would change, no empty commit is made and the current HEAD
 /// snapshot is returned.
@@ -165,13 +177,23 @@ pub fn restore_to(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
     let head_tree = head.tree()?;
     let target_tree = target.tree().context("failed to read the target's files")?;
 
-    // 2. The tree to go back to: the target's, with today's chat grafted in
-    // and never-committed local files left out.
-    let chat_entry = head_tree
-        .get_path(&CHAT_DIR.iter().collect::<PathBuf>())
-        .ok()
-        .map(|e| (e.id(), e.filemode()));
-    let mut restore_id = set_path(&repo, &target_tree, &CHAT_DIR, chat_entry)?;
+    // 2. The tree to go back to: the target's, with today's chat and project
+    // marker grafted in and never-committed local files left out.
+    let head_entry = |path: &[&str]| {
+        head_tree
+            .get_path(&path.iter().collect::<PathBuf>())
+            .ok()
+            .map(|e| (e.id(), e.filemode()))
+    };
+    let mut restore_id = set_path(&repo, &target_tree, &CHAT_DIR, head_entry(&CHAT_DIR))?;
+    if let Some(marker) = head_entry(&PROJECT_MARKER) {
+        restore_id = set_path(
+            &repo,
+            &repo.find_tree(restore_id)?,
+            &PROJECT_MARKER,
+            Some(marker),
+        )?;
+    }
     let index = repo.index().context("failed to open the Git index")?;
     for path in uncommitted_files_in_the_way(&repo, &repo.find_tree(restore_id)?, &index)? {
         let parts: Vec<&str> = path.split('/').collect();
@@ -190,15 +212,12 @@ pub fn restore_to(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
     let oid = commit_tree(&repo, restore_id, Some(&head), &title, &trailers)?;
 
     // 4. Only now, with everything committed, overwrite the working
-    // directory. The index still describes the old HEAD tree, so checkout
-    // removes files the restore tree doesn't have; untracked and ignored
-    // files are left alone, and every path that holds one was removed from
-    // the restore tree above, so checkout has no reason to touch it.
-    let restore_tree = repo.find_tree(restore_id)?;
-    let mut checkout = CheckoutBuilder::new();
-    checkout.force();
-    repo.checkout_tree(restore_tree.as_object(), Some(&mut checkout))
-        .context("failed to update the project's files to the restored snapshot")?;
+    // directory — but only the paths that differ between HEAD and the
+    // restore tree. Everything else (the chat, in particular) is never
+    // touched, so a write that lands between the auto-save and here
+    // survives. Every path holding a never-committed file was removed from
+    // the restore tree above, so it can't be in this list.
+    checkout_changed_paths(&repo, &head_tree, &repo.find_tree(restore_id)?)?;
 
     let commit = repo.find_commit(oid)?;
     snapshot_of_any(&repo, &commit)
@@ -345,18 +364,22 @@ fn stage_everything(repo: &Repository) -> Result<Oid> {
         .context("the project's repository has no working folder")?
         .to_path_buf();
     let mut index = repo.index().context("failed to open the Git index")?;
+    // Called with file paths (and untracked directory paths): skip the path
+    // if it, or any folder above it inside the project, is its own repo —
+    // which also covers folders the outer repo already tracked before
+    // someone ran `git init`/`git clone` there.
     let mut skip_nested_repos = |path: &Path, _spec: &[u8]| -> i32 {
-        if workdir.join(path).join(".git").exists() {
-            1
-        } else {
-            0
-        }
+        let nested = path
+            .ancestors()
+            .filter(|a| !a.as_os_str().is_empty())
+            .any(|a| workdir.join(a).join(".git").exists());
+        if nested { 1 } else { 0 }
     };
     index
         .add_all(["*"], IndexAddOption::DEFAULT, Some(&mut skip_nested_repos))
         .context("failed to stage changed files")?;
     index
-        .update_all(["*"], None)
+        .update_all(["*"], Some(&mut skip_nested_repos))
         .context("failed to stage deleted files")?;
     index.write().context("failed to write the Git index")?;
     index
@@ -427,8 +450,18 @@ fn uncommitted_files_in_the_way(
     let workdir = repo
         .workdir()
         .context("the project's repository has no working folder")?;
+    // A path is "in the way" when something on disk there isn't committed.
+    // A directory counts only if something inside it isn't in the index; a
+    // fully tracked directory is safe for checkout to replace with a file.
     let untracked_on_disk = |rel: &str| {
-        index.get_path(Path::new(rel), 0).is_none() && workdir.join(rel).symlink_metadata().is_ok()
+        if index.get_path(Path::new(rel), 0).is_some() {
+            return false;
+        }
+        match workdir.join(rel).symlink_metadata() {
+            Ok(meta) if meta.is_dir() => dir_has_uncommitted(workdir, rel, index),
+            Ok(_) => true,
+            Err(_) => false,
+        }
     };
     let mut blocked = Vec::new();
     tree.walk(TreeWalkMode::PreOrder, |root, entry| {
@@ -466,6 +499,69 @@ fn uncommitted_files_in_the_way(
     })
     .context("failed to inspect the snapshot's files")?;
     Ok(blocked)
+}
+
+/// Whether any file under the on-disk directory `rel` (recursively, and
+/// counting empty-to-git things like symlinks as files) is missing from the
+/// index. Unreadable directories count as uncommitted — err on the side of
+/// not overwriting.
+fn dir_has_uncommitted(workdir: &Path, rel: &str, index: &Index) -> bool {
+    let Ok(entries) = std::fs::read_dir(workdir.join(rel)) else {
+        return true;
+    };
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return true;
+        };
+        let child = format!("{rel}/{}", entry.file_name().to_string_lossy());
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let uncommitted = if is_dir {
+            dir_has_uncommitted(workdir, &child, index)
+        } else {
+            index.get_path(Path::new(&child), 0).is_none()
+        };
+        if uncommitted {
+            return true;
+        }
+    }
+    false
+}
+
+/// Force-checks-out `new` over the working directory, limited to the paths
+/// that differ from `old` (the tree the index and disk currently match).
+fn checkout_changed_paths(repo: &Repository, old: &Tree, new: &Tree) -> Result<()> {
+    let changed = changed_paths(repo, old, new)?;
+    // An empty path list would mean "everything" to libgit2.
+    if changed.is_empty() {
+        return Ok(());
+    }
+    let mut checkout = CheckoutBuilder::new();
+    checkout.force().disable_pathspec_match(true);
+    for path in &changed {
+        checkout.path(path);
+    }
+    repo.checkout_tree(new.as_object(), Some(&mut checkout))
+        .context("failed to update the project's files to the restored snapshot")
+}
+
+/// Every path (old and new side of each delta) that differs between two
+/// trees, for a checkout limited to exactly those paths.
+fn changed_paths(repo: &Repository, old: &Tree, new: &Tree) -> Result<Vec<PathBuf>> {
+    let diff = repo
+        .diff_tree_to_tree(Some(old), Some(new), None)
+        .context("failed to compare the current and restored files")?;
+    let mut paths = Vec::new();
+    for delta in diff.deltas() {
+        for path in [delta.old_file().path(), delta.new_file().path()]
+            .into_iter()
+            .flatten()
+        {
+            if !paths.iter().any(|p: &PathBuf| p == path) {
+                paths.push(path.to_path_buf());
+            }
+        }
+    }
+    Ok(paths)
 }
 
 /// Whether `commit` changed anything besides `.ibproject/chat/` relative to
@@ -1219,5 +1315,139 @@ mod tests {
             !dir.path().join(".gitignore").exists(),
             "nothing written to disk"
         );
+    }
+
+    // ---- Re-review regressions ----------------------------------------
+
+    fn manual_commit(dir: &Path, message: &str) {
+        let repo = Repository::open(dir).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_all(["*"], IndexAddOption::DEFAULT, None).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = Signature::now("Dev", "dev@example.com").unwrap();
+        let parent = repo.head().ok().map(|h| h.peel_to_commit().unwrap());
+        let parents: Vec<&Commit> = parent.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_tracked_folder_can_be_replaced_by_a_file_again() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "levels", "v1 level list\n");
+        let v1 = create_snapshot(dir.path(), "v1", None).unwrap().unwrap();
+        fs::remove_file(dir.path().join("levels")).unwrap();
+        write(dir.path(), "levels/a.txt", "level a\n");
+        create_snapshot(dir.path(), "v2", None).unwrap().unwrap();
+
+        restore_to(dir.path(), &v1.id).unwrap();
+        assert_eq!(read(dir.path(), "levels"), "v1 level list\n");
+        let repo = Repository::open(dir.path()).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(
+            head.tree_id(),
+            repo.find_commit(Oid::from_str(&v1.id).unwrap())
+                .unwrap()
+                .tree_id()
+        );
+    }
+
+    #[test]
+    fn a_folder_holding_an_uncommitted_file_is_not_replaced() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "levels", "v1 level list\n");
+        write(dir.path(), "game.gd", "v1\n");
+        let v1 = create_snapshot(dir.path(), "v1", None).unwrap().unwrap();
+        fs::remove_file(dir.path().join("levels")).unwrap();
+        write(dir.path(), "levels/a.txt", "level a\n");
+        write(dir.path(), "game.gd", "v2\n");
+        create_snapshot(dir.path(), "v2", None).unwrap().unwrap();
+        // Ignored by the default `*.tmp` rule, so never committed.
+        write(dir.path(), "levels/scratch.tmp", "local only\n");
+
+        restore_to(dir.path(), &v1.id).unwrap();
+        assert_eq!(read(dir.path(), "game.gd"), "v1\n");
+        assert_eq!(read(dir.path(), "levels/scratch.tmp"), "local only\n");
+        assert!(dir.path().join("levels").is_dir());
+    }
+
+    #[test]
+    fn checkout_only_touches_paths_that_change() {
+        use crate::chat_store::{append, create_thread, load_thread};
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "player.gd", "var speed = 1\n");
+        let thread = create_thread(dir.path(), "Speed", "claude-code").unwrap();
+        append(dir.path(), &thread.id, &user("first", 1)).unwrap();
+        create_snapshot(dir.path(), "Start", None).unwrap().unwrap();
+
+        // A chat append landing after the auto-save, before the checkout.
+        append(dir.path(), &thread.id, &user("late", 2)).unwrap();
+
+        let repo = Repository::open(dir.path()).unwrap();
+        let head_tree = repo.head().unwrap().peel_to_tree().unwrap();
+        let blob = repo.blob(b"var speed = 9\n").unwrap();
+        let new_id = set_path(&repo, &head_tree, &["player.gd"], Some((blob, 0o100644))).unwrap();
+        checkout_changed_paths(&repo, &head_tree, &repo.find_tree(new_id).unwrap()).unwrap();
+
+        assert_eq!(read(dir.path(), "player.gd"), "var speed = 9\n");
+        let (_, records) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(records, vec![user("first", 1), user("late", 2)]);
+    }
+
+    #[test]
+    fn undoing_the_first_turn_keeps_the_project_marker() {
+        let dir = TempDir::new().unwrap();
+        // A game that already had git history before InfinaBox opened it.
+        Repository::init(dir.path()).unwrap();
+        write(dir.path(), "main.gd", "extends Node\n");
+        manual_commit(dir.path(), "Initial commit");
+
+        write(dir.path(), ".ibproject/.ibx", "{\"version\":1}\n");
+        write(
+            dir.path(),
+            ".ibproject/context/concept.md",
+            "# A platformer\n",
+        );
+        write(dir.path(), "main.gd", "extends Node2D\n");
+        create_snapshot(dir.path(), "First AI turn", Some(("t", 1)))
+            .unwrap()
+            .unwrap();
+
+        let undo = undo_last(dir.path()).unwrap().unwrap();
+        assert_eq!(undo.title, "Went back to: Initial commit");
+        assert_eq!(read(dir.path(), "main.gd"), "extends Node\n");
+        assert_eq!(read(dir.path(), ".ibproject/.ibx"), "{\"version\":1}\n");
+        assert!(
+            !dir.path().join(".ibproject/context/concept.md").exists(),
+            "context stays restorable"
+        );
+        let repo = Repository::open(dir.path()).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(tree.get_path(Path::new(".ibproject/.ibx")).is_ok());
+    }
+
+    #[test]
+    fn folders_turned_into_repos_after_being_tracked_are_skipped() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "main.gd", "extends Node\n");
+        write(dir.path(), "addons/foo/plugin.gd", "v1\n");
+        create_snapshot(dir.path(), "First", None).unwrap().unwrap();
+
+        // Someone runs `git init` / clones over the already-tracked addon.
+        Repository::init(dir.path().join("addons/foo")).unwrap();
+        write(dir.path(), "addons/foo/plugin.gd", "v2 from upstream\n");
+        write(dir.path(), "addons/foo/extra.gd", "new\n");
+        write(dir.path(), "main.gd", "extends Node2D\n");
+
+        let snap = create_snapshot(dir.path(), "Second", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(snap.files_changed, 1, "main.gd only");
+        let repo = Repository::open(dir.path()).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(tree.get_path(Path::new("addons/foo/extra.gd")).is_err());
+        let entry = tree.get_path(Path::new("addons/foo/plugin.gd")).unwrap();
+        assert_eq!(repo.find_blob(entry.id()).unwrap().content(), b"v1\n");
     }
 }

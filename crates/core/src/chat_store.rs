@@ -107,23 +107,64 @@ pub fn append(project: &Path, thread_id: &str, record: &ChatRecord) -> Result<()
         .with_context(|| format!("failed to append to chat thread '{}'", path.display()))
 }
 
-/// If a crash left a partial last line (no trailing newline), truncates the
-/// file back to just after the last complete line, so the next record
-/// starts on its own line instead of being glued onto the fragment.
-/// Returns the file's (possibly new) length.
+/// Makes sure the file ends in a newline before a record is appended, so
+/// the new record starts on its own line. Returns the length to write at.
+///
+/// - Ends in `\n` (the normal case): checked by reading one byte.
+/// - The text after the last newline is valid JSON (a complete record or
+///   header whose newline was lost): the newline is added, nothing dropped.
+/// - Otherwise it's a fragment from a crash mid-append: the file is
+///   truncated back to just after the last newline. It never truncates into
+///   the header line; a file with no complete line at all is refused.
 fn drop_torn_tail(file: &mut File) -> std::io::Result<u64> {
-    let mut content = Vec::new();
-    file.seek(SeekFrom::Start(0))?;
-    file.read_to_end(&mut content)?;
-    if content.is_empty() || content.ends_with(b"\n") {
-        return Ok(content.len() as u64);
+    let len = file.metadata()?.len();
+    if len == 0 {
+        return Ok(0);
     }
-    let keep = content
-        .iter()
-        .rposition(|&b| b == b'\n')
-        .map_or(0, |i| i + 1) as u64;
-    file.set_len(keep)?;
-    Ok(keep)
+    let mut last = [0u8; 1];
+    file.seek(SeekFrom::Start(len - 1))?;
+    file.read_exact(&mut last)?;
+    if last[0] == b'\n' {
+        return Ok(len);
+    }
+
+    let tail_start = last_newline_before(file, len)?.map_or(0, |i| i + 1);
+    let mut tail = Vec::with_capacity((len - tail_start) as usize);
+    file.seek(SeekFrom::Start(tail_start))?;
+    file.read_to_end(&mut tail)?;
+    if serde_json::from_slice::<Value>(&tail).is_ok() {
+        file.seek(SeekFrom::Start(len))?;
+        file.write_all(b"\n")?;
+        return Ok(len + 1);
+    }
+    if tail_start == 0 {
+        // The only line is the header, and it's damaged.
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the thread header line is incomplete",
+        ));
+    }
+    file.set_len(tail_start)?;
+    Ok(tail_start)
+}
+
+/// Offset of the last `\n` in the first `len` bytes, scanning backwards in
+/// chunks so a long thread isn't read whole.
+fn last_newline_before(file: &mut File, len: u64) -> std::io::Result<Option<u64>> {
+    const CHUNK: u64 = 8192;
+    let mut buf = vec![0u8; CHUNK as usize];
+    let mut end = len;
+    while end > 0 {
+        let start = end.saturating_sub(CHUNK);
+        let chunk = &mut buf[..(end - start) as usize];
+        file.seek(SeekFrom::Start(start))?;
+        file.read_exact(chunk)?;
+        if let Some(i) = chunk.iter().rposition(|&b| b == b'\n') {
+            return Ok(Some(start + i as u64));
+        }
+        end = start;
+    }
+    Ok(None)
 }
 
 pub fn set_provider_session(project: &Path, thread_id: &str, session_id: &str) -> Result<()> {
@@ -709,5 +750,122 @@ mod tests {
         assert!(!stale.exists());
         assert!(other.exists(), "only this thread's temp files are touched");
         assert_eq!(list_threads(dir.path()).unwrap().len(), 1);
+    }
+
+    fn thread_file(dir: &Path, id: &str) -> PathBuf {
+        dir.join(format!(".ibproject/chat/{id}.jsonl"))
+    }
+
+    #[test]
+    fn a_complete_last_line_missing_its_newline_is_kept() {
+        let dir = TempDir::new().unwrap();
+        let thread = create_thread(dir.path(), "T", "claude-code").unwrap();
+        let first = ChatRecord::User {
+            text: "one".into(),
+            at: 1,
+        };
+        let second = ChatRecord::User {
+            text: "two".into(),
+            at: 2,
+        };
+        append(dir.path(), &thread.id, &first).unwrap();
+        let path = thread_file(dir.path(), &thread.id);
+        let raw = fs::read_to_string(&path).unwrap();
+        fs::write(&path, raw.trim_end_matches('\n')).unwrap();
+
+        append(dir.path(), &thread.id, &second).unwrap();
+        let (_, records) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(records, vec![first, second]);
+    }
+
+    #[test]
+    fn the_header_is_never_truncated() {
+        let dir = TempDir::new().unwrap();
+        let thread = create_thread(dir.path(), "T", "claude-code").unwrap();
+        let path = thread_file(dir.path(), &thread.id);
+        let header = fs::read_to_string(&path).unwrap();
+
+        // Header alone, newline lost: repaired, not wiped.
+        fs::write(&path, header.trim_end_matches('\n')).unwrap();
+        let rec = ChatRecord::User {
+            text: "hi".into(),
+            at: 1,
+        };
+        append(dir.path(), &thread.id, &rec).unwrap();
+        let (summary, records) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(summary, thread);
+        assert_eq!(records, vec![rec.clone()]);
+
+        // A torn header with no complete line: refused, file left as is.
+        let torn = &header[..header.len() / 2];
+        fs::write(&path, torn).unwrap();
+        assert!(append(dir.path(), &thread.id, &rec).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), torn);
+    }
+
+    #[test]
+    fn torn_tail_repair_scans_back_across_chunks() {
+        let dir = TempDir::new().unwrap();
+        let thread = create_thread(dir.path(), "T", "claude-code").unwrap();
+        let big = ChatRecord::User {
+            text: "x".repeat(20_000),
+            at: 1,
+        };
+        append(dir.path(), &thread.id, &big).unwrap();
+        let path = thread_file(dir.path(), &thread.id);
+        // A fragment longer than one 8 KiB scan chunk.
+        let mut f = OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(format!(r#"{{"kind":"user","text":"{}"#, "y".repeat(20_000)).as_bytes())
+            .unwrap();
+        drop(f);
+
+        let small = ChatRecord::User {
+            text: "after".into(),
+            at: 2,
+        };
+        append(dir.path(), &thread.id, &small).unwrap();
+        let (_, records) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(records, vec![big, small]);
+    }
+
+    #[test]
+    fn appending_to_a_long_thread_does_not_reread_it() {
+        // Guards against reading the whole file on every append (which made
+        // 2000 × 20 KB appends take ~18 s). Build a ~40 MB thread directly,
+        // then append small records: reading it whole each time would move
+        // ~20 GB; checking just the tail is instant.
+        let dir = TempDir::new().unwrap();
+        let thread = create_thread(dir.path(), "T", "claude-code").unwrap();
+        let line = format!(
+            "{}\n",
+            serde_json::to_string(&ChatRecord::User {
+                text: "z".repeat(20_000),
+                at: 0
+            })
+            .unwrap()
+        );
+        let mut f = OpenOptions::new()
+            .append(true)
+            .open(thread_file(dir.path(), &thread.id))
+            .unwrap();
+        for _ in 0..2000 {
+            f.write_all(line.as_bytes()).unwrap();
+        }
+        drop(f);
+
+        let started = std::time::Instant::now();
+        for i in 0..500 {
+            append(
+                dir.path(),
+                &thread.id,
+                &ChatRecord::User {
+                    text: "hi".into(),
+                    at: i,
+                },
+            )
+            .unwrap();
+        }
+        let elapsed = started.elapsed();
+        assert!(elapsed.as_secs() < 5, "500 appends took {elapsed:?}");
     }
 }
