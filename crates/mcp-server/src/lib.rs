@@ -14,9 +14,6 @@ pub mod bridge_protocol;
 pub mod context;
 pub mod server;
 
-#[cfg(test)]
-mod e2e_tests;
-
 use rmcp::ServiceExt;
 
 /// Environment variable names shared with the app (which sets them when it

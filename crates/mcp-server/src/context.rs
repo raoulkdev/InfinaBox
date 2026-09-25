@@ -6,7 +6,9 @@
 //! against a temp project (the same split as `terminal.rs`/`watcher.rs` in
 //! the app: testable logic here, thin tool wrappers in `server.rs`).
 
+use std::ffi::OsStr;
 use std::fs;
+use std::io::{Read as _, Write as _};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow, bail};
@@ -64,15 +66,30 @@ impl ContextDir {
         let root = self
             .canonical_root()?
             .ok_or_else(|| anyhow!("this project has no Context folder yet"))?;
-        let full = checked_join(&root, rel)?;
-        let real = full
-            .canonicalize()
-            .with_context(|| format!("no context card at {rel}"))?;
-        // Catches symlinks inside the folder that point outside it.
-        if !real.starts_with(&root) {
-            bail!("refusing {rel}: it resolves outside the context folder");
+        let rel_path = checked_relative(rel)?;
+        let (dirs, file_name) = split_file(&rel_path, rel)?;
+        let parent = resolve_dir(&root, &dirs, false, rel)?;
+        let path = parent.join(file_name);
+
+        // Check the entry itself without following it, then open it and make
+        // sure the handle we got is that same regular file. A symlink swapped
+        // in between the check and the open fails the identity check.
+        let before =
+            fs::symlink_metadata(&path).with_context(|| format!("no context card at {rel}"))?;
+        if before.file_type().is_symlink() {
+            bail!("refusing {rel}: it is a symlink");
         }
-        fs::read_to_string(&real).with_context(|| format!("couldn't read {rel} as text"))
+        if !before.is_file() {
+            bail!("refusing {rel}: not a file");
+        }
+        let mut file = fs::File::open(&path).with_context(|| format!("couldn't open {rel}"))?;
+        if !same_file(&before, &file.metadata()?) {
+            bail!("refusing {rel}: it changed while being opened");
+        }
+        let mut text = String::new();
+        file.read_to_string(&mut text)
+            .with_context(|| format!("couldn't read {rel} as text"))?;
+        Ok(text)
     }
 
     /// Case-insensitive plain-text search across every card's lines.
@@ -103,6 +120,7 @@ impl ContextDir {
     /// subfolders as needed. Returns the normalized relative path written.
     pub fn write(&self, rel: &str, markdown: &str) -> Result<String> {
         let rel_path = checked_relative(rel)?;
+        check_card_components(&rel_path, rel)?;
         if rel_path.extension().and_then(|e| e.to_str()) != Some(CARD_EXTENSION) {
             bail!("context cards are markdown files; use a path ending in .{CARD_EXTENSION}");
         }
@@ -110,24 +128,13 @@ impl ContextDir {
             .with_context(|| format!("couldn't create {}", self.root.display()))?;
         let root = self.root.canonicalize()?;
 
-        let target = root.join(&rel_path);
-        let parent = target
-            .parent()
-            .ok_or_else(|| anyhow!("refusing {rel}: no parent folder"))?;
-        // `checked_relative` already rejected `..` and absolute paths, so
-        // this can only create folders under the root, unless an existing
-        // folder along the way is a symlink out of it: canonicalizing the
-        // parent below catches that before anything is written.
-        fs::create_dir_all(parent)?;
-        let real_parent = parent.canonicalize()?;
-        if !real_parent.starts_with(&root) {
-            bail!("refusing {rel}: it resolves outside the context folder");
-        }
-        let file_name = target
-            .file_name()
-            .expect("has an .md extension, so a file name");
-        let real_target = real_parent.join(file_name);
-        if let Ok(meta) = fs::symlink_metadata(&real_target) {
+        // Subfolders are created one level at a time from the canonical root,
+        // each existing level verified to be a real folder (not a symlink)
+        // first, so nothing is ever created outside the context folder.
+        let (dirs, file_name) = split_file(&rel_path, rel)?;
+        let parent = resolve_dir(&root, &dirs, true, rel)?;
+        let target = parent.join(file_name);
+        if let Ok(meta) = fs::symlink_metadata(&target) {
             if meta.file_type().is_symlink() {
                 bail!("refusing {rel}: it is a symlink");
             }
@@ -135,7 +142,36 @@ impl ContextDir {
                 bail!("refusing {rel}: it is a folder");
             }
         }
-        fs::write(&real_target, markdown).with_context(|| format!("couldn't write {rel}"))?;
+
+        // Write a fresh temp file beside the target, then rename it over the
+        // target. `create_new` won't follow anything already at the temp
+        // path, and rename replaces the target entry itself (even one swapped
+        // for a symlink after the check above) instead of writing through
+        // it. It's also atomic, so a reader never sees half a card.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let tmp = parent.join(format!(
+            ".{}.{}-{nanos}.tmp",
+            file_name.to_string_lossy(),
+            std::process::id()
+        ));
+        let written = (|| -> Result<()> {
+            let mut f = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)?;
+            f.write_all(markdown.as_bytes())?;
+            f.sync_all()?;
+            drop(f);
+            fs::rename(&tmp, &target)?;
+            Ok(())
+        })();
+        if let Err(e) = written {
+            let _ = fs::remove_file(&tmp);
+            return Err(e.context(format!("couldn't write {rel}")));
+        }
         Ok(to_slash(&rel_path))
     }
 
@@ -149,8 +185,8 @@ impl ContextDir {
 }
 
 /// Validates an agent-supplied relative path lexically: no absolute paths,
-/// no drive prefixes, no `..`. The on-disk (symlink) half of the check
-/// happens after canonicalizing, in the callers.
+/// no drive prefixes, no `..`. The on-disk (symlink) half of the check is
+/// `resolve_dir` plus the per-file checks in the callers.
 fn checked_relative(rel: &str) -> Result<PathBuf> {
     let rel = rel.trim();
     if rel.is_empty() {
@@ -172,8 +208,78 @@ fn checked_relative(rel: &str) -> Result<PathBuf> {
     Ok(out)
 }
 
-fn checked_join(root: &Path, rel: &str) -> Result<PathBuf> {
-    Ok(root.join(checked_relative(rel)?))
+/// Written cards must be listable and portable: no hidden components (they
+/// would never show up in `list`), and no `\` or `:` (a separator or an
+/// invalid name character on some platforms).
+fn check_card_components(rel_path: &Path, rel: &str) -> Result<()> {
+    for comp in rel_path.components() {
+        let part = comp
+            .as_os_str()
+            .to_str()
+            .ok_or_else(|| anyhow!("refusing {rel}: not valid UTF-8"))?;
+        if part.starts_with('.') {
+            bail!("refusing {rel}: names starting with '.' are hidden and not allowed");
+        }
+        if part.contains('\\') || part.contains(':') {
+            bail!("refusing {rel}: use '/' between folders, and no ':' in names");
+        }
+    }
+    Ok(())
+}
+
+/// Splits a checked relative path into its folder components and file name.
+fn split_file<'a>(rel_path: &'a Path, rel: &str) -> Result<(Vec<&'a OsStr>, &'a OsStr)> {
+    let mut parts: Vec<&OsStr> = rel_path.components().map(|c| c.as_os_str()).collect();
+    let file = parts
+        .pop()
+        .ok_or_else(|| anyhow!("refusing {rel}: not a file path"))?;
+    Ok((parts, file))
+}
+
+/// Walks `dirs` down from the canonical `root` one level at a time. Every
+/// existing level must be a real folder, never a symlink. With `create`, a
+/// missing level is made with a single `create_dir`, which fails rather than
+/// following anything that appears there in the meantime. Returns the
+/// canonical folder reached.
+fn resolve_dir(root: &Path, dirs: &[&OsStr], create: bool, rel: &str) -> Result<PathBuf> {
+    let mut cur = root.to_path_buf();
+    for part in dirs {
+        cur.push(part);
+        match fs::symlink_metadata(&cur) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(meta) if meta.file_type().is_symlink() => {
+                bail!("refusing {rel}: a folder on the way is a symlink")
+            }
+            Ok(_) => bail!("refusing {rel}: a folder on the way is a file"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && create => {
+                fs::create_dir(&cur)
+                    .with_context(|| format!("couldn't create a folder for {rel}"))?;
+                if !fs::symlink_metadata(&cur)?.is_dir() {
+                    bail!("refusing {rel}: a folder on the way changed while being created");
+                }
+            }
+            Err(e) => return Err(e).with_context(|| format!("no context card at {rel}")),
+        }
+    }
+    // Belt and braces: the folder reached really is inside the root.
+    let real = cur.canonicalize()?;
+    if !real.starts_with(root) {
+        bail!("refusing {rel}: it resolves outside the context folder");
+    }
+    Ok(real)
+}
+
+#[cfg(unix)]
+fn same_file(a: &fs::Metadata, b: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+/// Stable std has no file identity on other platforms; fall back to checking
+/// the opened handle is a regular file (the pre-open check refused symlinks).
+#[cfg(not(unix))]
+fn same_file(_a: &fs::Metadata, b: &fs::Metadata) -> bool {
+    b.is_file()
 }
 
 fn collect_cards(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<()> {
@@ -289,6 +395,30 @@ mod tests {
     }
 
     #[test]
+    fn write_refuses_hidden_or_unportable_names() {
+        let project = temp_project();
+        let ctx = ContextDir::for_project(&project);
+        for bad in [
+            ".hidden.md",
+            ".secret/card.md",
+            "a\\b.md",
+            "c:d.md",
+            "dir:x/card.md",
+        ] {
+            assert!(ctx.write(bad, "x").is_err(), "write should refuse {bad:?}");
+        }
+        // Nothing was written, not even an empty folder.
+        assert_eq!(ctx.list().unwrap(), Vec::<String>::new());
+        if ctx.root().exists() {
+            assert_eq!(fs::read_dir(ctx.root()).unwrap().count(), 0);
+        }
+        // Temp files from the atomic write never linger.
+        ctx.write("sub/ok.md", "fine").unwrap();
+        assert_eq!(fs::read_dir(ctx.root().join("sub")).unwrap().count(), 1);
+        fs::remove_dir_all(project).ok();
+    }
+
+    #[test]
     fn refuses_paths_that_escape_the_context_folder() {
         let project = temp_project();
         let ctx = ContextDir::for_project(&project);
@@ -336,6 +466,11 @@ mod tests {
         assert!(ctx.write("linkdir/secret.md", "pwned").is_err());
         assert!(ctx.write("linkdir/new.md", "pwned").is_err());
         assert!(ctx.write("link.md", "pwned").is_err());
+        // Regression: nested folders under a symlinked folder must not be
+        // created outside before the write is refused.
+        assert!(ctx.write("linkdir/a/b/new.md", "pwned").is_err());
+        assert!(!outside.join("a").exists());
+        assert!(ctx.read("linkdir/a/b/new.md").is_err());
         assert_eq!(
             fs::read_to_string(outside.join("secret.md")).unwrap(),
             "outside"

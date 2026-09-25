@@ -1,50 +1,18 @@
 //! End-to-end: spawn the real `infinabox-cli mcp-server` binary and speak
 //! raw MCP JSON-RPC to it over stdio, the way an agent CLI does.
 //!
-//! Locating the binary: the cli crate depends on this one, so its binary
-//! can't be a `CARGO_BIN_EXE_*` of this crate's tests. Instead the test asks
-//! cargo to build `infinabox-cli` (a no-op when it's up to date) and takes
-//! the executable path from cargo's own JSON build messages, which stays
-//! correct under any `CARGO_TARGET_DIR`. Set `INFINABOX_CLI_BIN` to skip the
-//! build and use a specific binary.
+//! Lives in the cli crate so cargo builds the binary for us and hands its
+//! path over as `CARGO_BIN_EXE_infinabox-cli`.
 
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use infinabox_mcp_server::bridge_client::APP_NOT_RUNNING;
+use infinabox_mcp_server::server::TOOL_NAMES;
+use infinabox_mcp_server::{ENV_BRIDGE_ADDR, ENV_BRIDGE_TOKEN, ENV_PROJECT};
 use serde_json::{Value, json};
-
-use crate::server::TOOL_NAMES;
-
-fn cli_binary() -> PathBuf {
-    if let Some(p) = std::env::var_os("INFINABOX_CLI_BIN") {
-        return PathBuf::from(p);
-    }
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../cli/Cargo.toml");
-    let out = Command::new(cargo)
-        .args([
-            "build",
-            "--quiet",
-            "--message-format=json",
-            "--bin",
-            "infinabox-cli",
-        ])
-        .arg("--manifest-path")
-        .arg(&manifest)
-        .stderr(Stdio::inherit())
-        .output()
-        .expect("run cargo build for infinabox-cli");
-    assert!(out.status.success(), "building infinabox-cli failed");
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter(|m| m["reason"] == "compiler-artifact" && m["target"]["name"] == "infinabox-cli")
-        .find_map(|m| m["executable"].as_str().map(PathBuf::from))
-        .expect("cargo reported no infinabox-cli executable")
-}
 
 struct Session {
     child: Child,
@@ -83,14 +51,21 @@ impl Drop for Session {
 
 #[test]
 fn cli_mcp_server_handshakes_and_lists_tools() {
-    let project = std::env::temp_dir().join(format!("infinabox-mcp-e2e-{}", std::process::id()));
+    let project = std::env::temp_dir().join(format!(
+        "infinabox-mcp-e2e-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
     std::fs::create_dir_all(&project).unwrap();
 
-    let mut child = Command::new(cli_binary())
+    let mut child = Command::new(env!("CARGO_BIN_EXE_infinabox-cli"))
         .arg("mcp-server")
-        .env(crate::ENV_PROJECT, &project)
-        .env_remove(crate::ENV_BRIDGE_ADDR)
-        .env_remove(crate::ENV_BRIDGE_TOKEN)
+        .env(ENV_PROJECT, &project)
+        .env_remove(ENV_BRIDGE_ADDR)
+        .env_remove(ENV_BRIDGE_TOKEN)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -158,10 +133,7 @@ fn cli_mcp_server_handshakes_and_lists_tools() {
     let text = call["result"]["content"][0]["text"]
         .as_str()
         .unwrap_or_default();
-    assert!(
-        text.starts_with(crate::bridge_client::APP_NOT_RUNNING),
-        "{call}"
-    );
+    assert!(text.starts_with(APP_NOT_RUNNING), "{call}");
 
     // And a context write lands in the project the env var named.
     s.send(json!({

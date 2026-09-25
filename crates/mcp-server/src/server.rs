@@ -138,6 +138,18 @@ fn err(e: anyhow::Error) -> String {
     format!("{e:#}")
 }
 
+/// Runs blocking filesystem/git work off the async executor, flattening
+/// both failure kinds into the tool's error text.
+async fn blocking<T: Send + 'static>(
+    what: &str,
+    f: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| format!("{what} failed: {e}"))?
+        .map_err(err)
+}
+
 #[tool_router]
 impl InfinaBoxServer {
     #[tool(
@@ -145,7 +157,8 @@ impl InfinaBoxServer {
 notes in .ibproject/context/). Use this first to see what's already decided about the game."
     )]
     async fn list_context_cards(&self) -> Result<String, String> {
-        let cards = self.context()?.list().map_err(err)?;
+        let ctx = self.context()?;
+        let cards = blocking("listing context cards", move || ctx.list()).await?;
         Ok(to_json(&cards))
     }
 
@@ -157,7 +170,8 @@ list_context_cards or search_context."
         &self,
         Parameters(CardPath { path }): Parameters<CardPath>,
     ) -> Result<String, String> {
-        self.context()?.read(&path).map_err(err)
+        let ctx = self.context()?;
+        blocking("reading a context card", move || ctx.read(&path)).await
     }
 
     #[tool(
@@ -169,7 +183,8 @@ says about a topic before changing related code."
         &self,
         Parameters(SearchQuery { query }): Parameters<SearchQuery>,
     ) -> Result<String, String> {
-        let hits = self.context()?.search(&query).map_err(err)?;
+        let ctx = self.context()?;
+        let hits = blocking("searching context", move || ctx.search(&query)).await?;
         Ok(to_json(&hits))
     }
 
@@ -182,7 +197,11 @@ stay inside the context folder."
         &self,
         Parameters(WriteCard { path, markdown }): Parameters<WriteCard>,
     ) -> Result<String, String> {
-        let written = self.context()?.write(&path, &markdown).map_err(err)?;
+        let ctx = self.context()?;
+        let written = blocking("writing a context card", move || {
+            ctx.write(&path, &markdown)
+        })
+        .await?;
         Ok(format!("Saved context card {written}."))
     }
 
@@ -242,13 +261,10 @@ with title, time, and files changed. Read-only: InfinaBox creates snapshots itse
     ) -> Result<String, String> {
         let project = self.project()?.clone();
         let limit = limit.unwrap_or(DEFAULT_SNAPSHOT_LIMIT);
-        // git2 work is blocking; keep it off the async executor.
-        let snapshots = tokio::task::spawn_blocking(move || {
+        let snapshots = blocking("listing snapshots", move || {
             infinabox_core::snapshot::list_snapshots(&project, limit)
         })
-        .await
-        .map_err(|e| format!("listing snapshots failed: {e}"))?
-        .map_err(err)?;
+        .await?;
         Ok(to_json(&snapshots))
     }
 }

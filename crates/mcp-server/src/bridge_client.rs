@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
 use crate::bridge_protocol::{BridgeRequest, BridgeResponse, Hello};
@@ -20,6 +20,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// Starting a game (which can first install the addon) is the slowest
 /// request; this bounds how long a hung app can stall the agent.
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Largest reply line accepted from the app (recent output/errors are
+/// bounded by the app's ring buffers, far below this).
+const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Where the app's bridge is and how to authenticate, as passed by the app
 /// in the environment when it launched the agent.
@@ -108,8 +111,9 @@ async fn exchange(
     write.write_all(out.as_bytes()).await.map_err(lost)?;
     write.flush().await.map_err(lost)?;
 
+    // Bounded, so a broken or hostile peer can't make this buffer forever.
     let mut line = String::new();
-    let n = BufReader::new(read)
+    let n = BufReader::new(read.take(MAX_RESPONSE_BYTES))
         .read_line(&mut line)
         .await
         .map_err(lost)?;
@@ -119,6 +123,18 @@ async fn exchange(
              connections with an outdated token; restart the agent from InfinaBox)."
                 .to_string(),
         );
+    }
+    // Every protocol line ends in a newline; without one the reply was cut
+    // off (the app quit mid-write) or ran past the size limit.
+    if !line.ends_with('\n') {
+        return Err(if n as u64 >= MAX_RESPONSE_BYTES {
+            format!(
+                "The InfinaBox app's reply was larger than {} MiB, so it was dropped.",
+                MAX_RESPONSE_BYTES / (1024 * 1024)
+            )
+        } else {
+            "The InfinaBox app's reply was cut off before it finished.".to_string()
+        });
     }
     match serde_json::from_str::<BridgeResponse>(line.trim_end()) {
         Ok(BridgeResponse::Ok { data }) => Ok(data),
@@ -248,5 +264,44 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.starts_with(APP_NOT_RUNNING), "{err}");
+    }
+
+    /// An app that writes `reply` verbatim after reading the hello and
+    /// request lines, then closes.
+    async fn raw_app(reply: Vec<u8>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (read, mut write) = stream.into_split();
+            let mut lines = BufReader::new(read).lines();
+            lines.next_line().await.unwrap();
+            lines.next_line().await.unwrap();
+            let _ = write.write_all(&reply).await;
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn reply_without_newline_is_an_error() {
+        // A complete, valid response object, but cut off before its newline.
+        let addr = raw_app(br#"{"status":"ok","data":{"running":true}}"#.to_vec()).await;
+        let err = call(Some(&config(&addr, TOKEN)), &BridgeRequest::GameStatus)
+            .await
+            .unwrap_err();
+        assert!(err.contains("cut off"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn oversized_reply_is_an_error() {
+        let big = format!(
+            "{{\"status\":\"ok\",\"data\":\"{}\"}}\n",
+            "x".repeat(MAX_RESPONSE_BYTES as usize)
+        );
+        let addr = raw_app(big.into_bytes()).await;
+        let err = call(Some(&config(&addr, TOKEN)), &BridgeRequest::GameStatus)
+            .await
+            .unwrap_err();
+        assert!(err.contains("larger than 4 MiB"), "{err}");
     }
 }
