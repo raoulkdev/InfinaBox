@@ -142,9 +142,14 @@ impl Inner {
         let was_live = matches!(self.state, GameState::Starting | GameState::Running);
         self.flush(host);
         if let Some(mut process) = self.process.take() {
-            process
-                .stop()
-                .map_err(|e| format!("Couldn't stop the running game: {e:#}"))?;
+            if let Err(e) = process.stop() {
+                // The process is out of our hands either way (dropping it
+                // retries the kill), so don't keep reporting "running".
+                if was_live {
+                    self.set_state(GameState::Stopped, host);
+                }
+                return Err(format!("Couldn't stop the running game: {e:#}"));
+            }
         }
         Ok(was_live)
     }
@@ -295,6 +300,8 @@ impl GameManager {
         let before = fingerprint(project);
         let up_to_date = before.is_some() && self.inner().imported.get(&key) == before.as_ref();
         if !up_to_date {
+            // Not cancellable (core's `import_assets` runs to completion): a
+            // Stop meanwhile only keeps the game from starting afterwards.
             let errors = validate::import_assets(godot, project)
                 .map_err(|e| format!("Godot couldn't import the project's assets: {e:#}"))?;
             // Importing writes `.import`/`.uid` files; fingerprint after.

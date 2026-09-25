@@ -18,7 +18,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use infinabox_mcp_server::bridge_protocol::{BridgeRequest, BridgeResponse, Hello};
 use rand::Rng;
@@ -35,14 +35,25 @@ const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024 - 1;
 /// Budget for the output/error lists inside a reply, leaving room for the
 /// envelope; the oldest entries are dropped first to fit.
 const MAX_LIST_BYTES: usize = 3 * 1024 * 1024;
-/// Unauthenticated connections get this long to say hello.
-const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+/// Total time (not per read) an unauthenticated connection gets to send its
+/// hello line, so a client dripping a byte at a time can't hold one open.
+const HELLO_DEADLINE: Duration = Duration::from_secs(3);
 /// An authenticated connection idle this long is closed (the client opens
 /// a fresh connection per request anyway).
 const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
-/// Connections served at once; more are closed straight away.
-const MAX_CONNECTIONS: usize = 32;
+/// Connections still waiting for their hello; more are closed straight
+/// away. Counted apart from authenticated ones, so sockets without the
+/// token can never use up the slots the agent needs.
+const MAX_PENDING: usize = 32;
+/// Authenticated connections served at once; more get a "too many
+/// connections" error reply.
+const MAX_AUTHENTICATED: usize = 32;
+/// Pause after a failed `accept` (e.g. out of file descriptors), so a
+/// persistent error doesn't spin the accept loop.
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(100);
+pub const TOO_MANY_CONNECTIONS: &str =
+    "The InfinaBox app is busy with too many bridge connections; try again in a moment.";
 
 /// Where the bridge is listening and the per-launch token clients must
 /// present. `None` until `start` has bound the listener.
@@ -63,6 +74,12 @@ pub trait BridgeHandler: Send + Sync + 'static {
 
 /// Serves the bridge from a `GameManager`: the same calls the game
 /// commands make.
+///
+/// Scope: `RunGame` runs whichever Godot project the connection's
+/// `Hello.project` names, and `StopGame`/`RecentErrors`/`RecentOutput` act
+/// on whatever game is running now, even one started for another project
+/// (`GameStatus` reports which). That's acceptable because only the user's
+/// own agent, launched by this app, has the token.
 pub struct GameBridge {
     pub manager: Arc<GameManager>,
     pub host: Arc<dyn GameHost>,
@@ -178,13 +195,88 @@ fn invalid(e: serde_json::Error) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, e)
 }
 
+/// A socket read with an optional overall deadline: before each read the
+/// read timeout is set to the time left, so the deadline holds however the
+/// peer spreads its bytes out.
+struct DeadlineStream {
+    stream: TcpStream,
+    deadline: Option<Instant>,
+}
+
+impl Read for DeadlineStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if let Some(deadline) = self.deadline {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "hello deadline passed",
+                ));
+            }
+            self.stream.set_read_timeout(Some(left))?;
+        }
+        self.stream.read(buf)
+    }
+}
+
+/// One taken slot of a connection budget, given back on drop (including
+/// when the connection's thread panics).
+struct Slot(Arc<AtomicUsize>);
+
+impl Slot {
+    fn take(counter: &Arc<AtomicUsize>, max: usize) -> Option<Slot> {
+        counter
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < max).then_some(n + 1)
+            })
+            .ok()
+            .map(|_| Slot(counter.clone()))
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// The two connection budgets (see `MAX_PENDING`/`MAX_AUTHENTICATED`).
+#[derive(Clone, Default)]
+struct Budgets {
+    pending: Arc<AtomicUsize>,
+    authenticated: Arc<AtomicUsize>,
+}
+
+fn write_response(writer: &mut TcpStream, response: &BridgeResponse) -> io::Result<()> {
+    let mut out = serde_json::to_string(response).map_err(invalid)?;
+    if out.len() > MAX_RESPONSE_BYTES {
+        out = serde_json::to_string(&BridgeResponse::Error {
+            message: "The reply was too large to send over the bridge.".into(),
+        })
+        .map_err(invalid)?;
+    }
+    out.push('\n');
+    writer.write_all(out.as_bytes())?;
+    writer.flush()
+}
+
 /// Serves one connection until the client closes it or misbehaves.
-/// Returns why it ended (for tests; the accept loop ignores it).
-fn serve_connection(stream: TcpStream, token: &str, handler: &dyn BridgeHandler) -> io::Result<()> {
-    stream.set_read_timeout(Some(HELLO_TIMEOUT))?;
+/// `pending` is the pre-auth slot this connection holds; it's swapped for
+/// an authenticated one once the hello checks out. Returns why it ended
+/// (the accept loop ignores it).
+fn serve_connection(
+    stream: TcpStream,
+    token: &str,
+    handler: &dyn BridgeHandler,
+    budgets: &Budgets,
+    pending: Slot,
+) -> io::Result<()> {
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     let mut writer = stream.try_clone()?;
-    let mut reader = BufReader::new(stream);
+    let mut reader = BufReader::new(DeadlineStream {
+        stream,
+        deadline: Some(Instant::now() + HELLO_DEADLINE),
+    });
 
     let Some(first) = read_line(&mut reader)? else {
         return Ok(());
@@ -196,41 +288,60 @@ fn serve_connection(stream: TcpStream, token: &str, handler: &dyn BridgeHandler)
             "wrong bridge token",
         ));
     }
-    reader.get_ref().set_read_timeout(Some(IDLE_TIMEOUT))?;
+    let inner = reader.get_mut();
+    inner.deadline = None;
+    inner.stream.set_read_timeout(Some(IDLE_TIMEOUT))?;
+    let authenticated = Slot::take(&budgets.authenticated, MAX_AUTHENTICATED);
+    drop(pending);
+    let Some(_authenticated) = authenticated else {
+        // A token holder deserves a real answer. Read its request first:
+        // closing with unread data would reset the connection and could
+        // lose the reply.
+        let _ = read_line(&mut reader);
+        let busy = BridgeResponse::Error {
+            message: TOO_MANY_CONNECTIONS.into(),
+        };
+        return write_response(&mut writer, &busy);
+    };
 
     while let Some(line) = read_line(&mut reader)? {
         let request: BridgeRequest = serde_json::from_str(&line).map_err(invalid)?;
         let response = handler.handle(&hello.project, request);
-        let mut out = serde_json::to_string(&response).map_err(invalid)?;
-        if out.len() > MAX_RESPONSE_BYTES {
-            out = serde_json::to_string(&BridgeResponse::Error {
-                message: "The reply was too large to send over the bridge.".into(),
-            })
-            .map_err(invalid)?;
-        }
-        out.push('\n');
-        writer.write_all(out.as_bytes())?;
-        writer.flush()?;
+        write_response(&mut writer, &response)?;
     }
     Ok(())
 }
 
-/// Accepts connections forever, each on its own thread. Blocks.
-fn serve(listener: TcpListener, token: String, handler: Arc<dyn BridgeHandler>) {
+/// Accepts connections until `incoming` ends (a listener's never does),
+/// each on its own thread. Blocks.
+fn serve_incoming(
+    incoming: impl Iterator<Item = io::Result<TcpStream>>,
+    token: String,
+    handler: Arc<dyn BridgeHandler>,
+) {
     let token: Arc<str> = token.into();
-    let active = Arc::new(AtomicUsize::new(0));
-    for stream in listener.incoming() {
-        let Ok(stream) = stream else { continue };
-        if active.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-            active.fetch_sub(1, Ordering::SeqCst);
-            continue; // dropped = closed
-        }
-        let (token, handler, active) = (token.clone(), handler.clone(), active.clone());
+    let budgets = Budgets::default();
+    for stream in incoming {
+        let stream = match stream {
+            Ok(stream) => stream,
+            Err(_) => {
+                thread::sleep(ACCEPT_ERROR_BACKOFF);
+                continue;
+            }
+        };
+        // Without the token nobody is owed a reply: just close.
+        let Some(pending) = Slot::take(&budgets.pending, MAX_PENDING) else {
+            continue;
+        };
+        let (token, handler, budgets) = (token.clone(), handler.clone(), budgets.clone());
         thread::spawn(move || {
-            let _ = serve_connection(stream, &token, handler.as_ref());
-            active.fetch_sub(1, Ordering::SeqCst);
+            let _ = serve_connection(stream, &token, handler.as_ref(), &budgets, pending);
         });
     }
+}
+
+fn serve(listener: TcpListener, token: String, handler: Arc<dyn BridgeHandler>) {
+    serve_incoming(listener.incoming(), token, handler);
 }
 
 /// Binds `127.0.0.1:0` and returns the listener, its address, and a fresh
@@ -521,5 +632,118 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err, godot::NOT_A_GODOT_GAME);
+    }
+
+    /// Regression: sockets without the token dripping one byte at a time
+    /// used to hold every connection slot indefinitely (a per-read timeout
+    /// never fired), locking the real agent out. Now each gets
+    /// `HELLO_DEADLINE` in total, after which the agent gets through.
+    #[test]
+    fn dripping_clients_without_the_token_cannot_lock_out_the_agent() {
+        let (addr, token) = spawn_bridge(Arc::new(EchoHandler::default()));
+        let started = Instant::now();
+        let drippers: Vec<_> = (0..MAX_PENDING)
+            .map(|_| {
+                let mut stream = TcpStream::connect(&addr).unwrap();
+                thread::spawn(move || {
+                    // Returns how long the app kept this socket open.
+                    let opened = Instant::now();
+                    while opened.elapsed() < Duration::from_secs(20) {
+                        if stream.write_all(b" ").is_err() {
+                            return opened.elapsed();
+                        }
+                        thread::sleep(Duration::from_millis(200));
+                    }
+                    opened.elapsed()
+                })
+            })
+            .collect();
+        // Let the accept loop hand every dripper a pending slot.
+        thread::sleep(Duration::from_millis(300));
+        assert!(call(&addr, &token, "/g", BridgeRequest::GameStatus).is_err());
+
+        for dripper in drippers {
+            let held = dripper.join().unwrap();
+            assert!(
+                held < HELLO_DEADLINE + Duration::from_secs(2),
+                "held {held:?}"
+            );
+        }
+        call(&addr, &token, "/g", BridgeRequest::GameStatus).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    /// Opens a connection, authenticates, and proves it with one request;
+    /// the socket stays open (and holds its slot) until dropped.
+    fn authenticated_connection(addr: &str, token: &str) -> TcpStream {
+        let stream = TcpStream::connect(addr).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        writeln!(writer, r#"{{"hello":"{token}","project":"/p"}}"#).unwrap();
+        writeln!(writer, r#"{{"method":"game_status"}}"#).unwrap();
+        let mut reply = String::new();
+        BufReader::new(stream.try_clone().unwrap())
+            .read_line(&mut reply)
+            .unwrap();
+        assert!(reply.contains("\"ok\""), "{reply}");
+        stream
+    }
+
+    #[test]
+    fn authenticated_and_pending_connections_have_separate_budgets() {
+        let (addr, token) = spawn_bridge(Arc::new(EchoHandler::default()));
+        // Idle token holders don't use up the pending slots...
+        let held: Vec<_> = (0..MAX_AUTHENTICATED - 1)
+            .map(|_| authenticated_connection(&addr, &token))
+            .collect();
+        call(&addr, &token, "/g", BridgeRequest::GameStatus).unwrap();
+        // ...but once their own budget is full, a new one is told why.
+        let last = authenticated_connection(&addr, &token);
+        let err = call(&addr, &token, "/g", BridgeRequest::GameStatus).unwrap_err();
+        assert_eq!(err, TOO_MANY_CONNECTIONS);
+
+        drop(last);
+        drop(held);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while call(&addr, &token, "/g", BridgeRequest::GameStatus).is_err() {
+            assert!(Instant::now() < deadline, "slots were never given back");
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    struct PanickingHandler;
+
+    impl BridgeHandler for PanickingHandler {
+        fn handle(&self, _project: &str, request: BridgeRequest) -> BridgeResponse {
+            match request {
+                BridgeRequest::RunGame => panic!("handler bug (expected in this test)"),
+                _ => ok(json!("fine")),
+            }
+        }
+    }
+
+    /// A panicking connection thread used to keep its slot forever.
+    #[test]
+    fn a_panicking_handler_gives_its_slot_back() {
+        let (addr, token) = spawn_bridge(Arc::new(PanickingHandler));
+        for _ in 0..MAX_AUTHENTICATED + 5 {
+            assert!(call(&addr, &token, "/g", BridgeRequest::RunGame).is_err());
+        }
+        assert_eq!(
+            call(&addr, &token, "/g", BridgeRequest::GameStatus).unwrap(),
+            json!("fine")
+        );
+    }
+
+    /// A persistent accept error (e.g. out of file descriptors) backs off
+    /// instead of spinning.
+    #[test]
+    fn accept_errors_back_off() {
+        let errors = (0..5).map(|_| Err(io::Error::other("EMFILE")));
+        let started = Instant::now();
+        serve_incoming(errors, new_token(), Arc::new(EchoHandler::default()));
+        assert!(started.elapsed() >= ACCEPT_ERROR_BACKOFF * 5);
     }
 }
