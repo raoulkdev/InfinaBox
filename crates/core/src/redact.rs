@@ -22,13 +22,16 @@ pub const REDACTED: &str = "[redacted]";
 /// for readability.
 static TOKEN_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
-        // PEM private key blocks (RSA/EC/OPENSSH/ENCRYPTED/plain). An
-        // unterminated block is redacted to the end of the text rather than
-        // left half-exposed.
-        r"(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\z)",
-        // Anthropic (`sk-ant-...`) and OpenAI (`sk-...`, `sk-proj-...`,
-        // `sk-svcacct-...`) keys share the `sk-` prefix.
-        r"\bsk-[A-Za-z0-9_\-]{16,}",
+        // PEM private key blocks (RSA/EC/OPENSSH/ENCRYPTED/plain) and PGP
+        // private key blocks. An unterminated block is redacted to the end
+        // of the text rather than left half-exposed.
+        r"(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|\z)",
+        // Anthropic (`sk-ant-...`) and OpenAI (`sk-proj-...`,
+        // `sk-svcacct-...`, `sk-admin-...`, legacy `sk-<48 chars>`) keys.
+        // The legacy form requires a long unbroken alphanumeric run so
+        // kebab-case names like `sk-level-boss-fight.tscn` survive.
+        r"\bsk-(?:ant|proj|svcacct|admin)-[A-Za-z0-9_\-]{16,}",
+        r"\bsk-[A-Za-z0-9]{32,}",
         // Stripe secret/restricted/publishable keys and webhook secrets;
         // ElevenLabs-style `sk_<hex>` keys.
         r"\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{8,}",
@@ -82,10 +85,12 @@ static URL_USERINFO: LazyLock<Regex> = LazyLock::new(|| {
 ///
 /// The optional `: Type` before `=` lets a typed GDScript declaration
 /// (`var api_key: String = "..."`) redact the assigned literal instead of
-/// treating the type name as the value.
+/// treating the type name as the value. A bare value runs to whitespace,
+/// a quote, `,` or `;` — `&` is part of it (passwords contain `&`) except
+/// in a query string, which `redact_key_value` trims.
 static KEY_VALUE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"(?i)(?P<key>[A-Za-z0-9_.\-]*(?:api[_\-]?key|apikey|secret|secret[_\-]?key|token|passwd|password|passphrase|pwd|access[_\-]?key|private[_\-]?key|service[_\-]?role[_\-]?key|anon[_\-]?key|credentials?))(?P<sep>["']?\s*(?::\s*[A-Za-z_][A-Za-z0-9_]*\s*)?[:=]\s*)(?:"(?P<dq>[^"\n]*)"|'(?P<sq>[^'\n]*)'|(?P<bare>[^\s"'`,;&]+))"#,
+        r#"(?i)(?P<key>[A-Za-z0-9_.\-]*(?:api[_\-]?key|apikey|secret|secret[_\-]?key|token|passwd|password|passphrase|pwd|access[_\-]?key|private[_\-]?key|service[_\-]?role[_\-]?key|anon[_\-]?key|credentials?))(?P<sep>["']?\s*(?::\s*[A-Za-z_][A-Za-z0-9_]*\s*)?[:=]\s*)(?:"(?P<dq>[^"\n]*)"|'(?P<sq>[^'\n]*)'|(?P<bare>[^\s"'`,;]+))"#,
     )
     .expect("key/value pattern must compile")
 });
@@ -121,33 +126,81 @@ pub fn redact(text: &str) -> String {
         })
         .into_owned();
 
-    out = KEY_VALUE.replace_all(&out, redact_key_value).into_owned();
+    out = redact_key_values(&out);
 
     out
 }
 
-fn redact_key_value(c: &Captures) -> String {
-    let whole = &c[0];
-    let prefix = format!("{}{}", &c["key"], &c["sep"]);
+/// Key words weak enough on their own that plain lowercase prose after them
+/// ("Secret: underground passage") is game text, not a credential.
+fn is_common_word_key(key: &str) -> bool {
+    key.eq_ignore_ascii_case("secret") || key.eq_ignore_ascii_case("token")
+}
 
-    if let Some(v) = c.name("dq") {
-        return if should_redact_quoted(v.as_str()) {
-            format!("{prefix}\"{REDACTED}\"")
-        } else {
-            whole.to_string()
-        };
+/// Keys whose value is a human-chosen password: short and wordlike values
+/// are still secrets.
+fn is_password_key(key: &str) -> bool {
+    let k = key.to_ascii_lowercase();
+    ["password", "passwd", "passphrase", "pwd", "secret"]
+        .iter()
+        .any(|w| k.ends_with(w))
+}
+
+/// Runs `KEY_VALUE` over `text` by hand rather than with `replace_all`,
+/// because a query-string match must stop consuming at `&` so the next
+/// parameter (`&token=...`) is still scanned.
+fn redact_key_values(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0;
+    while let Some(c) = KEY_VALUE.captures_at(text, last) {
+        let start = c.get(0).map_or(last, |m| m.start());
+        let (replacement, end) = redact_key_value(text, &c);
+        out.push_str(&text[last..start]);
+        out.push_str(&replacement);
+        last = end;
     }
-    if let Some(v) = c.name("sq") {
-        return if should_redact_quoted(v.as_str()) {
-            format!("{prefix}'{REDACTED}'")
-        } else {
-            whole.to_string()
-        };
+    out.push_str(&text[last..]);
+    out
+}
+
+/// Returns the replacement for one match and the byte offset in `haystack`
+/// where it ends.
+fn redact_key_value(haystack: &str, c: &Captures) -> (String, usize) {
+    let m = c.get(0).expect("group 0 always matches");
+    let whole = m.as_str();
+    let key = &c["key"];
+    let prefix = format!("{key}{}", &c["sep"]);
+
+    for (name, quote) in [("dq", '"'), ("sq", '\'')] {
+        if let Some(v) = c.name(name) {
+            let v = v.as_str();
+            let prose = is_common_word_key(key) && v.trim().contains(' ');
+            let replacement = if should_redact_quoted(v) && !prose {
+                format!("{prefix}{quote}{REDACTED}{quote}")
+            } else {
+                whole.to_string()
+            };
+            return (replacement, m.end());
+        }
     }
-    match c.name("bare") {
-        Some(v) if should_redact_bare(v.as_str()) => format!("{prefix}{REDACTED}"),
-        _ => whole.to_string(),
-    }
+
+    let Some(bare) = c.name("bare") else {
+        return (whole.to_string(), m.end());
+    };
+    // In a query string (`?token=abc&x=1`) the value ends at `&`; the rest
+    // is left for the next scan.
+    let in_query = haystack[..m.start()].ends_with(['?', '&']);
+    let value = match bare.as_str().find('&') {
+        Some(i) if in_query => &bare.as_str()[..i],
+        _ => bare.as_str(),
+    };
+    let end = bare.start() + value.len();
+    let replacement = if should_redact_bare(key, &c["sep"], value) {
+        format!("{prefix}{REDACTED}")
+    } else {
+        haystack[m.start()..end].to_string()
+    };
+    (replacement, end)
 }
 
 /// A quoted literal assigned to a credential-named key is treated as a
@@ -157,15 +210,33 @@ fn should_redact_quoted(value: &str) -> bool {
     !v.is_empty() && !v.contains(REDACTED)
 }
 
+/// GDScript/common type names: `var password: String` declares a type, it
+/// doesn't assign a value.
+const TYPE_NAMES: &[&str] = &[
+    "string",
+    "stringname",
+    "int",
+    "float",
+    "bool",
+    "variant",
+    "array",
+    "dictionary",
+    "packedbytearray",
+    "packedstringarray",
+    "object",
+    "node",
+    "str",
+    "number",
+    "boolean",
+    "any",
+];
+
 /// An unquoted value is only redacted when it could plausibly be a secret:
-/// long enough, and not obviously code (numbers, booleans, calls, node
-/// paths, collections, or an already-redacted marker).
-fn should_redact_bare(value: &str) -> bool {
+/// not a number, boolean, call, node path, collection or type, and long
+/// enough — 4 characters for password-like keys, 8 otherwise.
+fn should_redact_bare(key: &str, sep: &str, value: &str) -> bool {
     let v = value.trim_end_matches(['.', ')', ']', '}', ':']);
-    if v.len() < 8 || v.contains(REDACTED) {
-        return false;
-    }
-    if v.parse::<f64>().is_ok() {
+    if v.contains(REDACTED) || v.parse::<f64>().is_ok() {
         return false;
     }
     let lower = v.to_ascii_lowercase();
@@ -175,9 +246,31 @@ fn should_redact_bare(value: &str) -> bool {
     ) {
         return false;
     }
-    // GDScript/JS code rather than a literal: calls, indexing, node paths
-    // (`$Node`, `%Unique`), collections, env interpolation handled elsewhere.
-    !v.contains(['(', '[', '{', '$', '%', '<', '>'])
+    // `name: Type` with no assignment is a declaration.
+    if sep.trim_start_matches(['"', '\'']).trim() == ":" && TYPE_NAMES.contains(&lower.as_str()) {
+        return false;
+    }
+    // Code rather than a literal: node paths (`$Node`, `%Unique`), calls
+    // (`get_token()`), collections.
+    if v.starts_with(['$', '%', '[', '{', '<']) || looks_like_call(v) {
+        return false;
+    }
+    // "Secret: underground passage" / "The token: collectible coins".
+    if is_common_word_key(key) && v.chars().all(|ch| ch.is_ascii_lowercase()) {
+        return false;
+    }
+    let min_len = if is_password_key(key) { 4 } else { 8 };
+    v.chars().count() >= min_len
+}
+
+/// `ident(` or `a.b.c(` at the start: a function/method call.
+fn looks_like_call(v: &str) -> bool {
+    match v.find('(') {
+        Some(i) if i > 0 => v[..i]
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.'),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -194,7 +287,7 @@ mod tests {
             "OPENAI: sk-proj-abcdefghijklmnopqrstuvwxyz012345",
             "OPENAI: [redacted]",
         ),
-        ("sk-abcdefghijklmnopqrstuvwx", "[redacted]"),
+        ("sk-abcdefghijklmnopqrstuvwxyz0123456789ABCD", "[redacted]"),
         ("ghp_abcdefghijklmnopqrstuvwxyz0123456789", "[redacted]"),
         (
             "github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuv",
@@ -253,6 +346,29 @@ mod tests {
             "[redacted]\nafter",
         ),
         (
+            "-----BEGIN PGP PRIVATE KEY BLOCK-----\n\nlQOYBF0\n=abcd\n-----END PGP PRIVATE KEY BLOCK-----",
+            "[redacted]",
+        ),
+        (
+            "-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOYBF0 (cut off",
+            "[redacted]",
+        ),
+        // Short, symbol-bearing, `&`-containing passwords (review repros).
+        ("password=hunter2", "password=[redacted]"),
+        ("password: p&ssw0rd!", "password: [redacted]"),
+        ("DB_PASSWORD=hunt$r2%x", "DB_PASSWORD=[redacted]"),
+        ("pwd=Tr0ub4dor&3", "pwd=[redacted]"),
+        (
+            "https://x.example/login?user=ada&password=abcd&next=home&token=abcdefgh1234",
+            "https://x.example/login?user=ada&password=[redacted]&next=home&token=[redacted]",
+        ),
+        // Credential-named variables still redact quoted prose.
+        (
+            r#"api_key = "some words here""#,
+            r#"api_key = "[redacted]""#,
+        ),
+        ("secret: Xk9vQ2mR", "secret: [redacted]"),
+        (
             "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAA (truncated paste",
             "[redacted]",
         ),
@@ -284,6 +400,13 @@ mod tests {
         "token: true",
         "api_key: 123456789",
         "Visit https://godotengine.org/docs for help",
+        "res://scenes/sk-level-boss-fight-arena.tscn",
+        "Secret: underground passage",
+        "The token: collectible coins",
+        r#"var secret = "the old mill behind the waterfall""#,
+        "var password: String",
+        "var password = get_password()",
+        "@onready var pwd = %PasswordField",
     ];
 
     #[test]

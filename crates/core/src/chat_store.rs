@@ -7,10 +7,17 @@
 //! Thread ids are `YYYYMMDDTHHMMSSmmm-xxxxxxxx` (UTC time to the
 //! millisecond, then 8 random hex chars), so a plain string sort is a
 //! chronological sort and ids are safe as file names.
+//!
+//! Writers (`create_thread`, `append`, `set_provider_session`) serialize on
+//! one in-process lock: `set_provider_session` replaces the file by rename,
+//! and an `append` racing with it would otherwise write into the old,
+//! about-to-be-replaced inode and be lost. InfinaBox is the only process
+//! that writes these files.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -38,8 +45,17 @@ pub enum ChatRecord {
 
 const HEADER_KIND: &str = "thread";
 
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+/// A poisoned lock only means another writer panicked; the files themselves
+/// are still consistent (every write is whole-line or rename-based).
+fn write_lock() -> MutexGuard<'static, ()> {
+    WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 pub fn create_thread(project: &Path, title: &str, provider: &str) -> Result<ThreadSummary> {
     let dir = chat_dir(project);
+    let _guard = write_lock();
     fs::create_dir_all(&dir)
         .with_context(|| format!("failed to create chat folder '{}'", dir.display()))?;
 
@@ -71,23 +87,50 @@ pub fn create_thread(project: &Path, title: &str, provider: &str) -> Result<Thre
 
 pub fn append(project: &Path, thread_id: &str, record: &ChatRecord) -> Result<()> {
     let path = thread_path(project, thread_id)?;
-    if !path.is_file() {
-        anyhow::bail!("chat thread '{thread_id}' does not exist");
-    }
     let mut line = redacted_json(record)?;
     line.push('\n');
 
+    let _guard = write_lock();
+    if !path.is_file() {
+        anyhow::bail!("chat thread '{thread_id}' does not exist");
+    }
     let mut file = OpenOptions::new()
-        .append(true)
+        .read(true)
+        .write(true)
         .open(&path)
         .with_context(|| format!("failed to open chat thread '{}'", path.display()))?;
+    let end = drop_torn_tail(&mut file)
+        .with_context(|| format!("failed to repair chat thread '{}'", path.display()))?;
+    file.seek(SeekFrom::Start(end))?;
     // One `write_all` of a whole line keeps each record intact on disk.
     file.write_all(line.as_bytes())
         .with_context(|| format!("failed to append to chat thread '{}'", path.display()))
 }
 
+/// If a crash left a partial last line (no trailing newline), truncates the
+/// file back to just after the last complete line, so the next record
+/// starts on its own line instead of being glued onto the fragment.
+/// Returns the file's (possibly new) length.
+fn drop_torn_tail(file: &mut File) -> std::io::Result<u64> {
+    let mut content = Vec::new();
+    file.seek(SeekFrom::Start(0))?;
+    file.read_to_end(&mut content)?;
+    if content.is_empty() || content.ends_with(b"\n") {
+        return Ok(content.len() as u64);
+    }
+    let keep = content
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |i| i + 1) as u64;
+    file.set_len(keep)?;
+    Ok(keep)
+}
+
 pub fn set_provider_session(project: &Path, thread_id: &str, session_id: &str) -> Result<()> {
     let path = thread_path(project, thread_id)?;
+    let _guard = write_lock();
+    remove_stale_temp_files(&path);
+
     let content = fs::read_to_string(&path)
         .with_context(|| format!("failed to read chat thread '{}'", path.display()))?;
     let (first, rest) = match content.split_once('\n') {
@@ -101,20 +144,54 @@ pub fn set_provider_session(project: &Path, thread_id: &str, session_id: &str) -
     let mut new_content = header_line(&summary)?;
     new_content.push_str(rest);
 
-    // Atomic replace: write a sibling temp file, then rename over the
-    // original, so a crash leaves either the old or the new file — never a
-    // truncated one. The `.tmp` suffix keeps it out of `list_threads`.
-    let tmp = path.with_extension("jsonl.tmp");
-    {
+    // Atomic replace: write a uniquely named sibling temp file, then rename
+    // over the original, so a crash leaves either the old or the new file —
+    // never a truncated one. The name ends in `.tmp`, which keeps it out of
+    // `list_threads` and out of snapshots (the snapshot module ignores
+    // `*.tmp`), and a leftover from a crash is removed on the next rewrite.
+    let tmp = temp_path(&path);
+    let written = (|| -> Result<()> {
         let mut file =
             File::create(&tmp).with_context(|| format!("failed to create '{}'", tmp.display()))?;
         file.write_all(new_content.as_bytes())
             .with_context(|| format!("failed to write '{}'", tmp.display()))?;
         file.sync_all()
             .with_context(|| format!("failed to flush '{}'", tmp.display()))?;
+        fs::rename(&tmp, &path)
+            .with_context(|| format!("failed to replace chat thread '{}'", path.display()))
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(&tmp);
     }
-    fs::rename(&tmp, &path)
-        .with_context(|| format!("failed to replace chat thread '{}'", path.display()))
+    written
+}
+
+/// `<id>.jsonl.<random>.tmp`, next to the thread file.
+fn temp_path(thread_file: &Path) -> PathBuf {
+    let name = thread_file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let suffix = uuid::Uuid::new_v4().simple().to_string();
+    thread_file.with_file_name(format!("{name}.{}.tmp", &suffix[..8]))
+}
+
+/// Deletes temp files a crashed rewrite of this thread left behind. Only
+/// called while holding the write lock, so none of them is in use.
+fn remove_stale_temp_files(thread_file: &Path) {
+    let (Some(dir), Some(name)) = (thread_file.parent(), thread_file.file_name()) else {
+        return;
+    };
+    let prefix = format!("{}.", name.to_string_lossy());
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+        if file_name.starts_with(&prefix) && file_name.ends_with(".tmp") {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Newest first. Files whose header can't be read are skipped rather than
@@ -543,5 +620,94 @@ mod tests {
         let lines: Vec<&str> = raw.lines().collect();
         fs::write(&path, format!("{}\ngarbage\n{}\n", lines[0], lines[1])).unwrap();
         assert!(load_thread(dir.path(), &thread.id).is_err());
+    }
+
+    #[test]
+    fn append_after_a_torn_line_drops_the_fragment_and_stays_loadable() {
+        let dir = TempDir::new().unwrap();
+        let thread = create_thread(dir.path(), "T", "claude-code").unwrap();
+        let first = ChatRecord::User {
+            text: "one".into(),
+            at: 1,
+        };
+        let second = ChatRecord::User {
+            text: "two".into(),
+            at: 2,
+        };
+        append(dir.path(), &thread.id, &first).unwrap();
+        let path = dir
+            .path()
+            .join(format!(".ibproject/chat/{}.jsonl", thread.id));
+
+        let mut f = OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(br#"{"kind":"user","te"#).unwrap();
+        drop(f);
+
+        append(dir.path(), &thread.id, &second).unwrap();
+        let (_, records) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(records, vec![first, second]);
+        assert!(fs::read_to_string(&path).unwrap().ends_with("\n"));
+    }
+
+    #[test]
+    fn concurrent_appends_and_header_rewrites_lose_nothing() {
+        let dir = TempDir::new().unwrap();
+        let project = dir.path().to_path_buf();
+        let thread = create_thread(&project, "Busy", "claude-code").unwrap();
+
+        const N: i64 = 200;
+        let appender = {
+            let (project, id) = (project.clone(), thread.id.clone());
+            std::thread::spawn(move || {
+                for i in 0..N {
+                    append(
+                        &project,
+                        &id,
+                        &ChatRecord::User {
+                            text: format!("m{i}"),
+                            at: i,
+                        },
+                    )
+                    .unwrap();
+                }
+            })
+        };
+        let rewriter = {
+            let (project, id) = (project.clone(), thread.id.clone());
+            std::thread::spawn(move || {
+                for i in 0..N {
+                    set_provider_session(&project, &id, &format!("s{i}")).unwrap();
+                }
+            })
+        };
+        appender.join().unwrap();
+        rewriter.join().unwrap();
+
+        let (summary, records) = load_thread(&project, &thread.id).unwrap();
+        assert_eq!(summary.provider_session_id.as_deref(), Some("s199"));
+        let ats: Vec<i64> = records
+            .iter()
+            .map(|r| match r {
+                ChatRecord::User { at, .. } => *at,
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_eq!(ats, (0..N).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn stale_temp_files_are_cleaned_up_on_rewrite() {
+        let dir = TempDir::new().unwrap();
+        let thread = create_thread(dir.path(), "T", "claude-code").unwrap();
+        let chat = dir.path().join(".ibproject/chat");
+        let stale = chat.join(format!("{}.jsonl.deadbeef.tmp", thread.id));
+        let other = chat.join("20200101T000000000-00000000.jsonl.cafebabe.tmp");
+        fs::write(&stale, "leftover").unwrap();
+        fs::write(&other, "someone else's").unwrap();
+
+        set_provider_session(dir.path(), &thread.id, "s").unwrap();
+        assert!(!stale.exists());
+        assert!(other.exists(), "only this thread's temp files are touched");
+        assert_eq!(list_threads(dir.path()).unwrap().len(), 1);
     }
 }

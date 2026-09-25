@@ -11,16 +11,23 @@
 //! - `InfinaBox-Restores: <sha>` — on "Went back to" commits, the commit whose
 //!   tree was restored. Informational: undo doesn't need it (see `undo_last`).
 //!
-//! Never writes git config; never resets or rewrites history. The only
-//! working-directory overwrite (`restore_to`) happens after every
-//! uncommitted change has been saved into its own snapshot first.
+//! Safety rules this module keeps:
+//! - Never writes git config; never resets or rewrites history.
+//! - The only working-directory overwrite (`restore_to`) happens after every
+//!   uncommitted change has been saved into its own snapshot first.
+//! - Going back never rewinds the chat: `.ibproject/chat/` is a record of
+//!   what happened, so a restore keeps the current chat files as they are.
+//! - Going back never overwrites a file that exists on disk but was never
+//!   committed (an ignored local file such as a config or `.env`).
+//! - It refuses to act while git is mid-merge/rebase, or when the project
+//!   sits inside some other git repository.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use git2::{
-    Commit, Config, ErrorCode, IndexAddOption, Oid, Repository, Signature, Sort,
-    build::CheckoutBuilder,
+    Commit, Config, ErrorCode, Index, IndexAddOption, ObjectType, Oid, Repository, RepositoryState,
+    Signature, Sort, Tree, TreeWalkMode, TreeWalkResult, build::CheckoutBuilder,
 };
 use serde::Serialize;
 
@@ -47,6 +54,26 @@ const FALLBACK_EMAIL: &str = "infinabox@localhost";
 
 const AUTO_SAVE_TITLE: &str = "Auto-save before going back";
 
+/// Where chat threads live (see `chat_store`); kept as-is by every restore.
+const CHAT_DIR: [&str; 2] = [".ibproject", "chat"];
+
+/// Ignore rules applied in memory on top of the project's own `.gitignore`
+/// (never written to disk), so a project without one — or with an
+/// incomplete one — doesn't commit Godot's cache, OS clutter, local secrets
+/// or `chat_store`'s temp files. Export output folders are deliberately not
+/// listed: their names vary and a user may well keep sources in `build/`.
+const DEFAULT_IGNORES: &str = "\
+.godot/
+.import/
+.env
+.env.*
+*.tmp
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+";
+
 /// Commits everything (respecting `.gitignore`). `None` when nothing
 /// changed. `origin` is the (thread id, turn number) that produced it.
 /// Initializes the repository if the project isn't one yet.
@@ -55,7 +82,16 @@ pub fn create_snapshot(
     title: &str,
     origin: Option<(&str, u32)>,
 ) -> Result<Option<Snapshot>> {
-    let repo = open_or_init(project)?;
+    let repo = match open_project_repo(project)? {
+        Some(repo) => repo,
+        None => Repository::init(project).with_context(|| {
+            format!(
+                "failed to initialize a Git repository at '{}'",
+                project.display()
+            )
+        })?,
+    };
+    ensure_clean_state(&repo)?;
     let head = head_commit(&repo)?;
 
     let tree_id = stage_everything(&repo)?;
@@ -85,19 +121,184 @@ pub fn create_snapshot(
 /// trailer are skipped (not counted). An empty list when the project has no
 /// repository or no commits yet.
 pub fn list_snapshots(project: &Path, limit: usize) -> Result<Vec<Snapshot>> {
-    let repo = match Repository::open(project) {
+    let Some(repo) = open_project_repo(project)? else {
+        return Ok(Vec::new());
+    };
+    let mut snapshots = Vec::new();
+    for_each_snapshot_commit(&repo, |commit| {
+        if let Some(snapshot) = to_snapshot(&repo, commit)? {
+            snapshots.push(snapshot);
+        }
+        Ok(snapshots.len() < limit)
+    })?;
+    Ok(snapshots)
+}
+
+/// Makes the project look like `snapshot_id` again, as a new commit (after
+/// auto-saving any uncommitted work). Returns that commit.
+///
+/// Two things are deliberately *not* taken from the target:
+/// - `.ibproject/chat/` stays as it is now (chat history is a record, and
+///   the conversation about going back must survive going back);
+/// - a file the target has but which currently exists on disk without
+///   being committed (e.g. an ignored local `config.cfg` or `.env`) is left
+///   untouched — and left out of the new commit, so history matches disk.
+///
+/// If nothing would change, no empty commit is made and the current HEAD
+/// snapshot is returned.
+pub fn restore_to(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
+    let repo = open_project_repo(project)?.with_context(|| {
+        format!(
+            "'{}' has no history yet, so there is nothing to go back to",
+            project.display()
+        )
+    })?;
+    ensure_clean_state(&repo)?;
+    let target = resolve_commit(&repo, snapshot_id)?;
+
+    // 1. Nothing uncommitted is ever lost: save it as its own snapshot.
+    create_snapshot(project, AUTO_SAVE_TITLE, None)
+        .context("failed to auto-save uncommitted changes before going back")?;
+
+    let head = head_commit(&repo)?
+        .context("the project has no history yet, so there is nothing to go back to")?;
+    let head_tree = head.tree()?;
+    let target_tree = target.tree().context("failed to read the target's files")?;
+
+    // 2. The tree to go back to: the target's, with today's chat grafted in
+    // and never-committed local files left out.
+    let chat_entry = head_tree
+        .get_path(&CHAT_DIR.iter().collect::<PathBuf>())
+        .ok()
+        .map(|e| (e.id(), e.filemode()));
+    let mut restore_id = set_path(&repo, &target_tree, &CHAT_DIR, chat_entry)?;
+    let index = repo.index().context("failed to open the Git index")?;
+    for path in uncommitted_files_in_the_way(&repo, &repo.find_tree(restore_id)?, &index)? {
+        let parts: Vec<&str> = path.split('/').collect();
+        restore_id = set_path(&repo, &repo.find_tree(restore_id)?, &parts, None)?;
+    }
+    if restore_id == head.tree_id() {
+        return snapshot_of_any(&repo, &head);
+    }
+
+    // 3. A new commit with that tree, on top of HEAD.
+    let title = format!("Went back to: {}", commit_title(&target));
+    let trailers = [
+        (TRAILER_SNAPSHOT, "1".to_string()),
+        (TRAILER_RESTORES, target.id().to_string()),
+    ];
+    let oid = commit_tree(&repo, restore_id, Some(&head), &title, &trailers)?;
+
+    // 4. Only now, with everything committed, overwrite the working
+    // directory. The index still describes the old HEAD tree, so checkout
+    // removes files the restore tree doesn't have; untracked and ignored
+    // files are left alone, and every path that holds one was removed from
+    // the restore tree above, so checkout has no reason to touch it.
+    let restore_tree = repo.find_tree(restore_id)?;
+    let mut checkout = CheckoutBuilder::new();
+    checkout.force();
+    repo.checkout_tree(restore_tree.as_object(), Some(&mut checkout))
+        .context("failed to update the project's files to the restored snapshot")?;
+
+    let commit = repo.find_commit(oid)?;
+    snapshot_of_any(&repo, &commit)
+}
+
+/// Restores to the state before the latest snapshot. `None` when there is
+/// nothing to undo.
+///
+/// "Before the latest snapshot" is that snapshot's first parent commit.
+/// That one rule covers both cases in the plan: undoing a normal change
+/// goes back to how things were before it, and undoing a "Went back to"
+/// commit goes back to how things were before *that* — so pressing Undo
+/// twice redoes. The latest snapshot is chosen before `restore_to`
+/// auto-saves, so an auto-save made by this very call is never what gets
+/// undone.
+///
+/// Snapshots that changed nothing but chat (a turn that only talked) are
+/// skipped, since restoring never rewinds chat and undoing one would do
+/// nothing.
+///
+/// If ordinary commits were made after the latest snapshot (e.g. in
+/// Advanced mode), undo still restores the latest *snapshot's* parent, so
+/// those commits' changes are reverted in the working tree too — they stay
+/// in history and can be gone back to like any other commit.
+pub fn undo_last(project: &Path) -> Result<Option<Snapshot>> {
+    let Some(repo) = open_project_repo(project)? else {
+        return Ok(None);
+    };
+    let mut target = None;
+    for_each_snapshot_commit(&repo, |commit| {
+        if !is_snapshot(commit) {
+            return Ok(true);
+        }
+        if commit.parent_count() == 0 {
+            // The very first snapshot: nothing before it to go back to.
+            return Ok(false);
+        }
+        if changes_outside_chat(&repo, commit)? {
+            target = Some(commit.parent_id(0)?);
+            return Ok(false);
+        }
+        Ok(true)
+    })?;
+    match target {
+        Some(parent) => restore_to(project, &parent.to_string()).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// Opens the project's own repository. `None` when the project isn't in a
+/// repository at all; an error when it's inside someone else's (InfinaBox
+/// must never commit a game's changes into a parent repository, nor quietly
+/// nest a second one inside it).
+fn open_project_repo(project: &Path) -> Result<Option<Repository>> {
+    let repo = match Repository::discover(project) {
         Ok(repo) => repo,
-        Err(e) if e.code() == ErrorCode::NotFound => return Ok(Vec::new()),
+        Err(e) if e.code() == ErrorCode::NotFound => return Ok(None),
         Err(e) => {
             return Err(e).with_context(|| {
                 format!("failed to open Git repository at '{}'", project.display())
             });
         }
     };
-    if head_commit(&repo)?.is_none() {
-        return Ok(Vec::new());
+    let project_dir = project
+        .canonicalize()
+        .with_context(|| format!("project folder '{}' is not accessible", project.display()))?;
+    let workdir = repo.workdir().and_then(|w| w.canonicalize().ok());
+    if workdir.as_deref() != Some(project_dir.as_path()) {
+        let outer = workdir
+            .map(|w| w.display().to_string())
+            .unwrap_or_else(|| repo.path().display().to_string());
+        anyhow::bail!(
+            "This project is inside another git repository ({outer}), so InfinaBox can't keep its own history for it."
+        );
     }
+    Ok(Some(repo))
+}
 
+/// Mid-merge, mid-rebase, mid-cherry-pick etc.: committing or checking out
+/// now would tangle InfinaBox's snapshots into an operation someone else
+/// (the user or their agent, in a terminal) started.
+fn ensure_clean_state(repo: &Repository) -> Result<()> {
+    let state = repo.state();
+    if state != RepositoryState::Clean {
+        anyhow::bail!(
+            "The project's git history is in the middle of another operation ({state:?}). Finish or cancel it (e.g. in Advanced mode) before saving or going back."
+        );
+    }
+    Ok(())
+}
+
+/// Walks history from HEAD, newest first, calling `visit` on each commit
+/// until it returns `false`. Does nothing for an unborn HEAD.
+fn for_each_snapshot_commit(
+    repo: &Repository,
+    mut visit: impl FnMut(&Commit) -> Result<bool>,
+) -> Result<()> {
+    if head_commit(repo)?.is_none() {
+        return Ok(());
+    }
     let mut revwalk = repo.revwalk().context("failed to create revwalk")?;
     revwalk
         .push_head()
@@ -108,103 +309,16 @@ pub fn list_snapshots(project: &Path, limit: usize) -> Result<Vec<Snapshot>> {
     revwalk
         .set_sorting(Sort::TIME | Sort::TOPOLOGICAL)
         .context("failed to set revwalk sort order")?;
-
-    let mut snapshots = Vec::new();
     for oid in revwalk {
-        if snapshots.len() >= limit {
-            break;
-        }
         let oid = oid.context("failed to read commit id while walking history")?;
         let commit = repo
             .find_commit(oid)
             .with_context(|| format!("failed to look up commit {oid}"))?;
-        if let Some(snapshot) = to_snapshot(&repo, &commit)? {
-            snapshots.push(snapshot);
+        if !visit(&commit)? {
+            break;
         }
     }
-    Ok(snapshots)
-}
-
-/// Makes the project look exactly like `snapshot_id` again, as a new
-/// commit (after auto-saving any uncommitted work). Returns that commit.
-///
-/// If the project already matches the target once uncommitted work is
-/// saved, no empty commit is made and the current HEAD snapshot is returned.
-pub fn restore_to(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
-    let repo = Repository::open(project)
-        .with_context(|| format!("failed to open Git repository at '{}'", project.display()))?;
-    let target = resolve_commit(&repo, snapshot_id)?;
-
-    // 1. Nothing uncommitted is ever lost: save it as its own snapshot.
-    create_snapshot(project, AUTO_SAVE_TITLE, None)
-        .context("failed to auto-save uncommitted changes before going back")?;
-
-    let head = head_commit(&repo)?
-        .context("the project has no history yet, so there is nothing to go back to")?;
-    if head.tree_id() == target.tree_id() {
-        return snapshot_of_any(&repo, &head);
-    }
-
-    // 2. A new commit whose tree is the target's tree, on top of HEAD.
-    let title = format!("Went back to: {}", commit_title(&target));
-    let trailers = [
-        (TRAILER_SNAPSHOT, "1".to_string()),
-        (TRAILER_RESTORES, target.id().to_string()),
-    ];
-    let target_tree = target.tree().context("failed to read the target's files")?;
-    let oid = commit_tree(&repo, target_tree.id(), Some(&head), &title, &trailers)?;
-
-    // 3. Only now, with everything committed, overwrite the working
-    // directory. The index still describes the old HEAD tree, so checkout
-    // removes files the target doesn't have; untracked and ignored files
-    // are left alone.
-    let mut checkout = CheckoutBuilder::new();
-    checkout.force();
-    repo.checkout_tree(target_tree.as_object(), Some(&mut checkout))
-        .context("failed to update the project's files to the restored snapshot")?;
-
-    let commit = repo.find_commit(oid)?;
-    snapshot_of_any(&repo, &commit)
-}
-
-/// Restores to the snapshot before the latest one. `None` when there is
-/// nothing to undo.
-///
-/// "Before the latest one" is the latest snapshot's first parent commit.
-/// That one rule covers both cases in the plan: undoing a normal change
-/// goes back to how things were before it, and undoing a "Went back to"
-/// commit goes back to how things were before *that* — so pressing Undo
-/// twice redoes. The latest snapshot is chosen before `restore_to`
-/// auto-saves, so an auto-save made by this very call is never what gets
-/// undone.
-pub fn undo_last(project: &Path) -> Result<Option<Snapshot>> {
-    let Some(latest) = list_snapshots(project, 1)?.into_iter().next() else {
-        return Ok(None);
-    };
-    let repo = Repository::open(project)
-        .with_context(|| format!("failed to open Git repository at '{}'", project.display()))?;
-    let latest = repo.find_commit(Oid::from_str(&latest.id)?)?;
-    if latest.parent_count() == 0 {
-        return Ok(None);
-    }
-    let parent = latest
-        .parent(0)
-        .context("failed to read the previous snapshot")?;
-    restore_to(project, &parent.id().to_string()).map(Some)
-}
-
-fn open_or_init(project: &Path) -> Result<Repository> {
-    match Repository::open(project) {
-        Ok(repo) => Ok(repo),
-        Err(e) if e.code() == ErrorCode::NotFound => Repository::init(project).with_context(|| {
-            format!(
-                "failed to initialize a Git repository at '{}'",
-                project.display()
-            )
-        }),
-        Err(e) => Err(e)
-            .with_context(|| format!("failed to open Git repository at '{}'", project.display())),
-    }
+    Ok(())
 }
 
 /// `None` for an unborn HEAD (fresh repo, no commits yet).
@@ -219,12 +333,27 @@ fn head_commit(repo: &Repository) -> Result<Option<Commit<'_>>> {
     }
 }
 
-/// `git add -A`: new and modified files (respecting `.gitignore`) plus
-/// deletions. Writes the index and returns its tree.
+/// `git add -A`: new and modified files (respecting `.gitignore` plus
+/// `DEFAULT_IGNORES`) and deletions. Nested git repositories (e.g. an addon
+/// cloned into `addons/foo/`) are skipped rather than failing the whole
+/// snapshot. Writes the index and returns its tree.
 fn stage_everything(repo: &Repository) -> Result<Oid> {
+    repo.add_ignore_rule(DEFAULT_IGNORES)
+        .context("failed to apply default ignore rules")?;
+    let workdir = repo
+        .workdir()
+        .context("the project's repository has no working folder")?
+        .to_path_buf();
     let mut index = repo.index().context("failed to open the Git index")?;
+    let mut skip_nested_repos = |path: &Path, _spec: &[u8]| -> i32 {
+        if workdir.join(path).join(".git").exists() {
+            1
+        } else {
+            0
+        }
+    };
     index
-        .add_all(["*"], IndexAddOption::DEFAULT, None)
+        .add_all(["*"], IndexAddOption::DEFAULT, Some(&mut skip_nested_repos))
         .context("failed to stage changed files")?;
     index
         .update_all(["*"], None)
@@ -233,6 +362,123 @@ fn stage_everything(repo: &Repository) -> Result<Oid> {
     index
         .write_tree()
         .context("failed to write the staged tree")
+}
+
+/// Returns a copy of `base` with the entry at `path` (split into
+/// components) replaced by `entry`, or removed when `entry` is `None`.
+/// Directories left empty by a removal are dropped, as git would.
+fn set_path(
+    repo: &Repository,
+    base: &Tree,
+    path: &[&str],
+    entry: Option<(Oid, i32)>,
+) -> Result<Oid> {
+    match set_path_in(repo, Some(base), path, entry)? {
+        Some(id) => Ok(id),
+        None => Ok(repo.treebuilder(None)?.write()?),
+    }
+}
+
+/// `None` when the resulting tree is empty.
+fn set_path_in(
+    repo: &Repository,
+    base: Option<&Tree>,
+    path: &[&str],
+    entry: Option<(Oid, i32)>,
+) -> Result<Option<Oid>> {
+    let (name, rest) = path.split_first().context("empty tree path")?;
+    let mut builder = repo.treebuilder(base)?;
+    let new_entry = if rest.is_empty() {
+        entry
+    } else {
+        let child = match base.and_then(|b| b.get_name(name)) {
+            Some(e) if e.kind() == Some(ObjectType::Tree) => Some(repo.find_tree(e.id())?),
+            _ => None,
+        };
+        set_path_in(repo, child.as_ref(), rest, entry)?.map(|id| (id, 0o040000))
+    };
+    match new_entry {
+        Some((id, mode)) => {
+            builder.insert(name, id, mode)?;
+        }
+        None => {
+            if builder.get(name)?.is_some() {
+                builder.remove(name)?;
+            }
+        }
+    }
+    if builder.len() == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(builder.write()?))
+    }
+}
+
+/// Paths in `tree` whose place on disk is taken by something the index
+/// doesn't know about — after the auto-save that can only be an ignored
+/// (or nested-repo) file that was never committed, so a checkout would
+/// destroy it for good. Also catches an uncommitted *file* sitting where
+/// the tree needs a directory.
+fn uncommitted_files_in_the_way(
+    repo: &Repository,
+    tree: &Tree,
+    index: &Index,
+) -> Result<Vec<String>> {
+    let workdir = repo
+        .workdir()
+        .context("the project's repository has no working folder")?;
+    let untracked_on_disk = |rel: &str| {
+        index.get_path(Path::new(rel), 0).is_none() && workdir.join(rel).symlink_metadata().is_ok()
+    };
+    let mut blocked = Vec::new();
+    tree.walk(TreeWalkMode::PreOrder, |root, entry| {
+        if entry.kind() == Some(ObjectType::Tree) {
+            return TreeWalkResult::Ok;
+        }
+        let Ok(name) = entry.name() else {
+            return TreeWalkResult::Ok;
+        };
+        let rel = format!("{root}{name}");
+        if untracked_on_disk(&rel) {
+            blocked.push(rel);
+            return TreeWalkResult::Ok;
+        }
+        // A never-committed file standing where a parent folder should be.
+        let mut prefix = String::new();
+        for part in root
+            .trim_end_matches('/')
+            .split('/')
+            .filter(|p| !p.is_empty())
+        {
+            prefix.push_str(part);
+            let is_file = workdir
+                .join(&prefix)
+                .symlink_metadata()
+                .map(|m| !m.is_dir())
+                .unwrap_or(false);
+            if is_file && index.get_path(Path::new(&prefix), 0).is_none() {
+                blocked.push(rel);
+                break;
+            }
+            prefix.push('/');
+        }
+        TreeWalkResult::Ok
+    })
+    .context("failed to inspect the snapshot's files")?;
+    Ok(blocked)
+}
+
+/// Whether `commit` changed anything besides `.ibproject/chat/` relative to
+/// its first parent.
+fn changes_outside_chat(repo: &Repository, commit: &Commit) -> Result<bool> {
+    let new_tree = commit.tree()?;
+    let old_tree = commit.parent(0)?.tree()?;
+    let diff = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None)?;
+    let chat_prefix = Path::new(CHAT_DIR[0]).join(CHAT_DIR[1]);
+    Ok(diff.deltas().any(|d| {
+        let path = d.new_file().path().or_else(|| d.old_file().path());
+        !path.is_some_and(|p| p.starts_with(&chat_prefix))
+    }))
 }
 
 fn commit_tree(
@@ -294,17 +540,19 @@ fn commit_title(commit: &Commit) -> String {
         .to_string()
 }
 
+fn is_snapshot(commit: &Commit) -> bool {
+    parse_trailers(commit.message().unwrap_or(""))
+        .iter()
+        .any(|(k, v)| k == TRAILER_SNAPSHOT && v == "1")
+}
+
 /// Parses a commit into a `Snapshot`, or `None` when it doesn't carry the
 /// snapshot trailer.
 fn to_snapshot(repo: &Repository, commit: &Commit) -> Result<Option<Snapshot>> {
-    let message = commit.message().unwrap_or("");
-    let trailers = parse_trailers(message);
-    if !trailers
-        .iter()
-        .any(|(k, v)| k == TRAILER_SNAPSHOT && v == "1")
-    {
+    if !is_snapshot(commit) {
         return Ok(None);
     }
+    let trailers = parse_trailers(commit.message().unwrap_or(""));
     Ok(Some(build_snapshot(repo, commit, &trailers)?))
 }
 
@@ -738,5 +986,205 @@ mod tests {
             .unwrap();
         assert_eq!(snap.title, "Line one InfinaBox-Turn: 99");
         assert_eq!(snap.turn, None);
+    }
+
+    // ---- Review regressions -------------------------------------------
+
+    fn user(text: &str, at: i64) -> crate::chat_store::ChatRecord {
+        crate::chat_store::ChatRecord::User {
+            text: text.into(),
+            at,
+        }
+    }
+
+    #[test]
+    fn going_back_never_rewinds_the_chat() {
+        use crate::chat_store::{append, create_thread, list_threads, load_thread};
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "player.gd", "var speed = 1\n");
+        create_snapshot(dir.path(), "Start", None).unwrap().unwrap();
+
+        let thread = create_thread(dir.path(), "Speed", "claude-code").unwrap();
+        append(dir.path(), &thread.id, &user("make it 2", 1)).unwrap();
+        write(dir.path(), "player.gd", "var speed = 2\n");
+        create_snapshot(dir.path(), "make it 2", Some((&thread.id, 1)))
+            .unwrap()
+            .unwrap();
+
+        // Talk more after the snapshot (uncommitted chat), then undo.
+        append(dir.path(), &thread.id, &user("undo that", 2)).unwrap();
+        undo_last(dir.path()).unwrap().unwrap();
+        assert_eq!(read(dir.path(), "player.gd"), "var speed = 1\n");
+        let (_, records) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(records, vec![user("make it 2", 1), user("undo that", 2)]);
+        assert_eq!(list_threads(dir.path()).unwrap().len(), 1);
+
+        // Redo, and an explicit restore to before the thread existed.
+        append(dir.path(), &thread.id, &user("redo", 3)).unwrap();
+        undo_last(dir.path()).unwrap().unwrap();
+        assert_eq!(read(dir.path(), "player.gd"), "var speed = 2\n");
+        let first = list_snapshots(dir.path(), 100).unwrap().pop().unwrap();
+        assert_eq!(first.title, "Start");
+        append(dir.path(), &thread.id, &user("back to start", 4)).unwrap();
+        restore_to(dir.path(), &first.id).unwrap();
+        assert_eq!(read(dir.path(), "player.gd"), "var speed = 1\n");
+        let (_, records) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(records.len(), 4);
+        assert_eq!(records[3], user("back to start", 4));
+
+        // The committed tree carries the chat too, so disk and HEAD agree.
+        assert_eq!(create_snapshot(dir.path(), "Nothing", None).unwrap(), None);
+    }
+
+    #[test]
+    fn undo_skips_chat_only_snapshots() {
+        use crate::chat_store::{append, create_thread};
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "a.txt", "1");
+        create_snapshot(dir.path(), "One", None).unwrap().unwrap();
+        write(dir.path(), "a.txt", "2");
+        create_snapshot(dir.path(), "Two", None).unwrap().unwrap();
+        let thread = create_thread(dir.path(), "Just talking", "claude-code").unwrap();
+        append(dir.path(), &thread.id, &user("hi", 1)).unwrap();
+        create_snapshot(dir.path(), "Chat only", Some((&thread.id, 1)))
+            .unwrap()
+            .unwrap();
+
+        let undo = undo_last(dir.path()).unwrap().unwrap();
+        assert_eq!(undo.title, "Went back to: One");
+        assert_eq!(read(dir.path(), "a.txt"), "1");
+        assert!(
+            dir.path()
+                .join(format!(".ibproject/chat/{}.jsonl", thread.id))
+                .exists()
+        );
+    }
+
+    #[test]
+    fn nested_git_repositories_are_skipped_not_fatal() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "main.gd", "extends Node\n");
+        // An addon cloned with git inside the project.
+        let addon = dir.path().join("addons/foo");
+        fs::create_dir_all(&addon).unwrap();
+        Repository::init(&addon).unwrap();
+        write(dir.path(), "addons/foo/plugin.gd", "extends EditorPlugin\n");
+
+        let snap = create_snapshot(dir.path(), "With addon", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(snap.files_changed, 1);
+        let repo = Repository::open(dir.path()).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(tree.get_name("main.gd").is_some());
+        assert!(tree.get_path(Path::new("addons/foo")).is_err());
+
+        write(dir.path(), "main.gd", "extends Node2D\n");
+        assert!(
+            create_snapshot(dir.path(), "Again", None)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn going_back_never_clobbers_an_ignored_local_file() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "config.cfg", "committed defaults\n");
+        write(dir.path(), "game.gd", "v1\n");
+        let v1 = create_snapshot(dir.path(), "v1", None).unwrap().unwrap();
+
+        fs::remove_file(dir.path().join("config.cfg")).unwrap();
+        write(dir.path(), ".gitignore", "config.cfg\n");
+        write(dir.path(), "game.gd", "v2\n");
+        create_snapshot(dir.path(), "v2 ignores config", None)
+            .unwrap()
+            .unwrap();
+
+        write(dir.path(), "config.cfg", "my local settings, never saved\n");
+        restore_to(dir.path(), &v1.id).unwrap();
+        assert_eq!(read(dir.path(), "game.gd"), "v1\n");
+        assert_eq!(
+            read(dir.path(), "config.cfg"),
+            "my local settings, never saved\n"
+        );
+
+        // It was never force-added, and the commit matches what's on disk.
+        let repo = Repository::open(dir.path()).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(tree.get_name("config.cfg").is_none());
+        assert!(
+            tree.get_name(".gitignore").is_none(),
+            "v1 had no .gitignore"
+        );
+    }
+
+    #[test]
+    fn a_project_inside_another_repository_is_refused() {
+        let outer = TempDir::new().unwrap();
+        Repository::init(outer.path()).unwrap();
+        let project = outer.path().join("games/my-game");
+        write(&project, "main.gd", "extends Node\n");
+
+        let err = create_snapshot(&project, "First", None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("inside another git repository"), "{err}");
+        assert!(!project.join(".git").exists(), "no nested repo was created");
+        assert!(list_snapshots(&project, 10).is_err());
+        assert!(undo_last(&project).is_err());
+    }
+
+    #[test]
+    fn refuses_to_act_mid_merge() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "a.txt", "1");
+        let v1 = create_snapshot(dir.path(), "One", None).unwrap().unwrap();
+        write(dir.path(), "a.txt", "2");
+        create_snapshot(dir.path(), "Two", None).unwrap().unwrap();
+
+        // What `git merge` leaves behind while a conflict is unresolved.
+        fs::write(dir.path().join(".git/MERGE_HEAD"), format!("{}\n", v1.id)).unwrap();
+        write(dir.path(), "a.txt", "conflicted");
+        assert_eq!(
+            Repository::open(dir.path()).unwrap().state(),
+            RepositoryState::Merge
+        );
+        let err = create_snapshot(dir.path(), "Three", None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("middle of another operation"), "{err}");
+        assert!(restore_to(dir.path(), &v1.id).is_err());
+        assert!(undo_last(dir.path()).is_err());
+        assert_eq!(
+            read(dir.path(), "a.txt"),
+            "conflicted",
+            "nothing was touched"
+        );
+        assert_eq!(commit_count(dir.path()), 2);
+    }
+
+    #[test]
+    fn default_ignores_apply_without_a_gitignore() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "project.godot", "[application]\n");
+        write(dir.path(), ".godot/editor/cache.cfg", "cache");
+        write(dir.path(), ".import/icon.png-abc.stex", "import");
+        write(dir.path(), ".env", "STRIPE_SECRET_KEY=sk_live_abc\n");
+        write(dir.path(), ".DS_Store", "junk");
+        write(dir.path(), ".ibproject/chat/t.jsonl.deadbeef.tmp", "temp");
+
+        let snap = create_snapshot(dir.path(), "First", None).unwrap().unwrap();
+        assert_eq!(snap.files_changed, 1);
+        let repo = Repository::open(dir.path()).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(tree.get_name("project.godot").is_some());
+        for ignored in [".godot", ".import", ".env", ".DS_Store", ".ibproject"] {
+            assert!(tree.get_name(ignored).is_none(), "{ignored} was committed");
+        }
+        assert!(
+            !dir.path().join(".gitignore").exists(),
+            "nothing written to disk"
+        );
     }
 }
