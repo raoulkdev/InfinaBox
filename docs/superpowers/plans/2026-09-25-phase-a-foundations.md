@@ -570,6 +570,12 @@ Pin the Godot version in a constant during this task: the latest stable 4.x rele
 
 ## Wave 2 (3 subagents in parallel)
 
+**Status (2026-09-25):** H and I built in parallel, reviewed and merged. G (agent and chat commands) waits for Task A. Notes from Wave 2:
+- Added a `game_status` command to the contract so the Play panel starts from the real state.
+- The bridge enforces a 3s total hello deadline and keeps separate connection budgets for unauthenticated and authenticated clients.
+- `godot::restart_if_running` blocks (it may re-import assets); callers run it on a background thread, as the snapshot commands do. Task G must do the same.
+- The MCP client's bridge response timeout is 330s, just above core's 300s import limit.
+
 ### Task G: Agent and chat commands
 
 **Owns:** `src-tauri/src/commands/agent.rs`.
