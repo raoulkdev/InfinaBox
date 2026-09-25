@@ -2173,6 +2173,7 @@ dependencies = [
  "chrono",
  "git2",
  "include_dir",
+ "libc",
  "notify",
  "regex",
  "reqwest",
