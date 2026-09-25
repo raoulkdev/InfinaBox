@@ -12,7 +12,7 @@ use commands::fs::{
 };
 use commands::overview::{current_branch, list_recent_commits};
 use commands::godot::{
-    game_recent_errors, game_run, game_stop, godot_install, godot_status, GodotState,
+    game_recent_errors, game_run, game_status, game_stop, godot_install, godot_status, GodotState,
 };
 use commands::project::{ask_question, refresh_project_graph};
 use commands::scaffold::project_create;
@@ -63,6 +63,7 @@ pub fn run() {
             godot_install,
             game_run,
             game_stop,
+            game_status,
             game_recent_errors,
             snapshot_list,
             snapshot_create,

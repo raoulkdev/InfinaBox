@@ -79,6 +79,14 @@ pub fn game_stop(app: AppHandle) -> Result<(), String> {
     stop_game(&app)
 }
 
+/// The game's current state, so a panel opening mid-run can start from the
+/// truth instead of assuming `Stopped` (the `game-state` event only reports
+/// changes).
+#[tauri::command]
+pub fn game_status(_app: AppHandle) -> Result<GameState, String> {
+    Err("not implemented yet: game_status".into())
+}
+
 #[tauri::command]
 pub fn game_recent_errors(_app: AppHandle, _limit: usize) -> Result<Vec<GameError>, String> {
     Err("not implemented yet: game_recent_errors".into())

@@ -284,6 +284,7 @@ No separate sidecar binary. The app executable itself runs the MCP server when s
 | `godot_install` | | `GodotStatus` (progress via `godot-install-progress`) | H |
 | `game_run` | `projectPath` | `()` | H |
 | `game_stop` | | `()` | H |
+| `game_status` | | `GameState` (added after Wave 1: lets a panel start from the real state) | H |
 | `game_recent_errors` | `limit` | `GameError[]` | H |
 | `snapshot_list` | `projectPath, limit` | `Snapshot[]` | I |
 | `snapshot_create` | `projectPath, title` | `Snapshot \| null` | I |

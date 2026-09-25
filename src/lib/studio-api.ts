@@ -4,6 +4,7 @@ import type {
   AgentEventPayload,
   GameError,
   GameOutputLine,
+  GameState,
   GameStatePayload,
   GodotStatus,
   InstallProgress,
@@ -50,6 +51,9 @@ export const godotInstall = () => invoke<GodotStatus>("godot_install");
 export const gameRun = (projectPath: string) => invoke<void>("game_run", { projectPath });
 
 export const gameStop = () => invoke<void>("game_stop");
+
+/** The game's current state (the `game-state` event only reports changes). */
+export const gameStatus = () => invoke<GameState>("game_status");
 
 export const gameRecentErrors = (limit: number) =>
   invoke<GameError[]>("game_recent_errors", { limit });
