@@ -2,9 +2,10 @@
 //! path. A binary only counts as installed when it really runs: the version
 //! shown is whatever its own `--version` printed.
 
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -17,6 +18,8 @@ pub const GODOT_PATH_ENV: &str = "INFINABOX_GODOT";
 
 /// `--version` is instant on a working binary; anything slower is broken.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(20);
+/// A version string is one short line; never buffer more than this.
+const VERSION_MAX_BYTES: u64 = 4096;
 
 pub fn status(app_data: &Path) -> GodotStatus {
     let user_path = std::env::var_os(GODOT_PATH_ENV).map(PathBuf::from);
@@ -58,6 +61,14 @@ pub fn status_with(app_data: &Path, user_path: Option<&Path>) -> GodotStatus {
 /// (e.g. `4.7.2.stable.official.ed1daf0bf`), or `None` if it didn't run,
 /// failed, or hung.
 pub fn read_version(godot: &Path) -> Option<String> {
+    read_version_within(godot, VERSION_TIMEOUT)
+}
+
+/// `read_version` with an explicit overall deadline. Everything is bounded:
+/// the wait for exit, the wait for output (a background process the binary
+/// left behind may hold stdout open forever), and the bytes read.
+fn read_version_within(godot: &Path, timeout: Duration) -> Option<String> {
+    let deadline = Instant::now() + timeout;
     let mut child = Command::new(godot)
         .arg("--version")
         .stdin(Stdio::null())
@@ -65,14 +76,21 @@ pub fn read_version(godot: &Path) -> Option<String> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    let mut stdout = child.stdout.take()?;
-    let reader = thread::spawn(move || {
-        let mut out = String::new();
-        let _ = stdout.read_to_string(&mut out);
-        out
+    let stdout = child.stdout.take()?;
+    let (tx, rx) = mpsc::channel();
+    // Sends the first non-empty line as soon as it arrives, or nothing at
+    // EOF. May outlive this call if something keeps the pipe open; it then
+    // ends when that pipe closes.
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout.take(VERSION_MAX_BYTES));
+        let first = reader
+            .lines()
+            .map_while(Result::ok)
+            .map(|l| l.trim().to_string())
+            .find(|l| !l.is_empty());
+        let _ = tx.send(first);
     });
 
-    let deadline = Instant::now() + VERSION_TIMEOUT;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -84,19 +102,19 @@ pub fn read_version(godot: &Path) -> Option<String> {
             }
         }
     };
-    let out = reader.join().ok()?;
     if !status.success() {
         return None;
     }
-    out.lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .map(str::to_string)
+    rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .ok()
+        .flatten()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use crate::godot::test_support::fake_binary;
     use crate::godot::test_support::real_godot;
 
     #[test]
@@ -128,6 +146,47 @@ mod tests {
         std::fs::write(&fake, "hello").unwrap();
         assert!(!status_with(app_data.path(), Some(&fake)).installed);
         assert_eq!(read_version(&fake), None);
+    }
+
+    /// A binary that prints its version but leaves a background process
+    /// holding stdout open used to block until that process exited.
+    #[cfg(unix)]
+    #[test]
+    fn a_background_process_holding_stdout_does_not_block_the_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = fake_binary(dir.path(), "godot", "sleep 10 &\necho 4.7.2.fake");
+        let started = Instant::now();
+        assert_eq!(read_version(&fake).as_deref(), Some("4.7.2.fake"));
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn silence_with_stdout_held_open_times_out_at_the_deadline() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = fake_binary(dir.path(), "godot", "sleep 10 &\nexit 0");
+        let started = Instant::now();
+        assert_eq!(read_version_within(&fake, Duration::from_secs(1)), None);
+        let took = started.elapsed();
+        assert!(took < Duration::from_secs(3), "{took:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_huge_unterminated_output_is_capped() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = fake_binary(
+            dir.path(),
+            "godot",
+            // `exit 0`: `tr` dies of SIGPIPE once we stop reading.
+            "head -c 5000000 /dev/zero | tr '\\0' a\nexit 0",
+        );
+        let version = read_version(&fake).unwrap();
+        assert_eq!(version.len() as u64, VERSION_MAX_BYTES);
     }
 
     #[test]

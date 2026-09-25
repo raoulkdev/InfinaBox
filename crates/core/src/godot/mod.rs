@@ -35,6 +35,17 @@ pub(crate) mod test_support {
         path
     }
 
+    /// Writes an executable `/bin/sh` script standing in for a misbehaving
+    /// Godot binary (for failure modes a real Godot won't produce on demand).
+    #[cfg(unix)]
+    pub fn fake_binary(dir: &Path, name: &str, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
     /// A throwaway copy of `tests/fixtures/godot/projects/<name>`: running
     /// Godot writes a `.godot/` cache into the project, and the committed
     /// fixtures must stay exactly as recorded.

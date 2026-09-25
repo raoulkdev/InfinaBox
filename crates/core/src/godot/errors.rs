@@ -42,17 +42,25 @@ fn warning_header() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^(?:USER )?(?:SCRIPT |SHADER )?WARNING: (.*)$").unwrap())
 }
 
-/// `at: <function> (<path>:<line>)`, trimmed. The path is greedy so
-/// `res://a:b.gd`-style colons stay in it; the line is the last `:<digits>`.
+/// `at: <function> (res://<path>:<line>)`, trimmed. Anchored on `(res://`
+/// so a path containing `(` (`res://Player (old).gd`) keeps its location;
+/// the line is the last `:<digits>`. Engine source locations
+/// (`core/io/resource_loader.cpp`) aren't useful to the user and don't match.
 fn at_line() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^at: .*\((.+):(\d+)\)$").unwrap())
+    RE.get_or_init(|| Regex::new(r"^at: .*?\((res://.+):(\d+)\)$").unwrap())
 }
 
-/// `[n] <function> (<path>:<line>)`, trimmed.
+/// `[n] <function> (res://<path>:<line>)`, trimmed; same anchoring.
 fn backtrace_frame() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^\[\d+\] .*\((.+):(\d+)\)$").unwrap())
+    RE.get_or_init(|| Regex::new(r"^\[\d+\] .*?\((res://.+):(\d+)\)$").unwrap())
+}
+
+/// Any backtrace frame line, whatever its location.
+fn any_frame() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^\[\d+\] ").unwrap())
 }
 
 fn is_continuation(text: &str) -> bool {
@@ -60,17 +68,13 @@ fn is_continuation(text: &str) -> bool {
         return false;
     }
     let t = text.trim();
-    t.starts_with("at:") || t.starts_with("GDScript backtrace") || backtrace_frame().is_match(t)
+    t.starts_with("at:") || t.starts_with("GDScript backtrace") || any_frame().is_match(t)
 }
 
-/// A user location, if `path` is inside the project (`res://`). Engine
-/// source paths (`core/io/resource_loader.cpp`) aren't useful to the user.
+/// The user's `res://` location in an `at:` or frame line, if it has one.
 fn user_location(re: &Regex, text: &str) -> Option<(String, u32)> {
     let caps = re.captures(text.trim())?;
     let path = caps.get(1)?.as_str();
-    if !path.starts_with("res://") {
-        return None;
-    }
     let line = caps.get(2)?.as_str().parse().ok()?;
     Some((path.to_string(), line))
 }
@@ -327,6 +331,28 @@ mod tests {
                 raw: fixture("missing_resource.stderr.txt").trim_end().into(),
             }]
         );
+    }
+
+    /// The recorded blocks with the script renamed to a path containing
+    /// parentheses, which Godot prints verbatim inside its own `(...)`.
+    #[test]
+    fn a_res_path_containing_parentheses_keeps_its_location() {
+        for (scenario, line) in [("runtime_error", 7), ("missing_resource", 4)] {
+            let stderr = fixture(&format!("{scenario}.stderr.txt"))
+                .replace("res://main.gd", "res://Player (old).gd");
+            let mut parser = ErrorParser::new();
+            let mut errors = Vec::new();
+            for l in lines(OutputStream::Stderr, &stderr) {
+                errors.extend(parser.push(&l));
+            }
+            errors.extend(parser.finish());
+            assert_eq!(errors.len(), 1, "{scenario}");
+            assert_eq!(
+                (errors[0].file.as_deref(), errors[0].line),
+                (Some("res://Player (old).gd"), Some(line)),
+                "{scenario}"
+            );
+        }
     }
 
     #[test]
