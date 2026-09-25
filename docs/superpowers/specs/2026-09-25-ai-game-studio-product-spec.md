@@ -1,6 +1,6 @@
 # InfinaBox product spec: the AI game studio
 
-**Status:** product direction, approved at the decision level, pending review of this document
+**Status:** product direction, approved at the decision level (including the follow-up decisions in §2), pending review of this document
 **Date:** 2026-09-25
 **Supersedes:**
 - The product positioning in `CLAUDE.md` ("a workspace cockpit around the user's own terminal-based coding agent … explicitly not a chat-panel product").
@@ -27,6 +27,12 @@ The AI is **the user's own** (their Claude/ChatGPT subscription or API key, or a
 | Engine | Godot (4.x) only | Deep integration instead of lowest-common-denominator; InfinaBox manages the Godot install |
 | Scope | 2D **and** 3D | Templates, previews, and asset pipeline must handle both; 3D gets sequenced carefully (see §12) |
 | Chat panel | Yes: it is the primary interface | The terminal moves to Advanced mode; it is kept, not deleted |
+| Chat history | Committed to the project's repo | Conversations are part of the project record; secrets are redacted before commit (§9) |
+| GitHub backup | Later, not in the first phases | History is local git only until Phase D or after |
+| Godot addon | Installed automatically | Every InfinaBox project gets the addon; removable, but on by default (§10.3) |
+| Generation providers | Cloudflare Workers AI (images), Fish Audio (voice) | BYO keys via the connect flow; see §7.3 for what each covers |
+| InfinaBox pricing | Subscription | Pays for the app, never for AI usage (§15) |
+| Existing projects | None need migration | No legacy `.ibproject/` import path is built |
 
 ## 3. The problem
 
@@ -131,7 +137,10 @@ Replaces the current 13 folder-per-discipline sidebar sections with **typed, lin
 
 ### 7.3 Assets
 - **Browse**: built-in search across free, clearly-licensed libraries (e.g. Kenney, Quaternius, Poly Haven, OpenGameArt): 2D sprites, tilesets, 3D models (glTF), textures, SFX, music.
-- **Generate (bring your own)**: optional image/audio generation through the user's own provider keys (same connect flow as §8). Generation prompts automatically include the Style Guide card.
+- **Generate (bring your own)**: optional generation through the user's own provider accounts, connected with the same guided flow as §8 and stored in the OS keychain. Generation prompts automatically include the Style Guide card.
+  - **Images: Cloudflare Workers AI.** The user connects their Cloudflare account (account ID + API token). Used for sprites, concept art, textures, UI elements, and store/capsule art drafts. Output goes through a post-processing step (background removal, resizing, palette snapping for pixel art) before import. Model choice is configurable from what Workers AI offers at the time.
+  - **Voice: Fish Audio.** The user connects a Fish Audio API key. Fish Audio is text-to-speech and voice, so it covers character voices, dialogue lines, narration, and announcer barks; each Character card can hold a chosen voice so lines stay consistent.
+  - **Sound effects and music are not covered by either provider.** They come from the free libraries above in v1. A dedicated SFX/music generation provider is an open question (§18).
 - **Preview**: images, sprite sheets (with animation playback), tilesets, audio (waveform + playback), 3D models (orbit viewer).
 - **Import**: one click imports into the Godot project in the right folder with correct import settings (pixel-art filtering, etc.) and creates/links an Asset card.
 - **License tracking**: every asset records its source and license; a generated credits screen and a "license check" before launch.
@@ -149,7 +158,8 @@ Templates are the biggest quality lever for AI output: the agent extends known-g
 - Every approved AI change and every manual save point becomes a **snapshot** with a plain title and the chat turn that produced it.
 - Visual timeline with screenshots of the game at each point.
 - "Go back to before X" restores safely (implemented as new commits, never destructive rewrites).
-- Git is the storage underneath and is fully visible in Advanced mode. Optional GitHub backup for users who want it.
+- Git is the storage underneath and is fully visible in Advanced mode.
+- GitHub (remote) backup is deliberately **later**, not part of Phases A–C. Until then, history lives in the local repo only, and the UI should say so plainly.
 
 ### 7.6 Playtest
 - **Share a build**: one-click web export to a private itch.io page (via `butler`), or a downloadable desktop build.
@@ -231,12 +241,13 @@ my-game/
     graphs/                # *.graph.json flows (existing format)
     playtests/
     launch/
-    chat/                  # conversation threads (JSONL), user-deletable
+    chat/                  # conversation threads (JSONL), committed with the project
   AGENTS.md / CLAUDE.md    # generated agent instructions pointing at the Bible + MCP tools
 ```
 
-- Everything is plain text and committed to the project's git repo (except `chat/`, which is user-configurable).
-- Migration: existing `.ibproject/docs`, `business`, `marketing`, `community`, `release` folders are imported as untyped Bible cards; nothing is deleted.
+- Everything is plain text and committed to the project's git repo, **including `chat/`**. Conversations are part of the project's record: a snapshot links to the chat turn that produced it, and the agent can read past decisions.
+- Because chat is committed, InfinaBox **redacts secrets before writing chat files** (API keys, tokens, anything matching known credential formats) and warns before the first push to any remote. Users can still delete a thread; the deletion is itself a commit.
+- No migration path: there are no existing user projects in the old `.ibproject/docs|business|marketing|community|release` layout, so new projects start directly in this format.
 
 ## 10. Godot integration
 
@@ -252,7 +263,7 @@ my-game/
 - Launch via the Godot binary with the project path; capture stdout/stderr and structured errors.
 - **Phase 1:** separate managed game window, positioned beside InfinaBox.
 - **Later:** investigate true embedding (window reparenting per-OS, or a web-export preview for fast iteration). Treat as a research item; do not block the core loop on it.
-- A small InfinaBox **Godot addon** (auto-installed into the project, removable) provides a debug channel: screenshots, scene tree dumps, and live-tuning values from the running game.
+- A small InfinaBox **Godot addon** is **installed automatically** into every InfinaBox project (under `addons/infinabox/`, enabled in `project.godot`). It provides a debug channel: screenshots, scene tree dumps, and live-tuning values from the running game. It must be inert in exported release builds (debug-only), versioned with InfinaBox, and removable from Advanced settings.
 
 ### 10.4 Headless operations
 - `--headless` runs for import, validation, smoke tests, and exports.
@@ -292,7 +303,7 @@ Both are in scope, sequenced by risk:
 | `crates/core` git indexer + project graph + `ask.rs` | Snapshot timeline and grounded Q&A tool exposed via the MCP server |
 | `crates/core/src/mcp_client.rs` spike | Superseded by a real MCP server crate |
 | `ResizablePanelGroup`, motion conventions, `src/lib/*` | Unchanged, used everywhere |
-| Discipline `*Section.tsx` files + `NotBuiltYetSection` | Retired in favor of Bible views; contents migrated |
+| Discipline `*Section.tsx` files + `NotBuiltYetSection` | Retired in favor of Bible views (no data migration needed) |
 
 ## 14. Roadmap
 
@@ -310,7 +321,7 @@ Each phase has an exit criterion that must be demonstrated with real users, not 
 - Onboarding interview → starter Game Bible.
 - 3 polished 2D templates.
 - Plan/approve UI, explanations, auto error-fix loop.
-- New 6-entry navigation; old sections migrated.
+- New 6-entry navigation; old discipline sections retired.
 - **Exit:** 5 of 8 novice testers reach a playable, personalized prototype in under 30 minutes unassisted.
 
 ### Phase C: Make the whole game
@@ -319,16 +330,34 @@ Each phase has an exit criterion that must be demonstrated with real users, not 
 - Producer journey + checklists.
 - 2 more 2D templates, first 2 3D templates.
 - API-key and local-model runtimes.
+- Cloudflare Workers AI image generation and Fish Audio voice generation.
 - **Exit:** a tester takes a prototype to a complete short game (start screen → gameplay → ending) inside InfinaBox.
 
 ### Phase D: Ship it
 - Playtest sharing (itch.io via `butler`), feedback → cards.
+- GitHub backup (the earliest point it is considered).
 - Release exports, itch.io publishing, Steam checklist + `steamcmd` upload.
 - Launch kit and devlog drafts.
-- Godot addon (screenshots, live tuning), headless smoke tests.
+- Godot addon's full feature set (screenshots, live tuning), headless smoke tests. (The addon itself is installed from Phase A so runtime errors can be captured.)
 - **Exit:** a tester publishes a game to itch.io without leaving InfinaBox.
 
-## 15. Success measures
+## 15. Business model
+
+InfinaBox is sold as a **subscription**. Because users bring their own AI, the subscription pays for the app and InfinaBox's own services, never for model usage. That has to be obvious on the pricing page: "Your AI costs are with your AI provider; InfinaBox never marks them up."
+
+What the subscription covers (to be refined):
+- The app and continuous updates, including Godot version upgrades handled for the user.
+- The maintained template library (§7.4) and the InfinaBox Godot addon.
+- Curated asset library search and license tracking.
+- Playtest/launch tooling (build sharing, publishing flows, launch kit).
+- Later, any InfinaBox-hosted services (e.g. hosted backup as an alternative to GitHub, playtest feedback hosting) if they are built.
+
+Principles:
+- **You keep your game if you stop paying.** Projects are standard Godot + git + plain text (§9). Cancelling must never lock a user out of their own files; at worst InfinaBox-specific features stop working.
+- **A free trial long enough to reach a playable prototype.** The 30-minute first-run (§6.2) is also the conversion moment.
+- Subscription requires account and licensing infrastructure InfinaBox doesn't have today (accounts, license checks, payments). That is new backend work outside the desktop app and is scheduled alongside Phase B so it's ready before public release.
+
+## 16. Success measures
 
 InfinaBox has no telemetry today; any measurement must be **opt-in**, and the product must work fully without it. Measured in user studies and opt-in reporting:
 
@@ -338,7 +367,7 @@ InfinaBox has no telemetry today; any measurement must be **opt-in**, and the pr
 - Undo rate on AI changes (a proxy for AI output quality).
 - Games published to itch.io/Steam.
 
-## 16. Risks and mitigations
+## 17. Risks and mitigations
 
 | Risk | Mitigation |
 |---|---|
@@ -348,23 +377,31 @@ InfinaBox has no telemetry today; any measurement must be **opt-in**, and the pr
 | Scope: "everything about game dev" is enormous | Phase exit criteria gate expansion; Bible views let disciplines exist without bespoke tools |
 | User's usage limits hit mid-task | Surface provider limit messages plainly, save state, resume cleanly; never lose work |
 | Embedding the Godot window is hard cross-platform | Phase 1 uses a managed separate window; embedding is a research item |
+| Committed chat history leaks secrets or private text | Redaction before write, warning before first push to a remote, deletable threads |
+| Subscription feels unfair on top of paying for AI | Clear "we never touch your AI bill" messaging, generous trial, no lock-in of project files |
 | Asset licensing mistakes | License recorded per asset, pre-launch license check, generated credits |
 | Competition from engine-native AI and web "game generators" | Differentiate on ownership (real Godot project), full lifecycle, and teaching |
 
-## 17. Non-goals (v1)
+## 18. Non-goals (v1)
 
-- Selling, hosting, or proxying AI access.
+- Selling, hosting, or proxying AI access (including image/voice generation: always the user's own Cloudflare / Fish Audio accounts).
 - Engines other than Godot.
 - Real-time multi-user collaboration.
 - Mobile/console export (desktop + web only in v1).
 - A replacement for the Godot editor: deep manual scene editing stays in Godot ("Open in Godot" is always one click away).
 - Live-ops analytics and crash telemetry for shipped games.
 
-## 18. Open questions
+## 19. Resolved decisions and remaining open questions
 
-1. **Chat history storage**: commit `.ibproject/chat/` to the repo by default, or keep it local-only?
-2. **GitHub backup**: offer in Phase A (cheap, protects work) or defer?
-3. **Godot addon**: acceptable to auto-install into user projects (removable), or opt-in only?
-4. **Asset generation providers**: which image/audio providers to support first under BYO keys?
-5. **Pricing for InfinaBox itself**: free/open source, one-time purchase, or subscription? Independent of BYO AI, but affects Launch-phase features.
-6. **Existing users/projects**: is the `.ibproject/` migration (§9) needed, or are there no external projects yet?
+Resolved (2026-09-25):
+1. Chat history is committed to the project's repo (§9).
+2. GitHub backup comes later, no earlier than Phase D (§7.5, §14).
+3. The InfinaBox Godot addon installs automatically (§10.3).
+4. Generation providers: Cloudflare Workers AI for images, Fish Audio for voice (§7.3).
+5. InfinaBox is priced as a subscription (§15).
+6. No existing user projects need migration (§9).
+
+Still open:
+1. **SFX and music generation**: Fish Audio covers voice only. Stay library-only for SFX/music, or add a provider later?
+2. **Subscription details**: tiers, trial length, price point, and whether a free tier exists.
+3. **Accounts and licensing backend**: build in-house or use a payments/licensing provider?
