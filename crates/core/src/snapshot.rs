@@ -471,14 +471,7 @@ fn uncommitted_files_in_the_way(
 /// Whether `commit` changed anything besides `.ibproject/chat/` relative to
 /// its first parent.
 fn changes_outside_chat(repo: &Repository, commit: &Commit) -> Result<bool> {
-    let new_tree = commit.tree()?;
-    let old_tree = commit.parent(0)?.tree()?;
-    let diff = repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None)?;
-    let chat_prefix = Path::new(CHAT_DIR[0]).join(CHAT_DIR[1]);
-    Ok(diff.deltas().any(|d| {
-        let path = d.new_file().path().or_else(|| d.old_file().path());
-        !path.is_some_and(|p| p.starts_with(&chat_prefix))
-    }))
+    Ok(files_changed(repo, commit)? > 0)
 }
 
 fn commit_tree(
@@ -598,6 +591,9 @@ fn parse_trailers(message: &str) -> Vec<(String, String)> {
 
 /// Files differing between the commit and its first parent (or an empty
 /// tree, for a root commit) — the same diff `git_indexer` uses, counted.
+/// Chat threads under `.ibproject/chat/` are committed but not counted:
+/// this number is shown to users as "N files changed" and means their
+/// game's files.
 fn files_changed(repo: &Repository, commit: &Commit) -> Result<usize> {
     let new_tree = commit.tree().context("failed to get commit tree")?;
     let old_tree = if commit.parent_count() > 0 {
@@ -613,7 +609,14 @@ fn files_changed(repo: &Repository, commit: &Commit) -> Result<usize> {
     let diff = repo
         .diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), None)
         .context("failed to compute tree-to-tree diff")?;
-    Ok(diff.deltas().len())
+    let chat_prefix = Path::new(CHAT_DIR[0]).join(CHAT_DIR[1]);
+    Ok(diff
+        .deltas()
+        .filter(|d| {
+            let path = d.new_file().path().or_else(|| d.old_file().path());
+            !path.is_some_and(|p| p.starts_with(&chat_prefix))
+        })
+        .count())
 }
 
 /// Titles and trailer values must stay on one line, or they'd break the
@@ -1037,6 +1040,35 @@ mod tests {
     }
 
     #[test]
+    fn files_changed_excludes_chat_but_chat_is_still_committed() {
+        use crate::chat_store::{append, create_thread};
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "player.gd", "var speed = 1\n");
+        let thread = create_thread(dir.path(), "Speed", "claude-code").unwrap();
+        append(dir.path(), &thread.id, &user("add a player", 1)).unwrap();
+        let first = create_snapshot(dir.path(), "Add player", Some((&thread.id, 1)))
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.files_changed, 1, "player.gd only, not the chat file");
+
+        append(dir.path(), &thread.id, &user("make it 2", 2)).unwrap();
+        write(dir.path(), "player.gd", "var speed = 2\n");
+        let second = create_snapshot(dir.path(), "make it 2", Some((&thread.id, 2)))
+            .unwrap()
+            .unwrap();
+        assert_eq!(second.files_changed, 1);
+        assert_eq!(list_snapshots(dir.path(), 10).unwrap()[0], second);
+
+        let repo = Repository::open(dir.path()).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        let chat_file = format!(".ibproject/chat/{}.jsonl", thread.id);
+        assert!(
+            tree.get_path(Path::new(&chat_file)).is_ok(),
+            "chat is committed"
+        );
+    }
+
+    #[test]
     fn undo_skips_chat_only_snapshots() {
         use crate::chat_store::{append, create_thread};
         let dir = TempDir::new().unwrap();
@@ -1046,9 +1078,10 @@ mod tests {
         create_snapshot(dir.path(), "Two", None).unwrap().unwrap();
         let thread = create_thread(dir.path(), "Just talking", "claude-code").unwrap();
         append(dir.path(), &thread.id, &user("hi", 1)).unwrap();
-        create_snapshot(dir.path(), "Chat only", Some((&thread.id, 1)))
+        let chat_only = create_snapshot(dir.path(), "Chat only", Some((&thread.id, 1)))
             .unwrap()
             .unwrap();
+        assert_eq!(chat_only.files_changed, 0);
 
         let undo = undo_last(dir.path()).unwrap().unwrap();
         assert_eq!(undo.title, "Went back to: One");
