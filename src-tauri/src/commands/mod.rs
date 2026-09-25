@@ -1,6 +1,11 @@
+pub mod agent;
+pub mod bridge;
 pub mod environment;
 pub mod fs;
+pub mod godot;
 pub mod overview;
 pub mod project;
+pub mod scaffold;
+pub mod snapshot;
 pub mod terminal;
 pub mod watcher;
