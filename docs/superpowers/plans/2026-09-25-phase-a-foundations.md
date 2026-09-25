@@ -579,6 +579,7 @@ Pin the Godot version in a constant during this task: the latest stable 4.x rele
     - Commit the chat file in the same snapshot: write the chat records *before* snapshotting.
     - Emit `agent-turn-finished` and `snapshots-changed`.
     - If the game is running, ask `GodotState` to restart it. This is the Phase A "watch the game relaunch" behavior.
+- [ ] **Always end the turn:** emit `agent-turn-finished` exactly once per `agent_send`, on every path: normal completion, `run_turn` returning `Err` (e.g. the CLI fails to start), cancel, or an `Error` event with no `TurnCompleted`. When the turn fails without the runtime reporting why, append and emit an `AgentEvent::Error` with the real error text first. The chat UI relies on this to leave its "working" state. Also save the user message and every event to the chat store, because the UI reloads the thread from disk after each turn.
 - [ ] `agent_cancel`, `agent_status`, and the `chat_*` commands are thin wrappers.
 - [ ] **Verify:** `cargo check`, `cargo test --workspace --no-default-features`. Report a manual run: one real turn from the UI, with the JSONL file contents and the created snapshot.
 
