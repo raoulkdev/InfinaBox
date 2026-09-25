@@ -17,9 +17,13 @@ pub const APP_NOT_RUNNING: &str = "InfinaBox app is not running";
 
 /// Connecting is loopback, so this only trips when something is badly wrong.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-/// Starting a game (which can first install the addon) is the slowest
-/// request; this bounds how long a hung app can stall the agent.
-const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Starting a game is the slowest request: the app may first install the
+/// addon and import new assets, and core allows an import up to 300s
+/// (`godot::validate` `IMPORT_TIMEOUT`). This sits just above that, so a
+/// slow first import isn't reported to the agent as a failure while the app
+/// goes on to start the game; it still bounds how long a hung app can stall
+/// the agent.
+const RESPONSE_TIMEOUT: Duration = Duration::from_secs(330);
 /// Largest reply line accepted from the app (recent output/errors are
 /// bounded by the app's ring buffers, far below this).
 const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
