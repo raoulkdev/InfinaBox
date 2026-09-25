@@ -5,7 +5,7 @@
 // game's state, every output line, and every parsed error. Failures from
 // the backend are shown with their real text rather than smoothed over.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Loader2, Play, RotateCw, Square } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -78,11 +78,16 @@ function mergeErrors(prev: ErrorEntry[], incoming: GameError[]): ErrorEntry[] {
 export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
   const [godot, setGodot] = useState<GodotLoad>({ status: "loading" });
   // There's no "current game state" query in the Phase A contract, only
-  // the `game-state` event — Studio mounts once per open project and stays
-  // mounted, so it's listening before anything can start a game.
+  // the `game-state` event, so this starts at "stopped" until the first
+  // event. Studio mounts once per open project and stays mounted, so in
+  // practice it's listening before anything starts a game; a run that
+  // somehow began earlier shows up at its next state change (and its
+  // errors through the `gameRecentErrors` seeding below).
   const [gameState, setGameState] = useState<GameState>("stopped");
-  const [runId, setRunId] = useState(0);
   const [errors, setErrors] = useState<ErrorEntry[]>([]);
+  // Set by any live `game-state`/`game-error` event; once set, the one-off
+  // `gameRecentErrors` seed is stale and must not overwrite live state.
+  const liveEventSeen = useRef(false);
   const [pending, setPending] = useState<"run" | "stop" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -100,35 +105,59 @@ export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
   }, [checkGodot]);
 
   useEffect(() => {
+    // Errors are batched once per animation frame, like GameOutputLog's
+    // lines: a game erroring every frame shouldn't re-render per event.
+    let pendingErrors: GameError[] = [];
+    let frame: number | null = null;
+    const cancelFrame = () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = null;
+    };
+
     const offState = onGameState(({ state }) => {
+      liveEventSeen.current = true;
       setGameState(state);
       // A fresh run (including an automatic restart after an AI change)
-      // starts with a clean slate: the last run's output and errors are
-      // about code that may no longer exist.
+      // starts with a clean slate: the last run's errors are about code
+      // that may no longer exist. GameOutputLog clears its own output on
+      // the same event.
       if (state === "starting") {
-        setRunId((id) => id + 1);
+        pendingErrors = [];
+        cancelFrame();
         setErrors([]);
         setActionError(null);
       }
     });
-    const offError = onGameError((error) => setErrors((prev) => mergeErrors(prev, [error])));
+    const offError = onGameError((error) => {
+      liveEventSeen.current = true;
+      pendingErrors.push(error);
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        const batch = pendingErrors;
+        pendingErrors = [];
+        setErrors((prev) => mergeErrors(prev, batch));
+      });
+    });
     return () => {
       offState();
       offError();
+      cancelFrame();
     };
   }, []);
 
   // Seed the list with errors the backend already captured (e.g. from a run
-  // the AI started before this panel opened). Only when nothing live has
-  // arrived yet — the backend's buffer would otherwise double-count errors
-  // this panel already received as events. Best-effort: if it fails, the
-  // list simply starts empty and live `game-error` events still arrive.
+  // that began before this panel mounted — see the game-state note above).
+  // Skipped once any live event has arrived: by then the backend's buffer
+  // may hold a previous run's errors, or double-count ones this panel
+  // already received. Best-effort: if it fails, the list simply starts
+  // empty and live `game-error` events still arrive.
   useEffect(() => {
     let cancelled = false;
     setErrors([]);
     gameRecentErrors(MAX_ERRORS)
       .then((recent) => {
-        if (!cancelled) setErrors((prev) => (prev.length === 0 ? mergeErrors([], recent) : prev));
+        if (!cancelled && !liveEventSeen.current) setErrors(mergeErrors([], recent));
       })
       .catch(() => {});
     return () => {
@@ -275,7 +304,7 @@ export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
             </p>
           )}
           <GameErrorList entries={errors} onAskAiToFix={onAskAiToFix} />
-          <GameOutputLog runId={runId} />
+          <GameOutputLog />
           {version && (
             <div className="shrink-0 border-t border-border px-3 py-1 text-[11px] text-muted-foreground">
               <Tooltip>

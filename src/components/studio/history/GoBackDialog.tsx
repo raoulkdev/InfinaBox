@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,6 +23,13 @@ interface GoBackDialogProps {
  * any unsaved work is saved first), and the copy says so plainly: the point
  * of confirming is to avoid surprise, not to warn of loss. */
 export function GoBackDialog({ snapshot, onCancel, onConfirm }: GoBackDialogProps) {
+  // Keep showing the last snapshot while the dialog animates closed, so the
+  // title doesn't flash to `Go back to ""?` once the parent clears it.
+  // (Adjusting state during render, React's "storing information from
+  // previous renders" pattern — no effect needed.)
+  const [shown, setShown] = useState<Snapshot | null>(snapshot);
+  if (snapshot !== null && snapshot !== shown) setShown(snapshot);
+
   return (
     <AlertDialog
       open={snapshot !== null}
@@ -31,7 +39,7 @@ export function GoBackDialog({ snapshot, onCancel, onConfirm }: GoBackDialogProp
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Go back to "{snapshot?.title}"?</AlertDialogTitle>
+          <AlertDialogTitle>Go back to "{shown?.title}"?</AlertDialogTitle>
           <AlertDialogDescription>
             Your game will be put back exactly the way it was at this point. Nothing is lost:
             everything after it stays in your history, and you can undo this afterwards.

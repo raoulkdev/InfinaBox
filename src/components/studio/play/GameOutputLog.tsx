@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { onGameOutput } from "@/lib/studio-api";
+import { onGameOutput, onGameState } from "@/lib/studio-api";
 import type { GameOutputLine } from "@/lib/studio-types";
 import { cn } from "@/lib/utils";
 import { classifyOutputLine, type OutputLineKind } from "./play-format";
@@ -14,11 +14,6 @@ interface LogLine extends GameOutputLine {
   kind: OutputLineKind;
 }
 
-interface GameOutputLogProps {
-  /** Changes whenever a new run starts — clears the previous run's output. */
-  runId: number;
-}
-
 const KIND_CLASS: Record<OutputLineKind, string> = {
   error: "text-destructive font-medium",
   "error-detail": "text-destructive/70",
@@ -26,7 +21,7 @@ const KIND_CLASS: Record<OutputLineKind, string> = {
   normal: "text-foreground/80",
 };
 
-export function GameOutputLog({ runId }: GameOutputLogProps) {
+export function GameOutputLog() {
   const [lines, setLines] = useState<LogLine[]>([]);
   const nextId = useRef(0);
   // Incoming lines are buffered and flushed at most once per animation
@@ -40,7 +35,22 @@ export function GameOutputLog({ runId }: GameOutputLogProps) {
   const stickToBottom = useRef(true);
 
   useEffect(() => {
-    const unsubscribe = onGameOutput((line) => {
+    const cancelFrame = () => {
+      if (frame.current !== null) cancelAnimationFrame(frame.current);
+      frame.current = null;
+    };
+    // A new run clears the last one's output. Done here, in the same
+    // subscription effect and in event order, rather than in a separate
+    // effect keyed on a run counter — that would run after the re-render
+    // and could wipe the new run's first lines along with the old ones.
+    const offState = onGameState(({ state }) => {
+      if (state !== "starting") return;
+      pending.current = [];
+      cancelFrame();
+      setLines([]);
+      stickToBottom.current = true;
+    });
+    const offOutput = onGameOutput((line) => {
       pending.current.push({ ...line, id: nextId.current++, kind: classifyOutputLine(line) });
       if (frame.current !== null) return;
       frame.current = requestAnimationFrame(() => {
@@ -54,17 +64,11 @@ export function GameOutputLog({ runId }: GameOutputLogProps) {
       });
     });
     return () => {
-      unsubscribe();
-      if (frame.current !== null) cancelAnimationFrame(frame.current);
-      frame.current = null;
+      offState();
+      offOutput();
+      cancelFrame();
     };
   }, []);
-
-  useEffect(() => {
-    pending.current = [];
-    setLines([]);
-    stickToBottom.current = true;
-  }, [runId]);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;

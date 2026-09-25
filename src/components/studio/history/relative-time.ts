@@ -14,8 +14,8 @@ function plural(n: number, unit: string): string {
 export function relativeTime(timestamp: number, now: number): string {
   const diff = Math.max(0, now - timestamp);
   if (diff < 45) return "just now";
-  if (diff < HOUR) return plural(Math.max(1, Math.round(diff / MINUTE)), "minute");
-  if (diff < DAY) return plural(Math.round(diff / HOUR), "hour");
+  if (diff < HOUR) return plural(Math.max(1, Math.floor(diff / MINUTE)), "minute");
+  if (diff < DAY) return plural(Math.floor(diff / HOUR), "hour");
   const days = Math.floor(diff / DAY);
   if (days === 1) return "yesterday";
   if (days < 7) return plural(days, "day");

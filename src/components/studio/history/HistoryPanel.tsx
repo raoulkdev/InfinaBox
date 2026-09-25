@@ -29,14 +29,15 @@ export interface HistoryPanelProps {
   projectPath: string;
 }
 
-/** How many snapshots to list. When a project has more, the panel says it's
- * showing only the latest ones rather than implying that's all of them. */
+/** How many snapshots to list. One extra is requested so the panel knows
+ * whether there are more, and says it's showing only the latest ones only
+ * when that's actually true. */
 const LIST_LIMIT = 100;
 
 type ListState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; snapshots: Snapshot[] };
+  | { status: "ready"; snapshots: Snapshot[]; hasMore: boolean };
 
 type Notice = { tone: "info" | "error"; text: string };
 
@@ -62,18 +63,14 @@ interface SnapshotRowProps {
 }
 
 function SnapshotRow({ snapshot, latest, now, disabled, onGoBack }: SnapshotRowProps) {
-  // `thread_id` is set only on snapshots an AI chat turn produced, so the
-  // icon tells "the AI did this" apart from a save point made any other way.
+  // `thread_id` is set only on snapshots an AI chat turn produced, so this
+  // tells "the AI did this" apart from a save point made any other way. Said
+  // in visible text; the icon is just decoration beside it.
   const byAi = snapshot.thread_id !== null;
   const Icon = byAi ? Sparkles : Save;
   return (
     <li className="group flex items-start gap-2 border-b border-border px-3 py-2 last:border-b-0 hover:bg-accent/50">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-        </TooltipTrigger>
-        <TooltipContent>{byAi ? "Made by your AI" : "Save point"}</TooltipContent>
-      </Tooltip>
+      <Icon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 truncate text-sm text-foreground/90">{snapshot.title}</span>
@@ -82,12 +79,16 @@ function SnapshotRow({ snapshot, latest, now, disabled, onGoBack }: SnapshotRowP
         <span className="text-xs text-muted-foreground">
           <Tooltip>
             <TooltipTrigger asChild>
-              <span>{relativeTime(snapshot.timestamp, now)}</span>
+              <span tabIndex={0} className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+                {relativeTime(snapshot.timestamp, now)}
+              </span>
             </TooltipTrigger>
             <TooltipContent>{absoluteTime(snapshot.timestamp)}</TooltipContent>
           </Tooltip>
           {" · "}
           {filesChangedLabel(snapshot.files_changed)}
+          {" · "}
+          {byAi ? "by your AI" : "save point"}
         </span>
       </div>
       <Button
@@ -95,7 +96,7 @@ function SnapshotRow({ snapshot, latest, now, disabled, onGoBack }: SnapshotRowP
         size="xs"
         variant="ghost"
         disabled={disabled}
-        className="shrink-0 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
+        className="shrink-0 opacity-60 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
         aria-label={`Go back to this point: ${snapshot.title}`}
         onClick={() => onGoBack(snapshot)}
       >
@@ -141,10 +142,14 @@ export function HistoryPanel({ projectPath }: HistoryPanelProps) {
 
   useEffect(() => {
     let cancelled = false;
-    snapshotList(projectPath, LIST_LIMIT)
+    snapshotList(projectPath, LIST_LIMIT + 1)
       .then((snapshots) => {
         if (cancelled) return;
-        setList({ status: "ready", snapshots });
+        setList({
+          status: "ready",
+          snapshots: snapshots.slice(0, LIST_LIMIT),
+          hasMore: snapshots.length > LIST_LIMIT,
+        });
         setNow(nowSeconds());
       })
       .catch((err) => {
@@ -165,19 +170,18 @@ export function HistoryPanel({ projectPath }: HistoryPanelProps) {
   const snapshots = list.status === "ready" ? list.snapshots : [];
 
   async function undoLast() {
-    const latestTitle = snapshots[0]?.title;
     setBusy("undo");
     setNotice(null);
     try {
       const result = await snapshotUndoLast(projectPath);
-      setNotice(
-        result === null
-          ? { tone: "info", text: "There's nothing to undo yet." }
-          : {
-              tone: "info",
-              text: latestTitle ? `Undid "${latestTitle}".` : "Undid the last change.",
-            },
-      );
+      // Deliberately generic: the list this panel last loaded may be stale
+      // (or the backend may auto-save unsaved work first), so naming the
+      // "latest" row here could name the wrong change. The refreshed list
+      // shows exactly what happened.
+      setNotice({
+        tone: "info",
+        text: result === null ? "There's nothing to undo yet." : "Undid the last change.",
+      });
     } catch (err) {
       setNotice({ tone: "error", text: `Couldn't undo: ${errorText(err)}` });
     } finally {
@@ -283,7 +287,7 @@ export function HistoryPanel({ projectPath }: HistoryPanelProps) {
             ))}
           </ul>
         )}
-        {list.status === "ready" && snapshots.length >= LIST_LIMIT && (
+        {list.status === "ready" && list.hasMore && (
           <p className="px-3 py-2 text-xs text-muted-foreground">
             Showing the latest {LIST_LIMIT} changes.
           </p>

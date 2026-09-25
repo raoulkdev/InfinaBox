@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import { AlertCircle, Download, Loader2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { fadeTransition } from "@/lib/motion";
+import { widthTransition } from "@/lib/motion";
 import { godotInstall, onGodotInstallProgress } from "@/lib/studio-api";
 import type { GodotStatus, InstallProgress } from "@/lib/studio-types";
 import { formatBytes } from "./play-format";
@@ -11,6 +11,25 @@ import { formatBytes } from "./play-format";
 interface GodotInstallCardProps {
   /** Called with the real status `godot_install` returns once it finishes. */
   onInstalled: (status: GodotStatus) => void;
+}
+
+/** `phase` is a free-form string in the contract. Known codes get plain
+ * labels; anything else is shown as the backend sent it rather than hidden. */
+const PHASE_LABELS: Record<string, string> = {
+  downloading: "Downloading Godot…",
+  download: "Downloading Godot…",
+  verifying: "Checking the download…",
+  verify: "Checking the download…",
+  extracting: "Unpacking…",
+  unpacking: "Unpacking…",
+  unzipping: "Unpacking…",
+  installing: "Setting up…",
+  done: "Finishing up…",
+  finished: "Finishing up…",
+};
+
+function phaseLabel(phase: string): string {
+  return PHASE_LABELS[phase.trim().toLowerCase()] ?? phase;
 }
 
 /** Shown while Godot isn't installed. The progress bar is driven only by
@@ -71,7 +90,7 @@ export function GodotInstallCard({ onInstalled }: GodotInstallCardProps) {
                 className="h-full rounded-full bg-primary"
                 initial={false}
                 animate={{ width: `${fraction * 100}%` }}
-                transition={fadeTransition}
+                transition={widthTransition}
               />
             ) : (
               <motion.div
@@ -85,7 +104,7 @@ export function GodotInstallCard({ onInstalled }: GodotInstallCardProps) {
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             <span className="flex min-w-0 items-center gap-1.5">
               <Loader2 className="size-3 shrink-0 animate-spin" />
-              <span className="truncate">{progress ? progress.phase : "Starting…"}</span>
+              <span className="truncate">{progress ? phaseLabel(progress.phase) : "Starting…"}</span>
             </span>
             {progress && (
               <span className="shrink-0 tabular-nums">
