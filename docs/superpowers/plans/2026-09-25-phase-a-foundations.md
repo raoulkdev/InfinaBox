@@ -252,7 +252,7 @@ pub fn ensure_addon(project: &Path) -> Result<bool>; // installs/updates addon; 
 The MCP server process (launched by the agent CLI) talks to the running InfinaBox app over **loopback TCP**, newline-delimited JSON.
 - The app listens on `127.0.0.1:<random port>` and generates a random 32-byte token per app launch.
 - It passes both to the MCP server process via the env vars `INFINABOX_BRIDGE_ADDR`, `INFINABOX_BRIDGE_TOKEN`, and `INFINABOX_PROJECT`.
-- The first message on every connection must be `{"hello": "<token>"}`. Otherwise the app closes the connection.
+- The first message on every connection must be `{"hello": "<token>", "project": "<project path>"}` (the `Hello` struct). Otherwise the app closes the connection. The project path tells the app which game to run.
 
 ```rust
 #[derive(Serialize, Deserialize)]
@@ -310,6 +310,8 @@ No separate sidecar binary. The app executable itself runs the MCP server when s
 ---
 
 ## Wave 0 (lead only)
+
+**Status (2026-09-25):** Task 0.1 done. Task 0.2: Godot fixtures recorded (4.7.2); Claude Code fixtures **pending a run of `node scripts/record-claude-fixtures.mjs` on a machine with a normal local `claude` install** (see `crates/core/tests/fixtures/README.md` for why they weren't recorded in the cloud session). Task A must not start until they're committed; every other Wave 1 task can.
 
 ### Task 0.1: Contracts, stubs, and dependencies
 
@@ -376,7 +378,7 @@ Pin the Godot version in a constant during this task: the latest stable 4.x rele
     - headless streaming flags; `--resume` when `resume_provider_session_id` is set
     - `--mcp-config` pointing to a temp JSON file built from `McpLaunch`, with the server named `infinabox`
     - the Director system prompt appended (see below)
-    - a tool allowlist: file read/edit/write/search tools plus `mcp__infinabox__*`
+    - limit the built-in tools with `--tools` (read/edit/write/search only; `--allowedTools` alone does **not** remove other tools, see `crates/core/tests/fixtures/README.md`), allow `mcp__infinabox__*`, and pass `--strict-mcp-config`
     - no shell tool in Phase A
   - Stdout is read line by line on the calling thread; stderr is captured for error classification.
   - Use a login-shell-equivalent PATH, the same concern `terminal.rs` solves with `-l`: resolve the user's login-shell PATH once (run `$SHELL -l -c 'echo $PATH'`) and cache it. GUI-launched apps on macOS don't inherit the shell PATH.
@@ -593,7 +595,7 @@ Pin the Godot version in a constant during this task: the latest stable 4.x rele
 - [ ] **`godot_install`:** runs `godot::install` on a background thread with the app data dir, emits progress, and returns the final status. `godot_status` is a thin wrapper.
 - [ ] **`bridge.rs`:**
   - `start(app)` binds `127.0.0.1:0`, generates a token (`rand`), and stores the address and token in `BridgeState`.
-  - Accepts connections on a background thread. It checks the `hello` token (constant-time compare), then serves `BridgeRequest`s by calling into `GodotState`. `RunGame` uses the project path from `INFINABOX_PROJECT` as sent by the MCP server; add it to the hello message if needed, reporting any contract change to the lead.
+  - Accepts connections on a background thread. It checks the `hello` token (constant-time compare), then serves `BridgeRequest`s by calling into `GodotState`. `RunGame` runs the project named in the connection's `Hello.project`.
   - Every connection handles one request at a time. Malformed input closes the connection.
 - [ ] **Verify:** `cargo check`, `cargo test --workspace --no-default-features`. Report a manual run: install Godot, run the scaffolded project, and see a deliberate error arrive as a `game-error` event. Then use the bridge from `infinabox-cli mcp-server` to run the game.
 
