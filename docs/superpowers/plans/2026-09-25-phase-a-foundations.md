@@ -354,6 +354,11 @@ Pin the Godot version in a constant during this task: the latest stable 4.x rele
 
 ## Wave 1 (7 subagents in parallel)
 
+**Status (2026-09-25):** B, C, D, E, F1, F2 built in parallel, reviewed (D had two review rounds for data safety), and merged. Task A waits for the Claude Code fixtures (see Wave 0 status). Decisions made during review:
+- Undo and "go back" never rewind the chat (`.ibproject/chat/`) or remove `.ibproject/.ibx`; everything else, including `.ibproject/context/`, is restored. `files_changed` excludes chat files, and `undo_last` skips chat-only snapshots.
+- A project inside another git repository is refused with a plain message rather than getting a nested repository.
+- The MCP server end-to-end test lives in `crates/cli/tests/mcp_server_e2e.rs`.
+
 ### Task A: Agent runtime for Claude Code CLI
 
 **Owns:** `crates/core/src/agent/**` except `types.rs`.
