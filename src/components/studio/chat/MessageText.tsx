@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { ExternalLink } from "./ExternalLink";
 
 // Renders the assistant's replies. The only markdown renderer already in the
 // bundle is MDXEditor, which is a full editor — far too heavy to mount once
@@ -12,7 +12,9 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 type Block =
   | { kind: "paragraph"; text: string }
   | { kind: "heading"; text: string }
-  | { kind: "list"; ordered: boolean; items: string[] }
+  /** `start` is the first item's number, so an ordered list split up by
+   * code blocks or paragraphs reads 1, 2, 3 — not 1, 1, 1. */
+  | { kind: "list"; ordered: boolean; start: number; items: string[] }
   | { kind: "code"; text: string };
 
 function parseBlocks(source: string): Block[] {
@@ -45,14 +47,14 @@ function parseBlocks(source: string): Block[] {
     }
 
     const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
-    const numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+    const numbered = /^\s*(\d+)[.)]\s+(.*)$/.exec(line);
     if (bullet || numbered) {
       flushParagraph();
       const ordered = !bullet;
-      const text = (bullet ?? numbered)![1];
+      const text = bullet ? bullet[1] : numbered![2];
       const last = blocks[blocks.length - 1];
       if (last?.kind === "list" && last.ordered === ordered) last.items.push(text);
-      else blocks.push({ kind: "list", ordered, items: [text] });
+      else blocks.push({ kind: "list", ordered, start: numbered ? Number(numbered[1]) : 1, items: [text] });
       continue;
     }
 
@@ -74,7 +76,13 @@ function parseBlocks(source: string): Block[] {
   return blocks;
 }
 
-const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)|(\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g;
+// Italics need a non-word, non-`*` character (or line start) before the
+// opening star, non-space characters just inside both stars, and no word
+// character right after the closing one — so globs like "*.gd files and
+// *.tscn" stay literal. Link text is capped and can't span lines, so a line
+// full of `[` can't make matching quadratic.
+const INLINE =
+  /(`[^`]+`)|(\*\*[^*]+\*\*)|((?<![\w*])\*(?:[^*\s]|[^*\s][^*]*[^*\s])\*(?![\w*]))|(\[[^\]\n]{1,500}\]\(https?:\/\/[^)\s]+\))/g;
 
 function renderInline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
@@ -98,15 +106,9 @@ function renderInline(text: string): ReactNode[] {
     } else {
       const link = /^\[([^\]]+)\]\((.+)\)$/.exec(token)!;
       out.push(
-        <button
-          key={key}
-          type="button"
-          onClick={() => void openUrl(link[2])}
-          className="text-foreground underline underline-offset-3 hover:text-foreground/80"
-          title={link[2]}
-        >
+        <ExternalLink key={key} url={link[2]}>
           {link[1]}
-        </button>,
+        </ExternalLink>,
       );
     }
     lastIndex = start + token.length;
@@ -143,7 +145,7 @@ export function MessageText({ text }: { text: string }) {
           case "list": {
             const List = block.ordered ? "ol" : "ul";
             return (
-              <List key={i} className={`flex flex-col gap-1 pl-5 ${block.ordered ? "list-decimal" : "list-disc"}`}>
+              <List key={i} start={block.ordered ? block.start : undefined} className={`flex flex-col gap-1 pl-5 ${block.ordered ? "list-decimal" : "list-disc"}`}>
                 {block.items.map((item, j) => (
                   <li key={j}>{renderInline(item)}</li>
                 ))}

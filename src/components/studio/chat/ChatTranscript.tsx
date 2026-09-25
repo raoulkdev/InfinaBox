@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { motion } from "motion/react";
 import {
   AlertCircle,
@@ -54,7 +54,10 @@ export function ChatTranscript({ items, turnInProgress }: { items: ChatItem[]; t
   );
 }
 
-function ChatItemView({ item }: { item: ChatItem }) {
+// Memoised: the reducer returns the same object for every item a new event
+// didn't touch, so while a turn streams only the changed row re-renders —
+// not every earlier reply's markdown on each event.
+const ChatItemView = memo(function ChatItemView({ item }: { item: ChatItem }) {
   switch (item.kind) {
     case "user":
       return (
@@ -75,7 +78,7 @@ function ChatItemView({ item }: { item: ChatItem }) {
     case "error":
       return <ErrorCard kind={item.errorKind} message={item.message} />;
   }
-}
+});
 
 function WorkRow({ item }: { item: Extract<ChatItem, { kind: "work" }> }) {
   const [open, setOpen] = useState(false);

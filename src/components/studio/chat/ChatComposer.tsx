@@ -37,8 +37,11 @@ export function ChatComposer({ value, onChange, onSend, onStop, busy, stopping, 
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     // `isComposing` keeps Enter working for IME users confirming a
-    // character instead of sending a half-typed message.
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    // character instead of sending a half-typed message. WKWebView (macOS)
+    // reports the IME's confirming Enter with `isComposing` already false,
+    // but still with the legacy keyCode 229, so check that too.
+    const imeEnter = e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229;
+    if (e.key === "Enter" && !e.shiftKey && !imeEnter) {
       e.preventDefault();
       if (canSend) onSend();
     }

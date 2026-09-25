@@ -194,10 +194,17 @@ export function applyRecord(view: ChatView, record: ChatRecord): ChatView {
   return record.kind === "user" ? applyUserMessage(view, record.text) : applyEvent(view, record.event);
 }
 
-/** Folds a whole saved thread. A saved thread never has a turn running
- * from the file's point of view (the caller knows better, if one is). */
-export function buildChatView(records: ChatRecord[]): ChatView {
-  return endTurn(records.reduce(applyRecord, emptyChatView));
+/** Folds a whole saved thread. The file alone can't say whether its last
+ * turn is still running, so the caller does (`running`): if it is, its
+ * in-flight steps stay "running" instead of being marked unfinished.
+ *
+ * `lastTurnError` is always cleared here — an error saved from an earlier
+ * session is history (its card stays in the transcript), not the current
+ * state of the AI connection, so it must not drive the status banner. */
+export function buildChatView(records: ChatRecord[], { running = false } = {}): ChatView {
+  const folded = records.reduce(applyRecord, emptyChatView);
+  const view = running ? { ...folded, turnInProgress: true } : endTurn(folded);
+  return { ...view, lastTurnError: null };
 }
 
 // --- Plain-language summaries for the collapsed "working" row ---

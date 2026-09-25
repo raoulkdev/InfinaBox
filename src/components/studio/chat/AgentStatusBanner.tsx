@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AlertCircle, Check, Clock, Copy, Download, KeyRound, RefreshCw } from "lucide-react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { fadeRise, fadeTransition } from "@/lib/motion";
 import { agentStatus } from "@/lib/studio-api";
 import type { RuntimeStatus } from "@/lib/studio-types";
 import type { TurnError } from "./chat-reducer";
+import { ExternalLink } from "./ExternalLink";
 
 // Anthropic's official installer commands and setup docs for Claude Code.
 // Shown verbatim for the user to run themselves — Phase A never installs
 // anything on their behalf (the guided install/sign-in flow is Phase B).
-const DOCS_URL = "https://docs.claude.com/en/docs/claude-code/setup";
+const DOCS_URL = "https://code.claude.com/docs/en/setup";
 const IS_WINDOWS = typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
 const INSTALL_COMMAND = IS_WINDOWS
   ? "irm https://claude.ai/install.ps1 | iex"
@@ -100,9 +100,10 @@ function renderContent(
     };
   }
 
-  const notInstalled =
-    (state.status === "ready" && !state.runtime.installed) || lastTurnError?.kind === "not_installed";
-  if (notInstalled) {
+  // Decided only by the latest real `agent_status` result. A turn's
+  // `not_installed` error just triggers a fresh check (see above), so once
+  // the user installs and presses "Check again", this goes away.
+  if (state.status === "ready" && !state.runtime.installed) {
     return {
       key: "not-installed",
       node: (
@@ -117,9 +118,9 @@ function renderContent(
             <CopyableCommand command={INSTALL_COMMAND} />
             <div className="flex items-center gap-2">
               {checkAgain}
-              <Button type="button" size="xs" variant="ghost" onClick={() => void openUrl(DOCS_URL)}>
+              <ExternalLink url={DOCS_URL} className="px-2 text-xs text-foreground underline-offset-3 hover:underline">
                 Installation help
-              </Button>
+              </ExternalLink>
             </div>
           </AlertDescription>
         </Alert>

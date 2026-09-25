@@ -121,8 +121,11 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
       try {
         const loaded = await chatLoadThread(projectPath, threadId);
         if (seq !== loadSeq.current) return;
-        const next = buildChatView(loaded.records);
-        setView(runningRef.current.has(threadId) ? { ...next, turnInProgress: true } : next);
+        const next = buildChatView(loaded.records, { running: runningRef.current.has(threadId) });
+        // A quiet resync right after a live turn keeps that turn's error for
+        // the status banner; the saved file alone never sets it (see
+        // `buildChatView`), so reopening an old failed thread shows no banner.
+        setView((v) => (quiet ? { ...next, lastTurnError: v.lastTurnError } : next));
       } catch (err) {
         if (seq !== loadSeq.current || quiet) return;
         setView(emptyChatView);
@@ -216,6 +219,10 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
       }
       busyRef.current = true;
       stickToBottom.current = true;
+      // Invalidate any in-flight quiet reload (from the previous turn's
+      // `agent-turn-finished`), which would otherwise land after this and
+      // replace the view without the message just sent.
+      loadSeq.current++;
       setView((v) => applyUserMessage(v, message));
       markRunning(threadId, true);
       try {
@@ -251,6 +258,15 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
     setStopping(true);
     try {
       await agentCancel(threadId);
+      // `agent-turn-finished` should follow a cancel, but don't rely on it:
+      // once the backend has confirmed the stop, the composer must never
+      // stay stuck on "Stop".
+      markRunning(threadId, false);
+      if (activeRef.current === threadId) {
+        busyRef.current = false;
+        setStopping(false);
+        setView((v) => endTurn(v));
+      }
     } catch (err) {
       setStopping(false);
       setView((v) => applyEvent(v, { type: "error", kind: "other", message: `Couldn't stop the AI: ${String(err)}` }));
@@ -308,6 +324,9 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
             const el = e.currentTarget;
             stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD;
           }}
+          role="log"
+          aria-live="polite"
+          aria-label="Conversation"
           className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
         >
           {loading ? (
