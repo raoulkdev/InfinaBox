@@ -636,9 +636,10 @@ pub fn stop_game(app: &AppHandle) -> Result<(), String> {
     manager(app).stop(&app_host(app))
 }
 
-// `async` on the sync commands below runs them off the main thread: they
-// spawn processes (`godot --version`, `--import`) and would otherwise
-// freeze the window.
+// Every command here is `async` (or `(async)` for the sync ones), so none
+// runs on the main thread: most spawn or kill processes (`godot --version`,
+// `--import`, the game), and even the state reads take a lock a stop can
+// briefly hold.
 
 #[tauri::command(async)]
 pub fn godot_status(app: AppHandle) -> Result<GodotStatus, String> {
@@ -681,12 +682,12 @@ pub fn game_stop(app: AppHandle) -> Result<(), String> {
 /// The game's current state, so a panel opening mid-run can start from the
 /// truth instead of assuming `Stopped` (the `game-state` event only reports
 /// changes).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn game_status(app: AppHandle) -> Result<GameState, String> {
     Ok(manager(&app).state())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn game_recent_errors(app: AppHandle, limit: usize) -> Result<Vec<GameError>, String> {
     Ok(manager(&app).recent_errors(limit))
 }
