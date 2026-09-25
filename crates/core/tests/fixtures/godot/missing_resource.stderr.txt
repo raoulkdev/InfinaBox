@@ -1,0 +1,4 @@
+ERROR: Resource file not found: res://art/does_not_exist.png (expected type: unknown)
+   at: _load (core/io/resource_loader.cpp:325)
+   GDScript backtrace (most recent call first):
+       [0] _ready (res://main.gd:4)
