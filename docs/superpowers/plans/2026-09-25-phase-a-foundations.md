@@ -313,7 +313,7 @@ No separate sidecar binary. The app executable itself runs the MCP server when s
 
 ## Wave 0 (lead only)
 
-**Status (2026-09-25):** Task 0.1 done. Task 0.2: Godot fixtures recorded (4.7.2); Claude Code fixtures **pending a run of `node scripts/record-claude-fixtures.mjs` on a machine with a normal local `claude` install** (see `crates/core/tests/fixtures/README.md` for why they weren't recorded in the cloud session). Task A must not start until they're committed; every other Wave 1 task can.
+**Status (2026-09-25):** Task 0.1 done. Task 0.2: Godot fixtures recorded (4.7.2); Claude Code fixtures recorded 2026-09-26 (CLI 2.1.283) with a clean, default configuration in the cloud container; see `crates/core/tests/fixtures/README.md` for exactly how, and re-record on a local install to confirm.
 
 ### Task 0.1: Contracts, stubs, and dependencies
 

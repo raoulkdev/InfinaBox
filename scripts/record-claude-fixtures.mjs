@@ -29,8 +29,35 @@ const replacements = [
   [userInfo().username, "<USER>"],
   ...(gitEmail ? [[gitEmail, "<EMAIL>"]] : []),
 ];
-const scrub = (text) =>
+const scrubText = (text) =>
   replacements.reduce((acc, [from, to]) => (from ? acc.split(from).join(to) : acc), text);
+
+// The init message lists everything installed on this machine (tools, slash
+// commands, skills, plugins, agents) plus local socket/memory paths. None of
+// that is needed by the parser and it differs per machine, so those fields
+// are emptied/removed, and rate-limit events are reduced to their status. Every other line is kept byte-for-byte (apart from
+// the text replacements above).
+const INIT_LIST_FIELDS = ["tools", "slash_commands", "terminal_slash_commands", "skills", "plugins", "agents", "capabilities"];
+const INIT_DROP_FIELDS = ["memory_paths", "messaging_socket_path"];
+function scrubLine(line) {
+  let msg;
+  try {
+    msg = JSON.parse(line);
+  } catch {
+    return line;
+  }
+  // Rate-limit events describe the account's plan; keep only whether the
+  // request was allowed.
+  if (msg?.type === "rate_limit_event" && msg.rate_limit_info) {
+    msg.rate_limit_info = { status: msg.rate_limit_info.status };
+    return JSON.stringify(msg);
+  }
+  if (msg?.type !== "system" || msg?.subtype !== "init") return line;
+  for (const f of INIT_LIST_FIELDS) if (Array.isArray(msg[f])) msg[f] = [];
+  for (const f of INIT_DROP_FIELDS) delete msg[f];
+  return JSON.stringify(msg);
+}
+const scrub = (text) => scrubText(text.split("\n").map(scrubLine).join("\n"));
 
 function claude(args) {
   const res = spawnSync("claude", args, { cwd: project, encoding: "utf8", timeout: 300_000 });

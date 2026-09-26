@@ -46,49 +46,44 @@ Things the parser must handle, all visible in these files:
   parented to window"), which is worth trying first when embedding the game
   window is researched.
 
-## `claude/` — to be recorded on a real local install
+## `claude/` — recorded
 
-Not recorded yet. These must come from a normal, locally installed and
-logged-in Claude Code CLI (the one InfinaBox users will have). On a machine
-with that, from the repo root:
+- **Version:** Claude Code `2.1.283` (see `version.txt`).
+- **Recorded:** 2026-09-26, with `node scripts/record-claude-fixtures.mjs`.
+- **How:** in the cloud container that built Phase A, but run as close to a
+  normal local install as possible: `env -i` with only `PATH`, a fresh empty
+  `HOME` (so no user config, plugins or settings), and the proxy/API variables
+  the container needs to reach the API. None of the session-specific variables
+  that the earlier dry run showed changing the output were set, and the
+  recordings contain none of those extra event types.
+- **Scrubbing (done by the script):** project path, home directory, username
+  and git email replaced with placeholders; the `init` message's machine
+  lists (`tools`, `slash_commands`, `skills`, `plugins`, `agents`,
+  `capabilities`, ...) emptied and local socket/memory paths removed;
+  `rate_limit_event` reduced to `{status}`. Everything else is byte-for-byte.
+- **Re-record on a real local install** (`node scripts/record-claude-fixtures.mjs`
+  on a Mac with `claude` logged in) whenever the CLI version changes or to
+  confirm these. If the output differs, the new recording wins; fix the
+  parser, not the fixture.
 
-```
-node scripts/record-claude-fixtures.mjs
-```
+| Scenario | Command (all with `--output-format stream-json --verbose`) | What it shows |
+|---|---|---|
+| `a_plain_text` | `-p "Reply with exactly: hello from the fixture"` | `system/init` → `assistant` (text) → `rate_limit_event` → `result` (success) |
+| `b_edit_file` | `-p "Append the line 'world' to notes.txt..." --allowedTools Read,Edit,Write` | Thinking blocks, a `Bash` attempt that is **denied** (`system/permission_denied`), then `Read` and `Edit` tool uses with `user` tool results, then text |
+| `c_resumed_turn` | `-p "..." --resume <a's session id>` | A resumed session |
+| `d_mcp_tool` | `-p "Call the echo tool..." --mcp-config mcp.json --allowedTools mcp__fixture__echo` | MCP tool named `mcp__fixture__echo`, preceded by a `ToolSearch` tool use |
+| `e_bad_resume` | `-p hi --resume 00000000-...` | Only a `result` with `is_error: true`, subtype `error_during_execution`; exit code 1; stderr `No conversation found with session ID: ...` |
 
-It records five scenarios (plain answer, file edit, resumed turn, MCP tool
-call via `scripts/fixtures/echo-mcp-server.mjs`, bad `--resume` id) plus
-`--version` and `--help`, scrubbing home path, username, git email, and the
-temp project path. Review the files, then commit them.
+Things the parser must handle, all visible in these files:
 
-**Why not recorded in the cloud session that wrote Wave 0:** the only
-`claude` available there was a cloud-hosted build running under that
-session's managed configuration. Its output included extra message types and
-partial-message stream events that environment variables were turning on,
-and it resumed the *host* session's id. That output doesn't represent what
-users' installs print, so it must not become the parser's source of truth.
-
-Observations from that dry run of the script (CLI 2.1.282), useful for Task
-A but **to be confirmed against the real recording**:
-
-- Headless streaming works as `claude -p "<prompt>" --output-format
-  stream-json --verbose`. Each line is one JSON object with a `type`.
-- A `system`/`init` message carries `session_id`. Assistant turns are
-  `assistant` messages whose `message.content` is a list of blocks (`text`,
-  `thinking`, `tool_use` with `name`/`input`). Tool results come back as
-  `user` messages. The turn ends with a `result` message carrying
-  `is_error` and `subtype` (`success`, `error_during_execution`).
-- MCP tools are named `mcp__<server>__<tool>` (e.g. `mcp__fixture__echo`).
-- A bad `--resume` id produces a single `result` with `is_error: true`,
-  subtype `error_during_execution`, exit code 1, and stderr
-  `No conversation found with session ID: <id>`.
-- **`--allowedTools` does not remove other tools**: in the file-edit
-  scenario the model tried `Bash` first and got a `permission_denied`. To
-  actually limit the built-in tool set, use `--tools "Read,Edit,Write,Glob,Grep"`.
-  `--strict-mcp-config` ignores the user's other MCP servers.
-  `--session-id <uuid>` lets InfinaBox choose the session id up front.
-  `--include-partial-messages` is opt-in; without it there should be no
-  `stream_event` lines.
-- Unknown message types appeared (`rate_limit_event`, `system` subtypes
-  such as `status`, `task_summary`, `post_turn_summary`); the parser must
-  ignore types it doesn't know.
+- Unknown message types and `system` subtypes (`rate_limit_event`,
+  `permission_denied`, `thinking_tokens`, ...) must be ignored, not errors.
+- An `assistant` message can contain `thinking` blocks, which are not user
+  text.
+- Tool results arrive as `user` messages whose content holds `tool_result`
+  blocks (with `tool_use_id` and optional `is_error`).
+- `--allowedTools` does **not** remove other tools (the model tried `Bash`
+  first in `b_edit_file`); limit built-in tools with `--tools`.
+- MCP tools may be deferred behind a `ToolSearch` call first.
+- The `result` message carries `usage` (`input_tokens`, `output_tokens`,
+  cache fields), `duration_ms`, `is_error`, `subtype`, and `result` text.
