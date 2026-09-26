@@ -203,6 +203,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
                 <Button
                   type="button"
                   size="sm"
+                  data-testid="new-project"
                   onClick={() => {
                     setOpenError(null);
                     setNewProjectOpen(true);
@@ -311,6 +312,10 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
                 return (
                   <div
                     key={name}
+                    data-testid={`cli-tool-${name}`}
+                    data-status={
+                      state.status === "loading" ? "loading" : state.installed ? "installed" : "missing"
+                    }
                     className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2"
                   >
                     <div className="flex items-center gap-2">
@@ -365,13 +370,17 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
                 Location
               </span>
               <div className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm text-foreground/90">
+                <span
+                  data-testid="new-project-location"
+                  className="min-w-0 flex-1 truncate rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm text-foreground/90"
+                >
                   {newProjectLocation ?? "No location chosen"}
                 </span>
                 <Button
                   type="button"
                   size="sm"
                   variant="secondary"
+                  data-testid="new-project-choose-location"
                   onClick={() => void handleChooseLocation()}
                 >
                   Choose…
@@ -382,6 +391,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
               <span className="text-xs font-medium tracking-wide text-muted-foreground">Name</span>
               <Input
                 autoFocus
+                data-testid="new-project-name"
                 value={newProjectName}
                 placeholder="My Game"
                 onChange={(e) => {
@@ -402,7 +412,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
               </p>
             )}
             {createProjectError && (
-              <Alert variant="destructive">
+              <Alert variant="destructive" data-testid="new-project-error">
                 <AlertCircle />
                 <AlertDescription>{createProjectError}</AlertDescription>
               </Alert>
@@ -414,6 +424,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
             </Button>
             <Button
               type="button"
+              data-testid="new-project-create"
               disabled={!newProjectLocation || !newProjectName.trim() || creatingProject}
               onClick={() => void handleCreateProject()}
             >

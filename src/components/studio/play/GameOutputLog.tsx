@@ -78,6 +78,7 @@ export function GameOutputLog() {
   return (
     <div
       ref={scrollRef}
+      data-testid="game-output"
       onScroll={(e) => {
         const el = e.currentTarget;
         stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;

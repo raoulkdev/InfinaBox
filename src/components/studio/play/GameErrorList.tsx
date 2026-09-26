@@ -32,6 +32,7 @@ function ErrorRow({ entry, onAskAiToFix }: { entry: ErrorEntry; onAskAiToFix: (m
 
   return (
     <motion.li
+      data-testid="game-error"
       layout="position"
       {...fadeRise}
       transition={fadeTransition}
@@ -54,6 +55,7 @@ function ErrorRow({ entry, onAskAiToFix }: { entry: ErrorEntry; onAskAiToFix: (m
       <Button
         type="button"
         size="xs"
+        data-testid="ask-ai-to-fix"
         variant={sent ? "ghost" : "outline"}
         className="shrink-0"
         disabled={sent}
