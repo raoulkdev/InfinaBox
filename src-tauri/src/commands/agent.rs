@@ -11,15 +11,31 @@
 //!
 //! The one promise the chat UI depends on: every successful `agent_send`
 //! ends with exactly one `agent-turn-finished`, whatever happens in between
-//! (the CLI failing to start, a cancel, a chat-file or snapshot error, even
-//! a panic in the runtime), and the transcript on disk ends with a
-//! `turn_completed` — so a reload after the turn never shows it running.
+//! (the CLI failing to start, a cancel, a chat-file or snapshot error), and
+//! the turn's events on disk include a `turn_completed` — so a reload after
+//! the turn never shows it running.
+//!
+//! Two limits on that promise:
+//! - A panic in the runtime is caught (and the turn still ended) only when
+//!   panics unwind: in debug and test builds. `src-tauri/Cargo.toml` asks
+//!   for `panic = "abort"` in release; while this crate is a workspace
+//!   member cargo ignores that profile (it warns "profiles for the non root
+//!   package will be ignored"), so release builds unwind today too — but if
+//!   the profile moves to the workspace root, a panic there takes the whole
+//!   app down instead. After such a crash and a relaunch the UI isn't stuck
+//!   anyway: ChatPanel's set of running threads starts empty, and the
+//!   transcript just ends without a `turn_completed`.
+//! - `turn_completed` isn't always the file's last event for the turn: a
+//!   chat-store failure noticed during the turn, or a snapshot that failed
+//!   after it, is reported as an `error` event after it (so both the live
+//!   view and a reload show it).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::Duration;
 
 use infinabox_core::agent::claude::ClaudeCodeRuntime;
 use infinabox_core::agent::claude_stream::STOPPED_MESSAGE;
@@ -49,6 +65,35 @@ const TITLE_MAX_CHARS: usize = 60;
 /// What the runtime says (in an `Error` event) when `--resume` names a
 /// conversation it doesn't have — see the `e_bad_resume` fixture.
 const BAD_RESUME_MARKER: &str = "No conversation found";
+
+/// How often a stop the runtime may have missed is sent again (see
+/// `resend_stop_until_started`).
+const STOP_RESEND_INTERVAL: Duration = Duration::from_millis(250);
+
+/// The InfinaBox MCP tool that (re)starts the game (`crates/mcp-server`),
+/// as the CLI names it. The Director prompt tells the agent to call it
+/// after editing, so a turn that did doesn't need a restart afterwards.
+const RUN_GAME_TOOL: &str = "mcp__infinabox__run_game";
+
+/// Tools that can't change the game's files. Every other tool (edits,
+/// `Bash`, helpers, other MCP servers' tools) is assumed to possibly
+/// change them. InfinaBox's own MCP tools (`mcp__infinabox__*`) are all
+/// in this group too: the only one that writes, `write_context_card`,
+/// writes design notes the running game doesn't load.
+const READ_ONLY_TOOLS: &[&str] = &[
+    "Read",
+    "Glob",
+    "Grep",
+    "LS",
+    "WebFetch",
+    "WebSearch",
+    "TodoWrite",
+    "ToolSearch",
+];
+
+fn may_change_game_files(tool: &str) -> bool {
+    !(tool.starts_with("mcp__infinabox__") || READ_ONLY_TOOLS.contains(&tool))
+}
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -126,8 +171,9 @@ pub(crate) trait TurnSink {
     /// One event, already appended to the chat store (or attempted).
     fn event(&self, thread_id: &str, event: &AgentEvent);
     /// The turn is over. Called exactly once per started turn, last.
-    /// `files_changed` is whether the agent reported editing anything.
-    fn finished(&self, thread_id: &str, snapshot: Option<&Snapshot>, files_changed: bool);
+    /// `restart_game` is whether a running game should be restarted onto
+    /// the turn's changes (see `TurnLog::restart_game`).
+    fn finished(&self, thread_id: &str, snapshot: Option<&Snapshot>, restart_game: bool);
 }
 
 /// A thread's claim on "the turn in progress". Dropping it (normally at the
@@ -205,10 +251,6 @@ pub(crate) fn cancel_turn(runner: &dyn TurnRunner, active: &ActiveTurns, thread_
     runner.cancel(thread_id);
 }
 
-/// Serializes this module's snapshots: two chats in the same project
-/// finishing together would otherwise race on the git index.
-static SNAPSHOT_LOCK: Mutex<()> = Mutex::new(());
-
 /// Everything recorded during one turn, and what it implies afterwards.
 struct TurnLog<'a> {
     project: &'a Path,
@@ -223,6 +265,18 @@ struct TurnLog<'a> {
     turn: Option<u32>,
     /// The first chat-store failure, reported once at the end of the turn.
     store_error: Option<String>,
+    /// How many events came before the one being recorded: orders tool
+    /// uses and results within the turn.
+    seq: usize,
+    /// Tool uses that may change game files and haven't reported back yet.
+    open_changes: HashSet<String>,
+    /// When the last possibly-file-changing tool was used or finished.
+    last_change: Option<usize>,
+    /// `run_game` uses that haven't reported back yet, and when each began.
+    open_runs: HashMap<String, usize>,
+    /// When the latest `run_game` that succeeded began, if it began after
+    /// every change before it had finished.
+    verified_run: Option<usize>,
 }
 
 impl<'a> TurnLog<'a> {
@@ -238,6 +292,54 @@ impl<'a> TurnLog<'a> {
             files_changed: false,
             turn: None,
             store_error: None,
+            seq: 0,
+            open_changes: HashSet::new(),
+            last_change: None,
+            open_runs: HashMap::new(),
+            verified_run: None,
+        }
+    }
+
+    /// Whether a running game should be restarted onto this turn's changes:
+    /// yes when files changed, unless the agent already ran the game itself
+    /// (a `run_game` that succeeded and began after the last tool that
+    /// could have changed files had finished). Restarting then would only
+    /// re-import and relaunch the same files, throwing away the game state
+    /// the agent just checked.
+    fn restart_game(&self) -> bool {
+        let already_ran = self
+            .verified_run
+            .is_some_and(|run| self.last_change.is_none_or(|change| change < run));
+        self.files_changed && !already_ran
+    }
+
+    /// Tracks tool uses/results for `restart_game`.
+    fn note_tool(&mut self, event: &AgentEvent) {
+        let at = self.seq;
+        match event {
+            AgentEvent::ToolUse { id, name, .. } if name == RUN_GAME_TOOL => {
+                self.open_runs.insert(id.clone(), at);
+            }
+            AgentEvent::ToolUse { id, name, .. } if may_change_game_files(name) => {
+                self.open_changes.insert(id.clone());
+                self.last_change = Some(at);
+            }
+            AgentEvent::ToolResult { id, ok, .. } => {
+                // A failed change may still have written something.
+                if self.open_changes.remove(id) {
+                    self.last_change = Some(at);
+                }
+                if let Some(began) = self.open_runs.remove(id) {
+                    // Nothing that might change files was still running,
+                    // and nothing had changed since it began.
+                    let saw_latest = self.open_changes.is_empty()
+                        && self.last_change.is_none_or(|change| change < began);
+                    if *ok && saw_latest {
+                        self.verified_run = Some(began);
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -253,7 +355,7 @@ impl<'a> TurnLog<'a> {
                 if let Err(e) = chat_store::set_provider_session(
                     self.project,
                     self.thread_id,
-                    provider_session_id,
+                    Some(provider_session_id),
                 ) {
                     self.note_store_error(e);
                 }
@@ -266,8 +368,10 @@ impl<'a> TurnLog<'a> {
                     self.saw_bad_resume = true;
                 }
             }
+            AgentEvent::ToolUse { .. } | AgentEvent::ToolResult { .. } => self.note_tool(&event),
             _ => {}
         }
+        self.seq += 1;
         let record = ChatRecord::Event {
             event,
             at: now_unix(),
@@ -347,10 +451,7 @@ fn drive(
         return;
     }
 
-    // An empty id is how a dead session is cleared (see below).
-    let resume = thread
-        .provider_session_id
-        .filter(|id| !id.trim().is_empty());
+    let resume = thread.provider_session_id;
     let resumed = resume.is_some();
     let req = TurnRequest {
         thread_id: thread_id.to_string(),
@@ -360,15 +461,26 @@ fn drive(
         mcp,
     };
 
-    let mut stop_forwarded = false;
-    let result = runner.run(req, &mut |event| {
-        // A stop pressed before the CLI was registered as running missed
-        // it; by the time the first event arrives it is, so pass it on.
-        if !stop_forwarded && slot.stop_requested.load(Ordering::SeqCst) {
-            stop_forwarded = true;
-            runner.cancel(thread_id);
-        }
-        log.record(event);
+    let started = AtomicBool::new(false);
+    let ended = RunEnded::default();
+    let result = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            resend_stop_until_started(runner, thread_id, &slot.stop_requested, &started, &ended)
+        });
+        // Wakes the watcher however `run` ends, a panic included (the
+        // scope waits for it before unwinding further).
+        let _ended = EndOnDrop(&ended);
+        let mut stop_forwarded = false;
+        runner.run(req, &mut |event| {
+            // Once the runtime emits anything, the turn is registered with
+            // it, so a stop it missed while starting up lands now.
+            if !stop_forwarded && slot.stop_requested.load(Ordering::SeqCst) {
+                stop_forwarded = true;
+                runner.cancel(thread_id);
+            }
+            started.store(true, Ordering::SeqCst);
+            log.record(event);
+        })
     });
     if let Err(e) = result {
         log.error(e);
@@ -378,9 +490,58 @@ fn drive(
     // no `SessionStarted`): forget it so the next turn starts fresh instead
     // of failing the same way forever.
     if resumed && log.saw_bad_resume && !log.saw_session {
-        if let Err(e) = chat_store::set_provider_session(project, thread_id, "") {
+        if let Err(e) = chat_store::set_provider_session(project, thread_id, None) {
             log.note_store_error(e);
         }
+    }
+}
+
+/// Set, and its waiter woken, once `runner.run` has returned or unwound.
+#[derive(Default)]
+struct RunEnded {
+    done: Mutex<bool>,
+    wake: Condvar,
+}
+
+struct EndOnDrop<'a>(&'a RunEnded);
+
+impl Drop for EndOnDrop<'_> {
+    fn drop(&mut self) {
+        *lock(&self.0.done) = true;
+        self.0.wake.notify_all();
+    }
+}
+
+/// A stop pressed while the runtime is still starting up (finding `claude`
+/// on the login shell's `PATH` can take seconds) can reach it before the
+/// turn is registered there, and be lost. So while a stop is requested and
+/// the runtime hasn't emitted anything yet, send it again every
+/// `STOP_RESEND_INTERVAL`. From the first event on the runtime has the
+/// turn, and `drive` forwards the stop once more itself, so this ends then
+/// (or when the run does).
+fn resend_stop_until_started(
+    runner: &dyn TurnRunner,
+    thread_id: &str,
+    stop_requested: &AtomicBool,
+    started: &AtomicBool,
+    ended: &RunEnded,
+) {
+    let mut done = lock(&ended.done);
+    while !*done && !started.load(Ordering::SeqCst) {
+        if stop_requested.load(Ordering::SeqCst) {
+            // Not under the lock: a cancel may take the runtime's locks.
+            drop(done);
+            runner.cancel(thread_id);
+            done = lock(&ended.done);
+            if *done {
+                break;
+            }
+        }
+        done = ended
+            .wake
+            .wait_timeout(done, STOP_RESEND_INTERVAL)
+            .unwrap_or_else(|e| e.into_inner())
+            .0;
     }
 }
 
@@ -450,11 +611,9 @@ pub(crate) fn run_turn_to_end(
         }
         let title = snapshot_title(message);
         let origin = log.turn.map(|n| (thread_id.as_str(), n));
-        let made = {
-            let _guard = lock(&SNAPSHOT_LOCK);
-            snapshot::create_snapshot(project, &title, origin)
-        };
-        match made {
+        // `create_snapshot` serializes itself with every other snapshot,
+        // restore and undo in the app.
+        match snapshot::create_snapshot(project, &title, origin) {
             Ok(snapshot) => snapshot,
             Err(e) => {
                 log.error(format!(
@@ -472,11 +631,11 @@ pub(crate) fn run_turn_to_end(
         None
     });
 
-    let files_changed = log.files_changed;
+    let restart_game = log.restart_game();
     // Free the thread before announcing the end, so a message sent in
     // reaction to `finished` isn't refused as "still working".
     drop(slot);
-    sink.finished(&thread_id, snapshot.as_ref(), files_changed);
+    sink.finished(&thread_id, snapshot.as_ref(), restart_game);
 }
 
 // ---------------------------------------------------------------------------
@@ -496,7 +655,7 @@ impl TurnSink for AppSink {
         );
     }
 
-    fn finished(&self, thread_id: &str, snapshot: Option<&Snapshot>, files_changed: bool) {
+    fn finished(&self, thread_id: &str, snapshot: Option<&Snapshot>, restart_game: bool) {
         let _ = self.0.emit(
             EVENT_TURN_FINISHED,
             TurnFinishedPayload {
@@ -507,7 +666,7 @@ impl TurnSink for AppSink {
         if snapshot.is_some() {
             let _ = self.0.emit(EVENT_SNAPSHOTS_CHANGED, ());
         }
-        if files_changed {
+        if restart_game {
             // Blocks (it may re-import assets), so on its own thread, with
             // none of this module's locks held. A failed restart shows up
             // through the game's own `game-state`/`game-error` events.
@@ -643,7 +802,8 @@ mod tests {
     struct Scripted {
         script: Box<Script>,
         requests: Mutex<Vec<TurnRequest>>,
-        cancels: Mutex<Vec<String>>,
+        /// Shared, so a script can watch the cancels arrive mid-turn.
+        cancels: Arc<Mutex<Vec<String>>>,
     }
 
     impl Scripted {
@@ -653,10 +813,20 @@ mod tests {
                 + Sync
                 + 'static,
         ) -> Self {
+            Self::with_cancels(Arc::default(), script)
+        }
+
+        fn with_cancels(
+            cancels: Arc<Mutex<Vec<String>>>,
+            script: impl Fn(&TurnRequest, &mut dyn FnMut(AgentEvent)) -> Result<(), String>
+                + Send
+                + Sync
+                + 'static,
+        ) -> Self {
             Self {
                 script: Box::new(script),
                 requests: Mutex::new(Vec::new()),
-                cancels: Mutex::new(Vec::new()),
+                cancels,
             }
         }
     }
@@ -678,7 +848,7 @@ mod tests {
     #[derive(Debug, PartialEq)]
     enum Out {
         Event(AgentEvent),
-        /// (snapshot title, thread trailer, turn trailer), files changed.
+        /// (snapshot title, thread trailer, turn trailer), restart the game.
         Finished(Option<(String, Option<String>, Option<u32>)>, bool),
     }
 
@@ -689,12 +859,12 @@ mod tests {
         fn event(&self, _thread_id: &str, event: &AgentEvent) {
             self.0.lock().unwrap().push(Out::Event(event.clone()));
         }
-        fn finished(&self, _thread_id: &str, snapshot: Option<&Snapshot>, files_changed: bool) {
+        fn finished(&self, _thread_id: &str, snapshot: Option<&Snapshot>, restart_game: bool) {
             let snap = snapshot.map(|s| (s.title.clone(), s.thread_id.clone(), s.turn));
             self.0
                 .lock()
                 .unwrap()
-                .push(Out::Finished(snap, files_changed));
+                .push(Out::Finished(snap, restart_game));
         }
     }
 
@@ -841,6 +1011,8 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(active.lock().unwrap().is_empty());
+        // No stop was asked for, so none was sent.
+        assert!(runner.cancels.lock().unwrap().is_empty());
 
         // Second turn: resumes the saved session, and with no file changes
         // makes no snapshot.
@@ -1047,21 +1219,147 @@ mod tests {
         let (dir, thread) = project_with_thread("late-stop");
         let active = ActiveTurns::default();
         let flags = active.clone();
-        let runner = Scripted::new(move |req, emit| {
+        let cancels = Arc::<Mutex<Vec<String>>>::default();
+        let seen = cancels.clone();
+        let runner = Scripted::with_cancels(cancels, move |req, emit| {
             // Stop pressed while the runtime was still starting up.
             lock(&flags)[&req.thread_id].store(true, Ordering::SeqCst);
             emit(AgentEvent::AssistantText {
                 text: "Sure".into(),
             });
+            // By the time the first event has been handled, it's been sent
+            // (the re-send watcher may have sent it as well).
+            assert!(!seen.lock().unwrap().is_empty());
             emit(other_error(STOPPED_MESSAGE));
             emit(completed(true));
             Ok(())
         });
         let sink = Recorder::default();
         send(&runner, &active, &dir, &thread, "hi", &sink);
-        assert_eq!(*runner.cancels.lock().unwrap(), vec![thread.clone()]);
+        let cancels = runner.cancels.lock().unwrap().clone();
+        assert!(!cancels.is_empty() && cancels.iter().all(|t| t == &thread));
         assert_eq!(sink.take().last(), Some(&Out::Finished(None, false)));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_stop_the_runtime_missed_is_resent_until_it_emits_something() {
+        let (dir, thread) = project_with_thread("resend-stop");
+        let active = ActiveTurns::default();
+        let flags = active.clone();
+        let cancels = Arc::<Mutex<Vec<String>>>::default();
+        let seen = cancels.clone();
+        let runner = Scripted::with_cancels(cancels, move |req, emit| {
+            // Stop pressed while the runtime is still finding `claude`, and
+            // it stays silent for a while: the stop keeps being re-sent.
+            lock(&flags)[&req.thread_id].store(true, Ordering::SeqCst);
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while seen.lock().unwrap().len() < 3 {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the stop was sent only {} time(s)",
+                    seen.lock().unwrap().len()
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            emit(other_error(STOPPED_MESSAGE));
+            emit(completed(true));
+            Ok(())
+        });
+        let sink = Recorder::default();
+        send(&runner, &active, &dir, &thread, "hi", &sink);
+        let cancels = runner.cancels.lock().unwrap().clone();
+        assert!(cancels.len() >= 3, "{cancels:?}");
+        assert!(cancels.iter().all(|t| t == &thread));
+        assert_eq!(
+            sink.take(),
+            vec![
+                Out::Event(other_error(STOPPED_MESSAGE)),
+                Out::Event(completed(true)),
+                Out::Finished(None, false),
+            ]
+        );
+        // The watcher ended with the turn: nothing more is sent.
+        std::thread::sleep(STOP_RESEND_INTERVAL * 2);
+        assert_eq!(runner.cancels.lock().unwrap().len(), cancels.len());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A tool use and its successful result.
+    fn tool(id: &str, name: &str) -> [AgentEvent; 2] {
+        [
+            AgentEvent::ToolUse {
+                id: id.into(),
+                name: name.into(),
+                summary: name.into(),
+            },
+            AgentEvent::ToolResult {
+                id: id.into(),
+                ok: true,
+                summary: "Done".into(),
+            },
+        ]
+    }
+
+    /// Runs one editing turn made of `tools`, then `FilesChanged` and
+    /// `TurnCompleted`; returns whether the game would be restarted.
+    fn restart_after(tools: Vec<AgentEvent>) -> bool {
+        let (dir, thread) = project_with_thread("restart");
+        let runner = Scripted::new(move |req, emit| {
+            fs::write(req.project_path.join("player.gd"), "extends Node2D # v2\n").unwrap();
+            for event in &tools {
+                emit(event.clone());
+            }
+            emit(AgentEvent::FilesChanged {
+                paths: vec!["player.gd".into()],
+            });
+            emit(completed(false));
+            Ok(())
+        });
+        let sink = Recorder::default();
+        send(&runner, &ActiveTurns::default(), &dir, &thread, "Edit", &sink);
+        let out = sink.take();
+        fs::remove_dir_all(&dir).unwrap();
+        match out.last() {
+            Some(Out::Finished(Some(_), restart)) => *restart,
+            other => panic!("expected a snapshotted finish, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_game_is_not_restarted_again_when_the_agent_ran_it_after_its_last_edit() {
+        // The Director flow: edit, run the game, check it, note it down.
+        let flow = [
+            tool("t1", "Edit"),
+            tool("t2", RUN_GAME_TOOL),
+            tool("t3", "mcp__infinabox__get_game_errors"),
+            tool("t4", "Read"),
+            tool("t5", "mcp__infinabox__write_context_card"),
+        ]
+        .concat();
+        assert!(!restart_after(flow));
+    }
+
+    #[test]
+    fn the_game_is_restarted_when_the_agent_did_not_run_it_after_its_last_edit() {
+        // Never ran it.
+        assert!(restart_after(tool("t1", "Edit").to_vec()));
+        // Ran it, then changed something again (by editing, or any tool
+        // that might write files, like a shell command).
+        for later in ["Write", "Bash", "mcp__other__tool"] {
+            let flow = [tool("t1", "Edit"), tool("t2", RUN_GAME_TOOL), tool("t3", later)].concat();
+            assert!(restart_after(flow), "{later}");
+        }
+        // The run failed.
+        let mut flow = [tool("t1", "Edit"), tool("t2", RUN_GAME_TOOL)].concat();
+        if let AgentEvent::ToolResult { ok, .. } = &mut flow[3] {
+            *ok = false;
+        }
+        assert!(restart_after(flow));
+        // The run began while an edit was still going.
+        let [edit_use, edit_result] = tool("t1", "Edit");
+        let [run_use, run_result] = tool("t2", RUN_GAME_TOOL);
+        assert!(restart_after(vec![edit_use, run_use, edit_result, run_result]));
     }
 
     #[test]
@@ -1121,8 +1419,12 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let (dir, thread) = project_with_thread("bad-resume");
-        chat_store::set_provider_session(&dir, &thread, "00000000-0000-0000-0000-000000000000")
-            .unwrap();
+        chat_store::set_provider_session(
+            &dir,
+            &thread,
+            Some("00000000-0000-0000-0000-000000000000"),
+        )
+        .unwrap();
 
         let fixtures =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/core/tests/fixtures/claude");
@@ -1158,10 +1460,7 @@ mod tests {
             "{out:?}"
         );
         assert_eq!(out[2..], [Out::Finished(None, false)]);
-        assert_eq!(
-            load(&dir, &thread).0.provider_session_id.as_deref(),
-            Some("")
-        );
+        assert_eq!(load(&dir, &thread).0.provider_session_id, None);
 
         // The next turn doesn't try to resume it.
         let runner = Scripted::new(|_, emit| {

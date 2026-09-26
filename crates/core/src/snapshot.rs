@@ -21,8 +21,15 @@
 //!   committed (an ignored local file such as a config or `.env`).
 //! - It refuses to act while git is mid-merge/rebase, or when the project
 //!   sits inside some other git repository.
+//! - Everything here that commits or checks out (`create_snapshot`,
+//!   `restore_to`, `undo_last`) holds one process-wide lock, so an AI turn's
+//!   snapshot can never land between a restore's commit and its checkout
+//!   (which would commit the pre-restore files on top of the "Went back to"
+//!   commit and mislabel history). It also serializes their use of the git
+//!   index. `list_snapshots` only reads, so it doesn't take it.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 use anyhow::{Context, Result};
 use git2::{
@@ -78,10 +85,34 @@ desktop.ini
 *.swp
 ";
 
+/// Held by every public function that commits or checks out (see the
+/// module docs). One lock for all projects: these calls are short and rare,
+/// and a single lock can't be taken in the wrong order. `std`'s `Mutex`
+/// isn't reentrant, so the public functions lock once and from then on only
+/// call the `*_locked` functions.
+static SNAPSHOT_LOCK: Mutex<()> = Mutex::new(());
+
+fn snapshot_lock() -> MutexGuard<'static, ()> {
+    // Poisoned only if a snapshot call panicked while holding it. The lock
+    // guards no data of its own (git's state is on disk and every step
+    // re-reads it), so carrying on is safe.
+    SNAPSHOT_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Commits everything (respecting `.gitignore`). `None` when nothing
 /// changed. `origin` is the (thread id, turn number) that produced it.
 /// Initializes the repository if the project isn't one yet.
 pub fn create_snapshot(
+    project: &Path,
+    title: &str,
+    origin: Option<(&str, u32)>,
+) -> Result<Option<Snapshot>> {
+    let _guard = snapshot_lock();
+    create_snapshot_locked(project, title, origin)
+}
+
+/// `create_snapshot`, for a caller already holding `SNAPSHOT_LOCK`.
+fn create_snapshot_locked(
     project: &Path,
     title: &str,
     origin: Option<(&str, u32)>,
@@ -159,6 +190,12 @@ pub fn list_snapshots(project: &Path, limit: usize) -> Result<Vec<Snapshot>> {
 /// If nothing would change, no empty commit is made and the current HEAD
 /// snapshot is returned.
 pub fn restore_to(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
+    let _guard = snapshot_lock();
+    restore_to_locked(project, snapshot_id)
+}
+
+/// `restore_to`, for a caller already holding `SNAPSHOT_LOCK`.
+fn restore_to_locked(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
     let repo = open_project_repo(project)?.with_context(|| {
         format!(
             "'{}' has no history yet, so there is nothing to go back to",
@@ -169,7 +206,7 @@ pub fn restore_to(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
     let target = resolve_commit(&repo, snapshot_id)?;
 
     // 1. Nothing uncommitted is ever lost: save it as its own snapshot.
-    create_snapshot(project, AUTO_SAVE_TITLE, None)
+    create_snapshot_locked(project, AUTO_SAVE_TITLE, None)
         .context("failed to auto-save uncommitted changes before going back")?;
 
     let head = head_commit(&repo)?
@@ -243,6 +280,9 @@ pub fn restore_to(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
 /// those commits' changes are reverted in the working tree too — they stay
 /// in history and can be gone back to like any other commit.
 pub fn undo_last(project: &Path) -> Result<Option<Snapshot>> {
+    // Held from choosing the target to the end of the restore, so a
+    // snapshot made in between can't change which one is "the latest".
+    let _guard = snapshot_lock();
     let Some(repo) = open_project_repo(project)? else {
         return Ok(None);
     };
@@ -262,7 +302,7 @@ pub fn undo_last(project: &Path) -> Result<Option<Snapshot>> {
         Ok(true)
     })?;
     match target {
-        Some(parent) => restore_to(project, &parent.to_string()).map(Some),
+        Some(parent) => restore_to_locked(project, &parent.to_string()).map(Some),
         None => Ok(None),
     }
 }
@@ -1449,5 +1489,79 @@ mod tests {
         assert!(tree.get_path(Path::new("addons/foo/extra.gd")).is_err());
         let entry = tree.get_path(Path::new("addons/foo/plugin.gd")).unwrap();
         assert_eq!(repo.find_blob(entry.id()).unwrap().content(), b"v1\n");
+    }
+
+    /// The race the lock exists for: an AI turn's snapshot landing between
+    /// a restore's commit and its checkout would commit the pre-restore
+    /// `game.gd` on top of the "Went back to" commit, silently undoing it
+    /// under the turn's title. With snapshots and restores racing from two
+    /// threads, no turn commit may ever touch `game.gd` (the turn thread only
+    /// writes chat files, which restores keep), every restore commit must
+    /// hold its target's `game.gd`, and the disk must end matching HEAD.
+    #[test]
+    fn concurrent_snapshots_and_restores_keep_history_consistent() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "game.gd", "v1\n");
+        let a = create_snapshot(dir.path(), "A", None).unwrap().unwrap();
+        write(dir.path(), "game.gd", "v2\n");
+        let b = create_snapshot(dir.path(), "B", None).unwrap().unwrap();
+
+        let project = dir.path().to_path_buf();
+        let done = Arc::new(AtomicBool::new(false));
+        let turns = {
+            let project = project.clone();
+            let done = done.clone();
+            std::thread::spawn(move || {
+                let mut i = 0;
+                while !done.load(Ordering::SeqCst) {
+                    write(&project, &format!(".ibproject/chat/turn-{i}.jsonl"), "{}\n");
+                    create_snapshot(&project, &format!("Turn {i}"), Some(("t", i))).unwrap();
+                    i += 1;
+                }
+            })
+        };
+        for round in 0..40 {
+            let target = if round % 2 == 0 { &a.id } else { &b.id };
+            restore_to(&project, target).unwrap();
+        }
+        done.store(true, Ordering::SeqCst);
+        turns.join().unwrap();
+        create_snapshot(&project, "Last turn", None).unwrap();
+
+        let repo = Repository::open(&project).unwrap();
+        let game = |commit: &Commit| -> Vec<u8> {
+            let entry = commit
+                .tree()
+                .unwrap()
+                .get_path(Path::new("game.gd"))
+                .unwrap();
+            repo.find_blob(entry.id()).unwrap().content().to_vec()
+        };
+        let mut walk = repo.revwalk().unwrap();
+        walk.push_head().unwrap();
+        let (mut restores, mut turn_commits) = (0, 0);
+        for oid in walk {
+            let commit = repo.find_commit(oid.unwrap()).unwrap();
+            let title = commit_title(&commit);
+            let restored = parse_trailers(commit.message().unwrap())
+                .into_iter()
+                .find(|(k, _)| k == TRAILER_RESTORES);
+            if let Some((_, target)) = restored {
+                restores += 1;
+                let target = repo.find_commit(Oid::from_str(&target).unwrap()).unwrap();
+                assert_eq!(game(&commit), game(&target), "{title}");
+            } else if title.starts_with("Turn ") || title == "Last turn" {
+                turn_commits += 1;
+                let parent = commit.parent(0).unwrap();
+                assert_eq!(game(&commit), game(&parent), "{title} changed game.gd");
+            }
+        }
+        assert_eq!(restores, 40);
+        assert!(turn_commits > 0);
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(read(&project, "game.gd").as_bytes(), game(&head).as_slice());
     }
 }
