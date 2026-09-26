@@ -102,12 +102,12 @@ export function GodotInstallCard({ onInstalled }: GodotInstallCardProps) {
             )}
           </div>
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span className="flex min-w-0 items-center gap-1.5">
+            <span data-testid="godot-install-phase" className="flex min-w-0 items-center gap-1.5">
               <Loader2 className="size-3 shrink-0 animate-spin" />
               <span className="truncate">{progress ? phaseLabel(progress.phase) : "Starting…"}</span>
             </span>
             {progress && (
-              <span className="shrink-0 tabular-nums">
+              <span data-testid="godot-install-bytes" className="shrink-0 tabular-nums">
                 {progress.total_bytes
                   ? `${formatBytes(progress.downloaded_bytes)} of ${formatBytes(progress.total_bytes)}`
                   : formatBytes(progress.downloaded_bytes)}
@@ -116,14 +116,19 @@ export function GodotInstallCard({ onInstalled }: GodotInstallCardProps) {
           </div>
         </div>
       ) : (
-        <Button type="button" className="self-start" onClick={() => void install()}>
+        <Button
+          type="button"
+          data-testid="godot-install"
+          className="self-start"
+          onClick={() => void install()}
+        >
           <Download data-icon="inline-start" />
           Install Godot
         </Button>
       )}
 
       {error && (
-        <Alert variant="destructive">
+        <Alert variant="destructive" data-testid="godot-install-error">
           <AlertCircle />
           <AlertDescription className="break-words">
             Couldn't install Godot: {error}

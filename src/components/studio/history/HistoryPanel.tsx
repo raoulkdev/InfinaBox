@@ -69,11 +69,17 @@ function SnapshotRow({ snapshot, latest, now, disabled, onGoBack }: SnapshotRowP
   const byAi = snapshot.thread_id !== null;
   const Icon = byAi ? Sparkles : Save;
   return (
-    <li className="group flex items-start gap-2 border-b border-border px-3 py-2 last:border-b-0 hover:bg-accent/50">
+    <li
+      data-testid="snapshot-row"
+      data-snapshot-id={snapshot.id}
+      className="group flex items-start gap-2 border-b border-border px-3 py-2 last:border-b-0 hover:bg-accent/50"
+    >
       <Icon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 truncate text-sm text-foreground/90">{snapshot.title}</span>
+          <span data-testid="snapshot-title" className="min-w-0 truncate text-sm text-foreground/90">
+            {snapshot.title}
+          </span>
           {latest && <Badge variant="outline">Latest</Badge>}
         </div>
         <span className="text-xs text-muted-foreground">
@@ -95,6 +101,7 @@ function SnapshotRow({ snapshot, latest, now, disabled, onGoBack }: SnapshotRowP
         type="button"
         size="xs"
         variant="ghost"
+        data-testid="snapshot-go-back"
         disabled={disabled}
         className="shrink-0 opacity-60 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
         aria-label={`Go back to this point: ${snapshot.title}`}
@@ -206,7 +213,11 @@ export function HistoryPanel({ projectPath }: HistoryPanelProps) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card">
+    <div
+      data-testid="history-panel"
+      data-list-status={list.status}
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card"
+    >
       <div data-tauri-drag-region className="flex h-9 shrink-0 items-center gap-2 px-3">
         <span className="text-xs font-medium tracking-wide text-muted-foreground">History</span>
         <div className="flex-1" />
@@ -214,6 +225,7 @@ export function HistoryPanel({ projectPath }: HistoryPanelProps) {
           type="button"
           size="xs"
           variant="outline"
+          data-testid="undo-last"
           disabled={busy !== null || snapshots.length === 0}
           onClick={() => void undoLast()}
         >
@@ -230,6 +242,8 @@ export function HistoryPanel({ projectPath }: HistoryPanelProps) {
         {notice && (
           <motion.div
             key={notice.text}
+            data-testid="history-notice"
+            data-tone={notice.tone}
             {...fadeRise}
             transition={fadeTransition}
             className="shrink-0 px-3 pb-2"

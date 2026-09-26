@@ -213,7 +213,14 @@ export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
   const version = godot.status === "ready" ? godot.godot.version : null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card">
+    <div
+      data-testid="play-panel"
+      data-godot={
+        godot.status === "ready" ? (godot.godot.installed ? "installed" : "missing") : godot.status
+      }
+      data-game-state={gameState}
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card"
+    >
       <div
         data-tauri-drag-region
         className="flex h-9 shrink-0 items-center gap-2 px-3"
@@ -234,6 +241,7 @@ export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
                   type="button"
                   size="sm"
                   variant="ghost"
+                  data-testid="game-restart"
                   disabled={pending !== null}
                   onClick={() => void run()}
                 >
@@ -248,6 +256,7 @@ export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
                   type="button"
                   size="sm"
                   variant="outline"
+                  data-testid="game-stop"
                   disabled={pending !== null}
                   onClick={() => void stop()}
                 >
@@ -263,6 +272,7 @@ export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
               <Button
                 type="button"
                 size="sm"
+                data-testid="game-play"
                 disabled={pending !== null}
                 onClick={() => void run()}
               >
@@ -312,7 +322,7 @@ export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
       {godot.status === "ready" && godot.godot.installed && (
         <>
           {actionError && (
-            <Alert variant="destructive" className="m-3 w-auto shrink-0">
+            <Alert variant="destructive" data-testid="game-action-error" className="m-3 w-auto shrink-0">
               <AlertCircle />
               <AlertDescription className="break-words">{actionError}</AlertDescription>
             </Alert>
