@@ -126,10 +126,20 @@ export function applyEvent(view: ChatView, event: AgentEvent): ChatView {
 
     case "files_changed": {
       if (event.paths.length === 0) return view;
-      // Attach to the most recent work group of this turn; a files_changed
-      // with no tool use before it still gets its own row rather than being
-      // dropped, since the change on disk is real either way.
-      const index = findLastIndex(view.items, (i) => i.kind === "work" || i.kind === "user");
+      // The runtime reports a turn's changed files once, at its end, so the
+      // turn's last work group may be something else entirely (e.g. "ran
+      // the game"). Attach them to the most recent group of this turn that
+      // actually wrote files, falling back to the turn's last group. A
+      // files_changed with no tool use before it still gets its own row
+      // rather than being dropped, since the change on disk is real either
+      // way.
+      const turnStart = findLastIndex(view.items, (i) => i.kind === "user");
+      const writer = findLastIndex(
+        view.items,
+        (i) => i.kind === "work" && i.steps.some((s) => FILE_WRITING_TOOLS.has(s.name)),
+      );
+      const index =
+        writer > turnStart ? writer : findLastIndex(view.items, (i) => i.kind === "work" || i.kind === "user");
       const target = index >= 0 ? view.items[index] : undefined;
       if (target?.kind === "work") {
         const merged = Array.from(new Set([...target.filesChanged, ...event.paths]));
@@ -227,8 +237,8 @@ export function describeWork(item: Extract<ChatItem, { kind: "work" }>): string 
   }
   // Nothing to say yet means every step was a file edit (the only tools
   // `describeTool` leaves to the changed-file list) — and that list arrives
-  // at the end of the turn, joining the turn's last group, not necessarily
-  // this one. Still say what these steps were.
+  // at the end of the turn, joining only the turn's last file-writing
+  // group, not necessarily this one. Still say what these steps were.
   if (phrases.length === 0) return item.steps.length > 0 ? "Edited files" : "Changed files";
   const text = phrases.join(", ");
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -275,6 +285,18 @@ function describeTool(name: string): string | null {
       return `used ${name}`;
   }
 }
+
+// The tools whose use writes files — Claude Code's edit tools plus the
+// InfinaBox MCP tool that saves a Context card — so the groups a turn's
+// `files_changed` belongs to. Mirrors the runtime's own list in
+// `crates/core/src/agent/claude_stream.rs`.
+const FILE_WRITING_TOOLS = new Set([
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit",
+  "mcp__infinabox__write_context_card",
+]);
 
 function hasRunningStep(item: ChatItem): boolean {
   return item.kind === "work" && item.steps.some((s) => s.status === "running");

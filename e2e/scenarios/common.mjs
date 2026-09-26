@@ -84,7 +84,7 @@ export function snapshotSubjects(project) {
  */
 export function gameProcesses(project, { includeHeadless = false } = {}) {
   const out = execFileSync("ps", ["-eo", "pid=,ppid=,args="]).toString();
-  return out
+  const matches = out
     .split("\n")
     .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
     .filter(
@@ -95,6 +95,10 @@ export function gameProcesses(project, { includeHeadless = false } = {}) {
         (includeHeadless || !m[3].includes("--headless")),
     )
     .map((m) => ({ pid: m[1], ppid: m[2], args: m[3] }));
+  // At startup Godot forks short-lived copies of itself (same command line,
+  // parent = the game) to probe the GPUs; those aren't separate games.
+  const pids = new Set(matches.map((m) => m.pid));
+  return matches.filter((m) => !pids.has(m.ppid));
 }
 
 export function gamePids(project) {
