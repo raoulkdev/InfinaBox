@@ -4,6 +4,8 @@
 //! commands and the Studio chat UI — only ever sees `AgentEvent`s.
 
 pub mod claude;
+pub mod claude_stream;
+pub mod path;
 pub mod types;
 
 pub use types::*;
