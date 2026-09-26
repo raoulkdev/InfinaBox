@@ -8,10 +8,18 @@ import { By } from "selenium-webdriver";
 import { clickWhenEnabled, isInert, textOf, tid, waitUntil, waitVisible } from "../lib/ui.mjs";
 import { chooseFolderInGtkDialog, findWindows } from "../lib/x11.mjs";
 
-/** Makes a fresh parent folder under the system temp dir — never inside
+let tempRoot = null;
+
+/** The run's own temp folder (run.mjs makes one per run), which every
+ * project and app home goes under. */
+export function setTempRoot(dir) {
+  tempRoot = dir;
+}
+
+/** Makes a fresh parent folder under this run's temp root — never inside
  * this repository, which core refuses ("inside another git repository"). */
 export function tempParent(label) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `ibx-e2e-${label}-projects-`));
+  return fs.mkdtempSync(path.join(tempRoot ?? os.tmpdir(), `projects-${label}-`));
 }
 
 /**
@@ -37,6 +45,18 @@ export async function createProjectFromHome(run, driver, parentDir, name) {
   const nameInput = await waitVisible(driver, tid("new-project-name"));
   await nameInput.sendKeys(name);
   await run.shot("new-project-dialog");
+  // However long the path, everything stays inside the dialog (a long path
+  // once pushed the location, preview and Create button past its edge).
+  const outside = await driver.executeScript(`
+    const dialog = document.querySelector('[role="dialog"]').getBoundingClientRect();
+    return [...document.querySelectorAll('[role="dialog"] *')]
+      .filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && (r.right > dialog.right + 1 || r.left < dialog.left - 1);
+      })
+      .map((el) => el.dataset.testid || el.tagName.toLowerCase() + ':' + (el.textContent || '').trim().slice(0, 30));
+  `);
+  if (outside.length > 0) throw new Error(`New Project dialog content runs past its edge: ${JSON.stringify(outside)}`);
   await clickWhenEnabled(driver, tid("new-project-create"));
 
   // Studio is one of App.tsx's permanently mounted sections: it counts as

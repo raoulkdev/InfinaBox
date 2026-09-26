@@ -1,7 +1,9 @@
-// The Phase A exit criterion, minus the AI chat turn (steps 1, 3, 5, 6 of
-// the plan, plus project creation): Home → New Project → Studio → Play →
-// a script error → "Ask AI to fix" → undo / go back, with Godot provided
-// through INFINABOX_GODOT.
+// The Phase A exit criterion: Home → New Project → Studio → Play, with
+// Godot provided through INFINABOX_GODOT, then either
+// - with --real-ai: a real AI chat turn, undo, and a script error the AI is
+//   asked to fix (ai-loop.mjs), or
+// - without it: a script error → "Ask AI to fix" → undo / go back, with the
+//   AI's edit and snapshot stood in for (steps 4–5c below).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -15,7 +17,8 @@ import {
   waitUntil,
   waitVisible,
 } from "../lib/ui.mjs";
-import { findWindows, xdotool } from "../lib/x11.mjs";
+import { xdotool } from "../lib/x11.mjs";
+import { aiLoop } from "./ai-loop.mjs";
 import {
   createProjectFromHome,
   gamePids,
@@ -61,7 +64,9 @@ export async function coreLoop(run, app, config) {
   });
 
   await run.step("2", "New Project creates a Godot project with one snapshot and opens Studio", async () => {
-    const parent = tempParent("core");
+    // A deliberately long folder name, so the New Project dialog has to
+    // cope with a long location (see createProjectFromHome).
+    const parent = tempParent("core-in-a-folder-with-a-rather-long-name-to-check-the-dialog-wraps");
     state.project = await createProjectFromHome(run, driver, parent, PROJECT_NAME);
     const p = state.project;
     for (const rel of [
@@ -78,7 +83,12 @@ export async function coreLoop(run, app, config) {
     if (subjects.length !== 1 || subjects[0] !== "New project") {
       throw new Error(`expected exactly one snapshot "New project", got ${JSON.stringify(subjects)}`);
     }
-    const dirty = git(p, "status", "--porcelain").trim();
+    // Opening Studio creates the project's first chat thread ("Main") under
+    // .ibproject/chat/; it's committed with the next snapshot, so it's the
+    // one thing allowed to be new here.
+    const chatOnly = git(p, "status", "--porcelain", "--", ".ibproject/chat").trim();
+    if (chatOnly) run.note(`not yet committed (expected): ${chatOnly.replace(/\n/g, " ")}`);
+    const dirty = git(p, "status", "--porcelain", "--", ".", ":(exclude).ibproject/chat").trim();
     if (dirty) throw new Error(`working tree not clean after create:\n${dirty}`);
     const godotCfg = fs.readFileSync(path.join(p, "project.godot"), "utf8");
     run.note(`project.godot config/name: ${godotCfg.match(/config\/name=.*/)?.[0]}`);
@@ -146,6 +156,11 @@ export async function coreLoop(run, app, config) {
     },
     { needs: ["2"], after: saveGameLog("3") },
   );
+
+  if (config.realAi) {
+    await aiLoop(run, app, config, state, saveGameLog);
+    return;
+  }
 
   await run.step(
     "4",
@@ -233,6 +248,16 @@ export async function coreLoop(run, app, config) {
       // Not a crash: the rest of Studio is still there and live.
       await waitVisible(driver, tid("play-panel"));
       await run.shot("ask-ai-to-fix");
+      // A sent request starts a real AI turn (the machine's `claude`), which
+      // this stand-in run doesn't want editing files — and History rightly
+      // holds off undo while a turn runs. Stop it and wait until it's over.
+      if (outcome === "sent") {
+        const stops = await driver.findElements(By.xpath('//*[@data-testid="chat-panel"]//button[normalize-space()="Stop"]'));
+        if (stops.length > 0) await stops[0].click().catch(() => {});
+        await waitAttr(driver, tid("chat-panel"), "data-busy", "false", { timeoutMs: 60_000 });
+        const dirty = git(state.project, "status", "--porcelain", "--", ".", ":(exclude).ibproject/chat").trim();
+        run.note(`stopped the AI turn the request started; uncommitted project changes: ${JSON.stringify(dirty)}`);
+      }
     },
     { needs: ["3"], after: saveGameLog("4") },
   );

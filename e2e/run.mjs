@@ -3,7 +3,7 @@
 // tauri-driver + WebKitWebDriver), a real Godot, real git, and the real
 // file system. See README.md for prerequisites and options.
 //
-//   node run.mjs [--scenario core|install|all] [--keep]
+//   node run.mjs [--scenario core|install|all] [--real-ai] [--keep]
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startApp } from "./lib/app.mjs";
 import { Run } from "./lib/runner.mjs";
+import { setTempRoot } from "./scenarios/common.mjs";
 import { coreLoop } from "./scenarios/core-loop.mjs";
 import { managedInstall } from "./scenarios/managed-install.mjs";
 
@@ -41,6 +42,9 @@ const config = {
   display: process.env.DISPLAY || ":99",
   scenario: arg("scenario", "all"),
   keep: process.argv.includes("--keep"),
+  // Drive real AI chat turns (the user's own `claude` CLI) instead of
+  // standing in for the AI. See README.md, "The real AI".
+  realAi: process.argv.includes("--real-ai") || process.env.E2E_REAL_AI === "1",
   artifacts: path.resolve(arg("artifacts", path.join(here, "artifacts", new Date().toISOString().replace(/[:.]/g, "-")))),
 };
 process.env.DISPLAY = config.display;
@@ -55,6 +59,12 @@ for (const [label, file] of [
   }
 }
 
+// Everything this run creates on disk (app homes, projects) lives under one
+// fresh folder of its own, so two runs at once (or one run's cleanup) can
+// never touch another run's files.
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ibx-e2e-run-"));
+setTempRoot(tempRoot);
+
 /**
  * A disposable home for one app launch. HOME and the XDG dirs point inside
  * it, so the app's data dir (where a managed Godot goes), the webview's
@@ -67,7 +77,7 @@ for (const [label, file] of [
  * which is what lets `chooseFolderInGtkDialog` type a path and accept it.
  */
 function makeAppHome(label) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), `ibx-e2e-${label}-`));
+  const home = fs.mkdtempSync(path.join(tempRoot, `home-${label}-`));
   const settings = path.join(home, ".config/glib-2.0/settings");
   fs.mkdirSync(settings, { recursive: true });
   fs.writeFileSync(path.join(settings, "keyfile"), "[org/gtk/settings/file-chooser]\nstartup-mode='cwd'\n");
@@ -80,9 +90,34 @@ function makeAppHome(label) {
   return home;
 }
 
+// With --real-ai the app (and so the `claude` it runs) gets a clean
+// environment, like a normal desktop launch: none of the variables of
+// whatever session is running this harness (e.g. an agent's own
+// CLAUDE_* / CCR_* settings, which change how the CLI behaves) leak into
+// the AI's turns. Only these pass through, for machines that reach the API
+// through a proxy; on a developer's own machine they're usually unset and
+// `claude` just uses its own login (which lives in the real HOME — see the
+// README for how to run with it).
+const AI_PASSTHROUGH = ["ANTHROPIC_BASE_URL", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"];
+// Where a proxied container keeps the CA bundle its proxy signs with.
+const PROXY_CA_BUNDLE = "/root/.ccr/ca-bundle.crt";
+// Plain session basics the app and the WebDriver stack may rely on.
+const BASIC_ENV = ["PATH", "SHELL", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "XDG_RUNTIME_DIR"];
+
+function baseEnv() {
+  if (!config.realAi) return { ...process.env };
+  const env = {};
+  for (const k of [...BASIC_ENV, ...AI_PASSTHROUGH]) if (process.env[k]) env[k] = process.env[k];
+  if (fs.existsSync(PROXY_CA_BUNDLE)) {
+    env.SSL_CERT_FILE = PROXY_CA_BUNDLE;
+    env.NODE_EXTRA_CA_CERTS = PROXY_CA_BUNDLE;
+  }
+  return env;
+}
+
 function appEnv(home, extra = {}) {
   const env = {
-    ...process.env,
+    ...baseEnv(),
     HOME: home,
     XDG_DATA_HOME: path.join(home, ".local/share"),
     XDG_CONFIG_HOME: path.join(home, ".config"),
@@ -111,6 +146,8 @@ async function launch(label, extraEnv) {
 const run = new Run(config.artifacts);
 console.log(`Artifacts: ${run.dir}`);
 console.log(`App: ${config.binary}`);
+console.log(`Temp root: ${tempRoot}`);
+console.log(`AI: ${config.realAi ? "real chat turns (--real-ai)" : "stand-in (no --real-ai)"}`);
 
 const cleanups = [];
 try {
@@ -125,7 +162,6 @@ try {
     await coreLoop(run, app, config);
     await app.stop();
     cleanups.pop();
-    if (!config.keep) fs.rmSync(app.home, { recursive: true, force: true });
   }
   if (config.scenario === "install" || config.scenario === "all") {
     const app = await launch("install", {});
@@ -134,10 +170,21 @@ try {
     await managedInstall(run, app, config);
     await app.stop();
     cleanups.pop();
-    if (!config.keep) fs.rmSync(app.home, { recursive: true, force: true });
   }
 } finally {
   for (const app of cleanups) await app.stop();
+  if (config.keep) console.log(`Kept: ${tempRoot}`);
+  else {
+    // An app that's just been told to quit can still write its data dir
+    // (seen: `.local/share/com.infinabox.app` reappearing right after the
+    // first removal), so remove until the folder stays gone.
+    for (let i = 0; i < 10; i++) {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+      await new Promise((r) => setTimeout(r, 500));
+      if (!fs.existsSync(tempRoot)) break;
+    }
+    if (fs.existsSync(tempRoot)) console.log(`Couldn't remove ${tempRoot}`);
+  }
 }
 
 process.exit(run.writeReport() ? 0 : 1);

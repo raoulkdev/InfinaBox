@@ -225,7 +225,11 @@ export function describeWork(item: Extract<ChatItem, { kind: "work" }>): string 
     seen.add(phrase);
     phrases.push(phrase);
   }
-  if (phrases.length === 0) return item.steps.length > 0 ? "Worked on your project" : "Changed files";
+  // Nothing to say yet means every step was a file edit (the only tools
+  // `describeTool` leaves to the changed-file list) — and that list arrives
+  // at the end of the turn, joining the turn's last group, not necessarily
+  // this one. Still say what these steps were.
+  if (phrases.length === 0) return item.steps.length > 0 ? "Edited files" : "Changed files";
   const text = phrases.join(", ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }

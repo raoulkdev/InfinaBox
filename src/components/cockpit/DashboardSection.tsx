@@ -357,7 +357,11 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
       </ScrollArea>
 
       <Dialog open={newProjectOpen} onOpenChange={handleNewProjectOpenChange}>
-        <DialogContent>
+        {/* `minmax(0,1fr)`: the dialog is a one-column grid, and a grid
+            column's default minimum is its content's width — so a long
+            location path would widen the column past the dialog's edge,
+            dragging the Create button out of reach with it. */}
+        <DialogContent className="grid-cols-[minmax(0,1fr)]">
           <DialogHeader>
             <DialogTitle>New Project</DialogTitle>
             <DialogDescription>
@@ -370,9 +374,12 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
                 Location
               </span>
               <div className="flex items-center gap-2">
+                {/* Wraps rather than truncates: the end of a path (the
+                    folder actually chosen) is the part worth seeing. */}
                 <span
                   data-testid="new-project-location"
-                  className="min-w-0 flex-1 truncate rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm text-foreground/90"
+                  title={newProjectLocation ?? undefined}
+                  className="min-w-0 flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm wrap-anywhere text-foreground/90"
                 >
                   {newProjectLocation ?? "No location chosen"}
                 </span>
@@ -380,6 +387,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
                   type="button"
                   size="sm"
                   variant="secondary"
+                  className="shrink-0"
                   data-testid="new-project-choose-location"
                   onClick={() => void handleChooseLocation()}
                 >
@@ -404,7 +412,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
               />
             </div>
             {newProjectLocation && newProjectName.trim() && (
-              <p className="truncate text-xs text-muted-foreground/80">
+              <p className="text-xs wrap-anywhere text-muted-foreground/80">
                 Will create{" "}
                 <span className="font-mono">
                   {newProjectLocation}/{newProjectName.trim()}
@@ -414,7 +422,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
             {createProjectError && (
               <Alert variant="destructive" data-testid="new-project-error">
                 <AlertCircle />
-                <AlertDescription>{createProjectError}</AlertDescription>
+                <AlertDescription className="wrap-anywhere">{createProjectError}</AlertDescription>
               </Alert>
             )}
           </div>

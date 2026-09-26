@@ -32,6 +32,8 @@ export function ChatTranscript({ items, turnInProgress }: { items: ChatItem[]; t
       {items.map((item) => (
         <motion.div
           key={item.key}
+          data-testid="chat-item"
+          data-kind={item.kind}
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={fadeTransition}
