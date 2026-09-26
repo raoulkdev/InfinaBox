@@ -102,8 +102,10 @@ fn b_edit_file() {
             result(
                 "toolu_016FxYPApVcSvAK44DvoxKRr",
                 false,
-                "Output redirection to '/work/my-game/notes.txt' needs approval. The path is \
-inside the working directories for this session ('/work/my-game'), and Claude Code asks before a shell command creates, cha…",
+                // The project's absolute path is taken out of the real text.
+                "Output redirection to 'notes.txt' needs approval. The path is inside the \
+working directories for this session ('my-game'), and Claude Code asks before a shell command \
+creates, changes or removes file…",
             ),
             tool(
                 "toolu_01SAmyqSjZ2VxSz5Tq9wg17Q",
@@ -252,6 +254,31 @@ fn every_fixture_ends_with_exactly_one_turn_completed() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn nothing_after_the_result_is_emitted() {
+    let (_, mut stream) = parse(&fixture("a_plain_text.jsonl"));
+    let text_line = fixture("a_plain_text.jsonl")
+        .lines()
+        .nth(1)
+        .unwrap()
+        .to_string();
+    assert_eq!(stream.parse_line(&text_line), vec![]);
+}
+
+#[test]
+fn failure_summaries_drop_the_project_path_longest_root_first() {
+    let mut stream = ClaudeStream::new(vec![
+        PathBuf::from("/tmp/game"),
+        PathBuf::from("/private/tmp/game"),
+    ]);
+    stream.parse_line(&edit_line("1", "Edit", r#"{"file_path":"/tmp/game/a.gd"}"#));
+    let line = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"1","is_error":true,"content":[{"type":"text","text":"<tool_use_error>File /private/tmp/game/a.gd not found in /private/tmp/game</tool_use_error>"}]}]}}"#;
+    assert_eq!(
+        stream.parse_line(line),
+        vec![result("1", false, "File a.gd not found in game")]
+    );
 }
 
 #[test]

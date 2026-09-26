@@ -93,10 +93,11 @@ impl ClaudeStream {
     }
 
     /// The events one line of stream-json output produces. Blank lines,
-    /// non-JSON lines, and unknown message types produce none.
+    /// non-JSON lines, and unknown message types produce none, and so does
+    /// anything after the `result` (so `TurnCompleted` always stays last).
     pub fn parse_line(&mut self, line: &str) -> Vec<AgentEvent> {
         let line = line.trim();
-        if line.is_empty() {
+        if line.is_empty() || self.saw_result {
             return Vec::new();
         }
         let Ok(msg) = serde_json::from_str::<Value>(line) else {
@@ -252,7 +253,7 @@ impl ClaudeStream {
             let summary = if ok {
                 "Done".to_string()
             } else {
-                failure_summary(block.get("content"))
+                failure_summary(block.get("content"), &self.roots)
             };
             events.push(AgentEvent::ToolResult {
                 id: id.to_string(),
@@ -279,6 +280,10 @@ impl ClaudeStream {
             };
             events.push(AgentEvent::Error { kind, message });
         }
+        // As the CLI reports them: `input_tokens` is its uncached figure and
+        // excludes `cache_read_input_tokens`/`cache_creation_input_tokens`
+        // (e.g. 2 input tokens with 18639 read from cache in a_plain_text),
+        // so it is not the size of the prompt.
         let usage = msg.get("usage").filter(|u| u.is_object()).map(|u| Usage {
             input_tokens: u.get("input_tokens").and_then(Value::as_u64),
             output_tokens: u.get("output_tokens").and_then(Value::as_u64),
@@ -409,8 +414,11 @@ fn content_blocks(msg: &Value) -> &[Value] {
         .map_or(&[], Vec::as_slice)
 }
 
-/// The first line of a failed tool's real error text, shortened.
-fn failure_summary(content: Option<&Value>) -> String {
+/// The first line of a failed tool's real error text, shortened, with the
+/// project's absolute path taken out (paths inside it become relative, the
+/// folder itself its name) so a home-directory path doesn't end up in the
+/// chat files committed with the project.
+fn failure_summary(content: Option<&Value>, roots: &[PathBuf]) -> String {
     let text = match content {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(blocks)) => blocks
@@ -420,9 +428,27 @@ fn failure_summary(content: Option<&Value>) -> String {
             .join("\n"),
         _ => String::new(),
     };
-    let text = text
+    let mut text = text
         .replace("<tool_use_error>", "")
         .replace("</tool_use_error>", "");
+    // Longest first: a canonical `/private/tmp/x` contains `/tmp/x`.
+    let mut roots: Vec<&PathBuf> = roots.iter().collect();
+    roots.sort_by_key(|r| std::cmp::Reverse(r.as_os_str().len()));
+    for root in roots {
+        let root_str = root.to_string_lossy();
+        let root_str = root_str.trim_end_matches(['/', '\\']);
+        if root_str.is_empty() {
+            continue;
+        }
+        let name = root
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        text = text
+            .replace(&format!("{root_str}/"), "")
+            .replace(&format!("{root_str}\\"), "")
+            .replace(root_str, &name);
+    }
     let line = first_line(&text, MAX_RESULT_SUMMARY);
     if line.is_empty() {
         "Failed".to_string()

@@ -44,7 +44,7 @@ fn builds_the_expected_arguments() {
     let dir = tempfile::tempdir().unwrap();
     let mut req = request(dir.path(), "-make it blue");
     req.resume_provider_session_id = Some("sess-1".into());
-    let args: Vec<String> = build_args(&req, Path::new("/tmp/mcp.json"))
+    let args: Vec<String> = build_args(&req, Path::new("/tmp/mcp.json"), "PROMPT")
         .into_iter()
         .map(|a| a.into_string().unwrap())
         .collect();
@@ -53,6 +53,9 @@ fn builds_the_expected_arguments() {
         "--output-format",
         "stream-json",
         "--verbose",
+        // Never load the project's own settings (hooks, env, apiKeyHelper).
+        "--setting-sources",
+        "user",
         "--resume",
         "sess-1",
         "--mcp-config",
@@ -65,7 +68,7 @@ fn builds_the_expected_arguments() {
         "--permission-mode",
         "acceptEdits",
         "--append-system-prompt",
-        DIRECTOR_PROMPT,
+        "PROMPT",
         "--",
         "-make it blue",
     ]
@@ -75,8 +78,42 @@ fn builds_the_expected_arguments() {
     assert_eq!(args, expected);
 
     req.resume_provider_session_id = None;
-    let args = build_args(&req, Path::new("/tmp/mcp.json"));
+    let args = build_args(&req, Path::new("/tmp/mcp.json"), "PROMPT");
     assert!(!args.iter().any(|a| a == "--resume"));
+}
+
+#[test]
+fn system_prompt_appends_the_projects_agents_md() {
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(system_prompt(dir.path()), DIRECTOR_PROMPT);
+    std::fs::write(dir.path().join("AGENTS.md"), "# My game\nUse tabs.\n").unwrap();
+    let prompt = system_prompt(dir.path());
+    assert!(prompt.starts_with(DIRECTOR_PROMPT));
+    assert!(prompt.ends_with("# This project's AGENTS.md\n\n# My game\nUse tabs.\n"));
+}
+
+#[test]
+fn sweeps_only_old_files_with_our_exact_name_pattern() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = std::time::SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60);
+    let ours_old = format!("infinabox-mcp-{}.json", uuid::Uuid::new_v4());
+    let ours_new = format!("infinabox-mcp-{}.json", uuid::Uuid::new_v4());
+    let names = [
+        ours_old.as_str(),
+        ours_new.as_str(),
+        "infinabox-mcp-not-a-uuid.json",
+        "someone-elses.json",
+    ];
+    for name in names {
+        let file = std::fs::File::create(dir.path().join(name)).unwrap();
+        if name != ours_new {
+            file.set_modified(old).unwrap();
+        }
+    }
+    sweep_stale_configs(dir.path(), STALE_TEMP_CONFIG_AGE);
+    for name in names {
+        assert_eq!(dir.path().join(name).exists(), name != ours_old, "{name}");
+    }
 }
 
 #[test]
@@ -286,11 +323,14 @@ fn runs_the_cli_and_streams_its_events() {
         .map(String::from)
         .collect();
     let mcp_path = fake.read("mcp_path.txt");
-    let expected: Vec<String> =
-        build_args(&request(fake.project.path(), message), Path::new(&mcp_path))
-            .into_iter()
-            .map(|a| a.into_string().unwrap())
-            .collect();
+    let expected: Vec<String> = build_args(
+        &request(fake.project.path(), message),
+        Path::new(&mcp_path),
+        DIRECTOR_PROMPT,
+    )
+    .into_iter()
+    .map(|a| a.into_string().unwrap())
+    .collect();
     assert_eq!(args, expected);
     assert_eq!(args.last().unwrap(), message);
 
@@ -422,12 +462,114 @@ fn a_second_turn_on_the_same_thread_is_refused_while_one_runs() {
     assert_eq!(refused, Some(true));
 }
 
+/// Several `run_turn`s on one thread started at the same moment: exactly
+/// one runs, the rest are refused, and the map ends up empty.
+#[cfg(unix)]
+#[test]
+fn concurrent_turns_on_one_thread_only_one_runs() {
+    const N: usize = 4;
+    let fake = FakeClaude::new(
+        r#"head -n 1 "$dir/stream.jsonl"; sleep 60"#,
+        &fixture("a_plain_text.jsonl"),
+    );
+    let runtime = Arc::new(fake.runtime());
+    let barrier = Arc::new(std::sync::Barrier::new(N));
+    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+    let handles: Vec<_> = (0..N)
+        .map(|_| {
+            let (runtime, barrier, tx) = (runtime.clone(), barrier.clone(), tx.clone());
+            let project = fake.project.path().to_path_buf();
+            std::thread::spawn(move || {
+                barrier.wait();
+                let mut events = Vec::new();
+                let result = runtime.run_turn(request(&project, "hi"), &mut |e| events.push(e));
+                let _ = tx.send(result.is_ok());
+                (result.is_ok(), events)
+            })
+        })
+        .collect();
+    // The N-1 refusals come back straight away; then stop the one that runs.
+    for _ in 0..N - 1 {
+        assert!(!rx.recv_timeout(Duration::from_secs(10)).unwrap());
+    }
+    // Its slot is reserved before the spawn, so the cancel always lands.
+    runtime.cancel("thread-1");
+    let results: Vec<(bool, Vec<AgentEvent>)> =
+        handles.into_iter().map(|h| h.join().unwrap()).collect();
+    let ran: Vec<_> = results.iter().filter(|(ok, _)| *ok).collect();
+    assert_eq!(ran.len(), 1);
+    assert!(matches!(
+        ran[0].1.last(),
+        Some(AgentEvent::TurnCompleted { is_error: true, .. })
+    ));
+    assert!(runtime.running.lock().unwrap().is_empty());
+}
+
+/// A cancel that arrives after the slot is reserved but before the process
+/// is stored is applied as soon as it is.
+#[cfg(unix)]
+#[test]
+fn cancel_before_the_child_is_registered_still_stops_it() {
+    use std::os::unix::process::CommandExt;
+    let runtime = ClaudeCodeRuntime::new();
+    let guard = RunningGuard::reserve(&runtime.running, "t").unwrap();
+    assert!(RunningGuard::reserve(&runtime.running, "t").is_none());
+    runtime.cancel("t");
+    assert!(guard.was_cancelled());
+
+    let child = Command::new("sleep")
+        .arg("60")
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let started = Instant::now();
+    guard.slot.set_child(child);
+    let status = guard.wait().expect("exit status");
+    assert!(!status.success());
+    assert!(started.elapsed() < Duration::from_secs(10));
+    drop(guard);
+    assert!(runtime.running.lock().unwrap().is_empty());
+}
+
+/// A guard only removes its own entry, never a later turn's.
+#[test]
+fn a_guard_only_removes_its_own_entry() {
+    let runtime = ClaudeCodeRuntime::new();
+    let first = RunningGuard::reserve(&runtime.running, "t").unwrap();
+    // Simulate the slot having been replaced by another turn's.
+    let other = Arc::new(TurnSlot::new());
+    runtime
+        .running
+        .lock()
+        .unwrap()
+        .insert("t".into(), other.clone());
+    drop(first);
+    let map = runtime.running.lock().unwrap();
+    assert!(Arc::ptr_eq(map.get("t").unwrap(), &other));
+}
+
 /// Runs one real turn, then resumes it. Needs a signed-in `claude`.
 #[test]
 #[ignore = "needs a logged-in claude CLI; run with --ignored"]
 fn real_turn_edits_a_file_and_resumes() {
     let project = tempfile::tempdir().unwrap();
     std::fs::write(project.path().join("notes.txt"), "hello\n").unwrap();
+    // The project's AGENTS.md reaches the agent (via the system prompt)...
+    std::fs::write(
+        project.path().join("AGENTS.md"),
+        "The project codeword is PELICAN-42.\n",
+    )
+    .unwrap();
+    // ...but its own settings (here a Stop hook) never run.
+    let hook_marker = project.path().join("hook-ran");
+    std::fs::create_dir(project.path().join(".claude")).unwrap();
+    std::fs::write(
+        project.path().join(".claude/settings.json"),
+        serde_json::json!({"hooks": {"Stop": [{"hooks": [{"type": "command",
+            "command": format!("touch '{}'", hook_marker.display())}]}]}})
+        .to_string(),
+    )
+    .unwrap();
     let runtime = ClaudeCodeRuntime::new();
     let status = runtime.detect();
     assert!(status.installed, "claude not found");
@@ -463,7 +605,11 @@ project: the InfinaBox tools aren't available, so don't try to run the game.",
             .contains("world")
     );
 
-    req.message = "Which word did you just add? Reply with only that word.".into();
+    assert!(!hook_marker.exists(), "the project's own hook ran");
+
+    req.message = "Which word did you just add, and what is the project codeword? Reply with \
+only those two, separated by a space."
+        .into();
     req.resume_provider_session_id = Some(provider_session_id.clone());
     let resumed = run(&runtime, req);
     eprintln!("{resumed:#?}");
@@ -477,6 +623,18 @@ project: the InfinaBox tools aren't available, so don't try to run the game.",
             ..
         })
     ));
+    let answer: String = resumed
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::AssistantText { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        answer.contains("world") && answer.contains("PELICAN-42"),
+        "{answer}"
+    );
+    assert!(!hook_marker.exists(), "the project's own hook ran");
 }
 
 /// Cancels a real turn as soon as it starts. Needs a signed-in `claude`.

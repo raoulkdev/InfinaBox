@@ -6,17 +6,27 @@
 //!
 //! ```text
 //! claude -p --output-format stream-json --verbose
+//!        --setting-sources user
 //!        [--resume <session id>]
 //!        --mcp-config <temp file> --strict-mcp-config
 //!        --tools Read,Edit,Write,Glob,Grep
 //!        --allowedTools Read,Edit,Write,Glob,Grep,mcp__infinabox__*
 //!        --permission-mode acceptEdits
-//!        --append-system-prompt <prompts/director.md>
+//!        --append-system-prompt <prompts/director.md + the project's AGENTS.md>
 //!        -- <the user's message>
 //! ```
 //!
 //! Each flag was checked against the recorded `claude --help` (2.1.283, in
 //! `crates/core/tests/fixtures/claude/help.txt`) and a real run:
+//! - `--setting-sources user`: `-p` skips the workspace trust dialog, so
+//!   without this a project's own `.claude/settings.json` /
+//!   `settings.local.json` (hooks, env, `apiKeyHelper`) would run silently
+//!   on every turn — dangerous for a downloaded or shared project. Verified:
+//!   a project `Stop` hook ran without the flag and not with it. The flag
+//!   also stops the CLI reading the project's `CLAUDE.md` (verified), so
+//!   the project's `AGENTS.md` (which the template's `CLAUDE.md` only
+//!   imports) is appended to the system prompt instead — as text; nothing
+//!   in the project gets to run.
 //! - `--tools` limits the *available* built-in tools (no shell in Phase A);
 //!   `--allowedTools` alone doesn't (see the fixtures README). With `--tools`
 //!   set, the MCP tools are listed directly instead of behind `ToolSearch`.
@@ -80,15 +90,30 @@ const CANCEL_GRACE: Duration = Duration::from_secs(3);
 /// How much stderr is kept for error classification.
 const MAX_STDERR_BYTES: usize = 64 * 1024;
 
+/// The project's agent instructions, appended after the Director prompt.
+const PROJECT_INSTRUCTIONS_FILE: &str = "AGENTS.md";
+/// More than this much of `AGENTS.md` isn't appended.
+const MAX_PROJECT_INSTRUCTIONS_BYTES: usize = 64 * 1024;
+
+/// Temp MCP configs are named `infinabox-mcp-<uuid>.json`; ones older than
+/// this (left behind by a crash — release builds abort on panic, so no
+/// destructor runs) are removed at the start of the next turn.
+const TEMP_CONFIG_PREFIX: &str = "infinabox-mcp-";
+const STALE_TEMP_CONFIG_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
 const NOT_INSTALLED_MESSAGE: &str = "InfinaBox couldn't find Claude Code (the `claude` command) \
 on this computer. Install Claude Code and sign in to it, then try again.";
 
-struct RunningTurn {
-    child: Arc<Mutex<Child>>,
-    cancelled: Arc<AtomicBool>,
+/// One thread's in-flight turn. Reserved in the map (with no child yet)
+/// before the CLI is spawned, so the one-turn-per-thread check and the
+/// insert happen under a single lock, and a cancel that arrives before the
+/// process exists is still honoured once it does.
+struct TurnSlot {
+    child: Mutex<Option<Child>>,
+    cancelled: AtomicBool,
 }
 
-type RunningMap = Arc<Mutex<HashMap<String, RunningTurn>>>;
+type RunningMap = Arc<Mutex<HashMap<String, Arc<TurnSlot>>>>;
 
 pub struct ClaudeCodeRuntime {
     /// `claude` (looked up on the login-shell `PATH`), or a path to a
@@ -168,13 +193,15 @@ impl AgentRuntime for ClaudeCodeRuntime {
             );
             return Ok(());
         };
-        if self.running.lock().unwrap().contains_key(&req.thread_id) {
+        let Some(turn) = RunningGuard::reserve(&self.running, &req.thread_id) else {
             anyhow::bail!("A turn is already running in this chat.");
-        }
+        };
 
+        sweep_stale_configs(&std::env::temp_dir(), STALE_TEMP_CONFIG_AGE);
         let config = TempMcpConfig::write(&req.mcp)?;
+        let system_prompt = system_prompt(&req.project_path);
         let mut cmd = Command::new(&program);
-        cmd.args(build_args(&req, config.path()))
+        cmd.args(build_args(&req, config.path(), &system_prompt))
             .current_dir(&req.project_path)
             .env("PATH", login_shell_path())
             .stdin(Stdio::null())
@@ -194,6 +221,13 @@ impl AgentRuntime for ClaudeCodeRuntime {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
+        if turn.was_cancelled() {
+            // Stopped before the CLI even started.
+            for event in ClaudeStream::new(Vec::new()).finish(StreamEnd::Cancelled) {
+                on_event(event);
+            }
+            return Ok(());
+        }
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -216,7 +250,7 @@ impl AgentRuntime for ClaudeCodeRuntime {
         let stdout = child.stdout.take().context("claude stdout was not piped")?;
         let stderr = child.stderr.take().context("claude stderr was not piped")?;
 
-        let turn = RunningGuard::register(&self.running, &req.thread_id, child);
+        turn.slot.set_child(child);
         let stderr_reader = std::thread::spawn(move || read_capped(stderr, MAX_STDERR_BYTES));
 
         let mut roots = vec![req.project_path.clone()];
@@ -264,37 +298,128 @@ impl AgentRuntime for ClaudeCodeRuntime {
     /// `CANCEL_GRACE`. `run_turn` then ends the turn with
     /// `Error{Other, "Stopped."}` + `TurnCompleted{is_error: true}` (unless
     /// the CLI had already sent its own result).
+    ///
+    /// A cancel that arrives after the turn is reserved but before the CLI
+    /// has been spawned is kept and applied as soon as it is (or the spawn
+    /// is skipped).
     fn cancel(&self, thread_id: &str) {
-        let target = self
-            .running
-            .lock()
-            .unwrap()
-            .get(thread_id)
-            .map(|t| (t.child.clone(), t.cancelled.clone()));
-        let Some((child, cancelled)) = target else {
-            return;
-        };
-        cancelled.store(true, Ordering::SeqCst);
-        signal(&child, false);
+        let slot = self.running.lock().unwrap().get(thread_id).cloned();
+        if let Some(slot) = slot {
+            slot.cancel();
+        }
+    }
+}
+
+impl TurnSlot {
+    fn new() -> Self {
+        Self {
+            child: Mutex::new(None),
+            cancelled: AtomicBool::new(false),
+        }
+    }
+
+    /// Marks the turn cancelled and, if its process exists, stops it. The
+    /// flag is set before taking the child lock and `set_child` checks it
+    /// after storing the child under that lock, so one of the two always
+    /// sees the other.
+    fn cancel(self: &Arc<Self>) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        if self.child.lock().unwrap().is_some() {
+            self.stop();
+        }
+    }
+
+    fn set_child(self: &Arc<Self>, child: Child) {
+        let mut slot = self.child.lock().unwrap();
+        *slot = Some(child);
+        drop(slot);
+        if self.cancelled.load(Ordering::SeqCst) {
+            self.stop();
+        }
+    }
+
+    /// SIGTERM now, SIGKILL after `CANCEL_GRACE` if it's still running.
+    fn stop(self: &Arc<Self>) {
+        signal(&self.child, false);
+        let slot = self.clone();
         std::thread::spawn(move || {
             let deadline = Instant::now() + CANCEL_GRACE;
             while Instant::now() < deadline {
-                if has_exited(&child) {
+                if has_exited(&slot.child) {
                     return;
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
-            signal(&child, true);
+            signal(&slot.child, true);
         });
     }
 }
 
+/// The appended system prompt: the Director prompt, then the project's own
+/// `AGENTS.md` if it has one (the CLI no longer reads the project's
+/// `CLAUDE.md` itself; see the module docs).
+pub(crate) fn system_prompt(project: &Path) -> String {
+    let mut prompt = DIRECTOR_PROMPT.to_string();
+    let Ok(bytes) = std::fs::read(project.join(PROJECT_INSTRUCTIONS_FILE)) else {
+        return prompt;
+    };
+    let text = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_PROJECT_INSTRUCTIONS_BYTES)]);
+    if !text.trim().is_empty() {
+        prompt.push_str(&format!(
+            "\n\n---\n\n# This project's {PROJECT_INSTRUCTIONS_FILE}\n\n{}\n",
+            text.trim()
+        ));
+    }
+    prompt
+}
+
+/// Removes `infinabox-mcp-<uuid>.json` files in `dir` older than `max_age`
+/// — configs a crashed turn never got to delete. Only files with exactly
+/// that name pattern are touched.
+fn sweep_stale_configs(dir: &Path, max_age: Duration) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let is_ours = name
+            .strip_prefix(TEMP_CONFIG_PREFIX)
+            .and_then(|rest| rest.strip_suffix(".json"))
+            .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok());
+        if !is_ours {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .ok()
+            .filter(|m| m.is_file())
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > max_age);
+        if old {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// The CLI arguments for one turn (see the module docs for why each).
-pub(crate) fn build_args(req: &TurnRequest, mcp_config: &Path) -> Vec<OsString> {
-    let mut args: Vec<OsString> = ["-p", "--output-format", "stream-json", "--verbose"]
-        .into_iter()
-        .map(OsString::from)
-        .collect();
+pub(crate) fn build_args(
+    req: &TurnRequest,
+    mcp_config: &Path,
+    system_prompt: &str,
+) -> Vec<OsString> {
+    let mut args: Vec<OsString> = [
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--setting-sources",
+        "user",
+    ]
+    .into_iter()
+    .map(OsString::from)
+    .collect();
     if let Some(id) = &req.resume_provider_session_id {
         args.push("--resume".into());
         args.push(id.into());
@@ -309,7 +434,7 @@ pub(crate) fn build_args(req: &TurnRequest, mcp_config: &Path) -> Vec<OsString> 
     args.push("--permission-mode".into());
     args.push("acceptEdits".into());
     args.push("--append-system-prompt".into());
-    args.push(DIRECTOR_PROMPT.into());
+    args.push(system_prompt.into());
     args.push("--".into());
     args.push(req.message.clone().into());
     args
@@ -341,7 +466,7 @@ impl TempMcpConfig {
     fn write(mcp: &McpLaunch) -> anyhow::Result<Self> {
         use std::io::Write;
         let path =
-            std::env::temp_dir().join(format!("infinabox-mcp-{}.json", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("{TEMP_CONFIG_PREFIX}{}.json", uuid::Uuid::new_v4()));
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -369,72 +494,97 @@ impl Drop for TempMcpConfig {
     }
 }
 
-/// Keeps a running turn in the cancel map for as long as it lives. Dropping
-/// it removes the entry and, if the process is somehow still running (e.g.
-/// the event callback panicked), kills it rather than leaking it.
+/// Holds a thread's reserved slot in the cancel map for as long as the turn
+/// runs. Dropping it removes the entry (only if it's still this turn's) and
+/// kills the process if it's somehow still running. That covers early
+/// returns and unwinding panics in debug builds; release builds abort on
+/// panic, so nothing runs then — the OS reaps the process group's parent,
+/// and `sweep_stale_configs` removes the temp config on a later turn.
 struct RunningGuard {
     running: RunningMap,
     thread_id: String,
-    child: Arc<Mutex<Child>>,
-    cancelled: Arc<AtomicBool>,
+    slot: Arc<TurnSlot>,
 }
 
 impl RunningGuard {
-    fn register(running: &RunningMap, thread_id: &str, child: Child) -> Self {
-        let child = Arc::new(Mutex::new(child));
-        let cancelled = Arc::new(AtomicBool::new(false));
-        running.lock().unwrap().insert(
-            thread_id.to_string(),
-            RunningTurn {
-                child: child.clone(),
-                cancelled: cancelled.clone(),
-            },
-        );
-        Self {
+    /// Reserves `thread_id`'s slot, or `None` if a turn already holds it.
+    /// Check and insert happen under one lock.
+    fn reserve(running: &RunningMap, thread_id: &str) -> Option<Self> {
+        let mut map = running.lock().unwrap();
+        if map.contains_key(thread_id) {
+            return None;
+        }
+        let slot = Arc::new(TurnSlot::new());
+        map.insert(thread_id.to_string(), slot.clone());
+        Some(Self {
             running: running.clone(),
             thread_id: thread_id.to_string(),
-            child,
-            cancelled,
-        }
+            slot,
+        })
     }
 
     /// Waits for the process to exit, without holding its lock while
     /// waiting (so `cancel` can still reach it).
     fn wait(&self) -> Option<ExitStatus> {
         loop {
-            match self.child.lock().unwrap().try_wait() {
-                Ok(Some(status)) => return Some(status),
-                Ok(None) => {}
-                Err(_) => return None,
+            match self
+                .slot
+                .child
+                .lock()
+                .unwrap()
+                .as_mut()
+                .map(Child::try_wait)
+            {
+                Some(Ok(Some(status))) => return Some(status),
+                Some(Ok(None)) => {}
+                None | Some(Err(_)) => return None,
             }
             std::thread::sleep(Duration::from_millis(20));
         }
     }
 
     fn was_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
+        self.slot.cancelled.load(Ordering::SeqCst)
     }
 }
 
 impl Drop for RunningGuard {
     fn drop(&mut self) {
-        self.running.lock().unwrap().remove(&self.thread_id);
-        if !has_exited(&self.child) {
-            signal(&self.child, true);
-            let _ = self.child.lock().unwrap().wait();
+        {
+            let mut map = self.running.lock().unwrap();
+            if map
+                .get(&self.thread_id)
+                .is_some_and(|s| Arc::ptr_eq(s, &self.slot))
+            {
+                map.remove(&self.thread_id);
+            }
+        }
+        if !has_exited(&self.slot.child) {
+            signal(&self.slot.child, true);
+            if let Some(child) = self.slot.child.lock().unwrap().as_mut() {
+                let _ = child.wait();
+            }
         }
     }
 }
 
-fn has_exited(child: &Mutex<Child>) -> bool {
-    !matches!(child.lock().unwrap().try_wait(), Ok(None))
+/// True unless there's a process that is still running (no process yet
+/// counts as exited: there's nothing to wait for).
+fn has_exited(child: &Mutex<Option<Child>>) -> bool {
+    !matches!(
+        child.lock().unwrap().as_mut().map(Child::try_wait),
+        Some(Ok(None))
+    )
 }
 
 /// Asks the process (and its group, on Unix) to stop, or kills it when
 /// `hard`. Only signals a process that hasn't been reaped yet, checked
 /// under the same lock `wait` uses, so a reused pid is never signalled.
-fn signal(child: &Mutex<Child>, hard: bool) {
-    let mut child = child.lock().unwrap();
+fn signal(child: &Mutex<Option<Child>>, hard: bool) {
+    let mut guard = child.lock().unwrap();
+    let Some(child) = guard.as_mut() else {
+        return;
+    };
     if !matches!(child.try_wait(), Ok(None)) {
         return;
     }

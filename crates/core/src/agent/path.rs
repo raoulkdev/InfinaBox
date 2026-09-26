@@ -3,16 +3,16 @@
 //! A GUI app launched from the macOS Dock or Finder does not inherit the
 //! `PATH` the user's shell sets up (Homebrew, `~/.local/bin`, nvm, ...), so
 //! a plain lookup against our own process's `PATH` often misses a `claude`
-//! that works fine in Terminal. `login_shell_path` asks the user's login
-//! shell once — the same concern `src-tauri/src/commands/terminal.rs`
-//! solves by spawning its shell with `-l` — and both detection and spawning
-//! use the result.
+//! that works fine in Terminal. `login_shell_path` asks the user's
+//! interactive login shell once — the same concern
+//! `src-tauri/src/commands/terminal.rs` solves by spawning its shell with
+//! `-l` — and both detection and spawning use the result.
 
 use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::{OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
 /// How long the login shell gets to print its `PATH`. A slow shell profile
@@ -32,23 +32,23 @@ pub fn is_on_path(name: &str) -> bool {
 }
 
 /// The full path of `name` in the given `PATH`-style list, if it's there.
-/// On Windows `.exe` and `.cmd` (how npm installs CLIs there) also match.
+/// On Windows a `name.exe` anywhere on the path is preferred over a
+/// `name.cmd` npm shim. (Windows isn't a Phase A target: a `.cmd` runs
+/// through cmd.exe, whose argument escaping differs from a normal
+/// program's, so passing chat messages to a shim needs checking before
+/// relying on it.)
 pub fn find_on_path(name: &str, path_var: &OsStr) -> Option<PathBuf> {
-    std::env::split_paths(path_var).find_map(|dir| {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-        if cfg!(windows) {
-            for ext in ["exe", "cmd"] {
-                let candidate = dir.join(format!("{name}.{ext}"));
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
-            }
-        }
-        None
-    })
+    let find = |file: &str| {
+        std::env::split_paths(path_var)
+            .map(|dir| dir.join(file))
+            .find(|candidate| candidate.is_file())
+    };
+    if cfg!(windows) {
+        return find(&format!("{name}.exe"))
+            .or_else(|| find(name))
+            .or_else(|| find(&format!("{name}.cmd")));
+    }
+    find(name)
 }
 
 /// The `PATH` the user's login shell sets up, followed by any entries of
@@ -71,40 +71,69 @@ fn query_login_shell_path() -> Option<OsString> {
         return None;
     }
     let shell = std::env::var_os("SHELL").filter(|s| !s.is_empty())?;
-    let script = format!("printf '%s%s%s' '{START_MARKER}' \"$PATH\" '{END_MARKER}'");
+    query_shell_path(&shell, LOGIN_SHELL_TIMEOUT)
+}
+
+/// Runs `shell -i -l -c <print PATH between markers>` and returns the
+/// printed `PATH`, or `None` if it isn't printed within `timeout`.
+///
+/// `-i` as well as `-l`: zsh (the macOS default) reads `.zshrc` — where
+/// nvm and `~/.local/bin` PATH edits usually live — only for interactive
+/// shells. `printenv PATH` rather than `$PATH` so fish (whose `$PATH` is a
+/// list) prints the same colon-separated form. stdin is null, so an rc file
+/// waiting for input gets EOF; one that hangs anyway hits the timeout.
+///
+/// Output is read on a helper thread that sends chunks over a channel, and
+/// we stop as soon as the end marker arrives: a profile that leaves a
+/// background process holding stdout open would otherwise keep the pipe
+/// from ever reaching EOF. That thread is never joined; it ends when the
+/// pipe closes.
+fn query_shell_path(shell: &OsStr, timeout: Duration) -> Option<OsString> {
+    let script = format!("printf '%s' '{START_MARKER}'; printenv PATH; printf '%s' '{END_MARKER}'");
     let mut child = Command::new(shell)
-        .args(["-l", "-c", &script])
+        .args(["-i", "-l", "-c", &script])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-
-    // Read on another thread so a chatty profile can't fill the pipe and
-    // block the shell while we wait on it.
     let mut stdout = child.stdout.take()?;
-    let reader = std::thread::spawn(move || {
-        let mut out = Vec::new();
-        let _ = stdout.read_to_end(&mut out);
-        out
-    });
-
-    let deadline = Instant::now() + LOGIN_SHELL_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                // Anything the shell started in the background could keep
-                // the pipe open; don't wait for the reader.
-                return None;
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match stdout.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
+                }
             }
         }
+    });
+
+    let deadline = Instant::now() + timeout;
+    let mut out = Vec::new();
+    let found = loop {
+        if let Some(path) = extract_marked_path(&String::from_utf8_lossy(&out)) {
+            break Some(path);
+        }
+        let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+            break None;
+        };
+        match rx.recv_timeout(left) {
+            Ok(chunk) => out.extend_from_slice(&chunk),
+            // Timed out, or the pipe closed without the end marker.
+            Err(_) => break None,
+        }
+    };
+    // Don't leave the shell running (or a zombie), whatever happened.
+    if !matches!(child.try_wait(), Ok(Some(_))) {
+        let _ = child.kill();
+        let _ = child.wait();
     }
-    let out = reader.join().ok()?;
-    extract_marked_path(&String::from_utf8_lossy(&out)).map(OsString::from)
+    found.map(OsString::from)
 }
 
 fn extract_marked_path(output: &str) -> Option<String> {
@@ -152,6 +181,57 @@ mod tests {
         for dir in std::env::split_paths(&own) {
             assert!(resolved.contains(&dir), "{dir:?} missing");
         }
+    }
+
+    /// A stand-in shell script (it ignores `-i -l -c ...`).
+    #[cfg(unix)]
+    fn fake_shell(body: &str) -> (tempfile::TempDir, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fakesh");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (dir, path)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_real_shell_prints_its_path() {
+        let path = query_shell_path(OsStr::new("/bin/sh"), Duration::from_secs(10))
+            .expect("sh should print PATH");
+        assert!(!path.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_background_process_holding_stdout_does_not_block() {
+        let (_dir, shell) = fake_shell(&format!(
+            "sleep 30 &\nprintf '%s/from/profile%s' '{START_MARKER}' '{END_MARKER}'"
+        ));
+        let started = Instant::now();
+        let path = query_shell_path(shell.as_os_str(), Duration::from_secs(5));
+        assert_eq!(path, Some(OsString::from("/from/profile")));
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hanging_profile_times_out() {
+        let (_dir, shell) = fake_shell("exec sleep 30");
+        let started = Instant::now();
+        assert_eq!(
+            query_shell_path(shell.as_os_str(), Duration::from_millis(500)),
+            None
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
