@@ -16,15 +16,13 @@
 //! the turn never shows it running.
 //!
 //! Two limits on that promise:
-//! - A panic in the runtime is caught (and the turn still ended) only when
-//!   panics unwind: in debug and test builds. `src-tauri/Cargo.toml` asks
-//!   for `panic = "abort"` in release; while this crate is a workspace
-//!   member cargo ignores that profile (it warns "profiles for the non root
-//!   package will be ignored"), so release builds unwind today too — but if
-//!   the profile moves to the workspace root, a panic there takes the whole
-//!   app down instead. After such a crash and a relaunch the UI isn't stuck
-//!   anyway: ChatPanel's set of running threads starts empty, and the
-//!   transcript just ends without a `turn_completed`.
+//! - A panic in the runtime is caught (and the turn still ended) only
+//!   because panics unwind; the workspace's release profile (root
+//!   `Cargo.toml`) deliberately keeps the default `panic = "unwind"` for
+//!   this. If that ever changes to "abort", a panic takes the whole app
+//!   down instead — though after a relaunch the UI isn't stuck: ChatPanel's
+//!   set of running threads starts empty, and the transcript just ends
+//!   without a `turn_completed`.
 //! - `turn_completed` isn't always the file's last event for the turn: a
 //!   chat-store failure noticed during the turn, or a snapshot that failed
 //!   after it, is reported as an `error` event after it (so both the live
