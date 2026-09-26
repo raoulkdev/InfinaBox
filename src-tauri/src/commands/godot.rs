@@ -547,6 +547,15 @@ fn hint_beside(window: Rect, monitor: Rect) -> Option<WindowHint> {
     })
 }
 
+/// The app window's size for placing the game beside it: the outer size
+/// (with the window frame), or the inner size when the outer one is
+/// unknown or 0x0 — which is what the outer size reads without a window
+/// manager (seen under Xvfb), and would put the game on top of InfinaBox.
+fn window_size(outer: Option<(u32, u32)>, inner: Option<(u32, u32)>) -> Option<(u32, u32)> {
+    let usable = |s: &(u32, u32)| s.0 > 0 && s.1 > 0;
+    outer.filter(usable).or(inner.filter(usable))
+}
+
 /// Tauri-managed state: at most one running game at a time.
 #[derive(Default)]
 pub struct GodotState(pub Arc<GameManager>);
@@ -562,14 +571,17 @@ impl AppHost {
             return None;
         }
         let pos = window.outer_position().ok()?;
-        let size = window.outer_size().ok()?;
+        let (width, height) = window_size(
+            window.outer_size().ok().map(|s| (s.width, s.height)),
+            window.inner_size().ok().map(|s| (s.width, s.height)),
+        )?;
         let monitor = window.current_monitor().ok()??;
         hint_beside(
             Rect {
                 x: pos.x,
                 y: pos.y,
-                width: size.width,
-                height: size.height,
+                width,
+                height,
             },
             Rect {
                 x: monitor.position().x,
@@ -934,6 +946,20 @@ mod tests {
         // Near the bottom: shrinks to fit rather than running off-screen.
         let hint = hint_beside(rect(0, 900, 800, 400), rect(0, 0, 2560, 1440)).unwrap();
         assert!(hint.y as u32 + hint.height <= 1440);
+    }
+
+    #[test]
+    fn window_size_falls_back_to_the_inner_size_when_the_outer_one_is_zero() {
+        assert_eq!(window_size(Some((1280, 830)), Some((1280, 800))), Some((1280, 830)));
+        // No window manager: outer size reads 0x0.
+        assert_eq!(window_size(Some((0, 0)), Some((1280, 800))), Some((1280, 800)));
+        assert_eq!(window_size(None, Some((1280, 800))), Some((1280, 800)));
+        assert_eq!(window_size(Some((0, 0)), Some((0, 0))), None);
+        assert_eq!(window_size(None, None), None);
+        // The fallback size still keeps the game clear of the app window.
+        let (width, height) = window_size(Some((0, 0)), Some((800, 600))).unwrap();
+        let hint = hint_beside(rect(0, 0, width, height), rect(0, 0, 1600, 1000)).unwrap();
+        assert!(hint.x >= 800);
     }
 
     #[test]

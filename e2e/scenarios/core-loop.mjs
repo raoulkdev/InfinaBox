@@ -15,11 +15,12 @@ import {
   waitUntil,
   waitVisible,
 } from "../lib/ui.mjs";
-import { findWindows } from "../lib/x11.mjs";
+import { findWindows, xdotool } from "../lib/x11.mjs";
 import {
   createProjectFromHome,
   gamePids,
   gameProcesses,
+  appWindows,
   gameWindows,
   git,
   snapshotSubjects,
@@ -31,7 +32,7 @@ const PROJECT_NAME = "E2E Game";
 const BREAK_TITLE = "Make the player faster";
 const READY_LINE = "[infinabox] ready 1";
 
-export async function coreLoop(run, app) {
+export async function coreLoop(run, app, config) {
   const { driver } = app;
   // Saves what the Play panel's output log and error list show, and the
   // Godot processes running this project, after every game step.
@@ -89,6 +90,7 @@ export async function coreLoop(run, app) {
     if (titles.length !== 1 || titles[0] !== "New project") {
       throw new Error(`History panel should list just "New project", shows ${JSON.stringify(titles)}`);
     }
+    await expectGripClear(run, driver);
   });
 
   await run.step(
@@ -110,21 +112,28 @@ export async function coreLoop(run, app) {
         what: "the Godot game window",
       });
       for (const w of windows) run.note(`game window ${w.id} "${w.name}" ${w.geometry}`);
-      // The app places the game beside its own window when there's room.
-      // Reported, not asserted: placement depends on the window manager.
-      const [main] = findWindows(["--name", "^InfinaBox$"]);
-      if (main) {
-        run.note(`InfinaBox window ${main.geometry}`);
-        const box = (g) => {
-          const m = g.match(/Position: (-?\d+),(-?\d+).*Geometry: (\d+)x(\d+)/);
-          return m && { x: +m[1], y: +m[2], w: +m[3], h: +m[4] };
-        };
-        const a = box(main.geometry);
-        const b = box(windows[0].geometry);
-        if (a && b && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) {
-          run.note("WARNING: the game window overlaps the InfinaBox window");
-        }
-      }
+      // The app places the game beside its own window when the screen has
+      // room for a usable one (at least 480px wide plus 16px gaps — see
+      // `hint_beside` in src-tauri/src/commands/godot.rs); then the two
+      // must not overlap. Without room, Godot places it itself.
+      // This launch's own window, found through the app binary's process —
+      // another InfinaBox (e.g. a parallel run on the same display) has a
+      // window with the same name.
+      const [main] = appWindows(config.binary);
+      if (!main) throw new Error(`couldn't find the InfinaBox window of ${config.binary}`);
+      run.note(`InfinaBox window ${main.geometry}`);
+      const box = (g) => {
+        const m = g.match(/Position: (-?\d+),(-?\d+).*Geometry: (\d+)x(\d+)/);
+        return m && { x: +m[1], y: +m[2], w: +m[3], h: +m[4] };
+      };
+      const a = box(main.geometry);
+      const b = box(windows[0].geometry);
+      const [screenW] = (xdotool("getdisplaygeometry") || "0 0").trim().split(/\s+/).map(Number);
+      const room = Math.max(screenW - (a.x + a.w), a.x) - 32 >= 480;
+      const overlaps = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+      run.note(`screen width ${screenW}; room beside the app: ${room ? "yes" : "no"}`);
+      if (overlaps && room) throw new Error("the game window overlaps the InfinaBox window");
+      run.note(overlaps ? "the game window overlaps the app (no room beside it on this screen)" : "the game window is beside the app, not over it");
       // Give the renderer a moment to draw its first frames before the capture.
       await new Promise((r) => setTimeout(r, 1500));
       await run.shot("game-window", windows[0].id);
@@ -168,7 +177,12 @@ export async function coreLoop(run, app) {
       if (!errors.some((e) => e.includes(want))) {
         throw new Error(`no error row mentions "${want}"; rows: ${JSON.stringify(errors)}`);
       }
+      // One broken line is one problem: Godot's follow-up blocks about the
+      // same script ("Failed to load script …", a second wording of the
+      // parse error) are grouped under the parse error, not rows of their own.
+      await expectOneRowFor(driver, "res://player.gd", want);
       await run.shot("error-in-play-panel");
+      await expectGripClear(run, driver);
 
       // "Ask AI to fix" on the row that carries the user's file and line.
       let row = null;
@@ -176,8 +190,17 @@ export async function coreLoop(run, app) {
         const t = await driver.executeScript("return arguments[0].textContent", el);
         if (t.includes(want)) row = el;
       }
-      await row.findElement(tid("ask-ai-to-fix")).click();
       const composer = await driver.findElement(By.css('textarea[aria-label="Message the AI"]'));
+      const draftBefore = await composer.getAttribute("value");
+      const askButton = await row.findElement(tid("ask-ai-to-fix"));
+      await askButton.click();
+      // The button says what really happened: sent to the AI, or only put
+      // in the chat box as a draft (e.g. while the chat can't send).
+      const outcome = await waitUntil(async () => (await askButton.getAttribute("data-outcome")) || null, {
+        what: "the Ask AI to fix button to report what happened",
+      });
+      const label = (await askButton.getText()).trim();
+      run.note(`Ask AI to fix → ${outcome}: "${label}"`);
       const reached = await waitUntil(
         async () => {
           const draft = await composer.getAttribute("value");
@@ -192,6 +215,14 @@ export async function coreLoop(run, app) {
         { what: "the fix request to reach the chat" },
       );
       run.note(`fix request reached the ${reached.where}: ${JSON.stringify(reached.text.slice(0, 160))}…`);
+      const expected = reached.where === "composer draft" && !draftBefore.includes(want)
+        ? { outcome: "drafted", label: "Added to the chat box" }
+        : { outcome: "sent", label: "Sent to chat" };
+      if (outcome !== expected.outcome || label !== expected.label) {
+        throw new Error(
+          `the request landed in the ${reached.where}, but the button says ${outcome} "${label}" (expected ${expected.outcome} "${expected.label}")`,
+        );
+      }
       // Whatever the chat says about its own state (e.g. an honest "Couldn't
       // open the conversation" while the chat backend is unfinished).
       const bodyText = await driver.executeScript("return document.body.innerText");
@@ -305,4 +336,89 @@ export async function coreLoop(run, app) {
     },
     { needs: ["5a"], after: saveGameLog("5b") },
   );
+
+  await run.step(
+    "5c",
+    'An engine error with no file in the project gets no "Ask AI to fix"; the game\'s own error still does',
+    async () => {
+      // A real engine error that isn't about the game: without the null
+      // sound device this launch's home provides (see makeAppHome in
+      // run.mjs), a machine with no sound card makes Godot report ALSA's
+      // ERR_CANT_OPEN from engine C++ source on every run.
+      const asoundrc = path.join(app.home, ".asoundrc");
+      const saved = fs.readFileSync(asoundrc, "utf8");
+      fs.rmSync(asoundrc);
+      try {
+        await clickWhenEnabled(driver, tid("game-play"));
+        await waitAttr(driver, tid("play-panel"), "data-game-state", ["running", "crashed"], { timeoutMs: 90_000 });
+        const want = `res://player.gd, line ${state.errorLine}`;
+        await waitUntil(async () => (await visibleTexts(driver, tid("game-error"))).some((e) => e.includes(want)), {
+          timeoutMs: 60_000,
+          what: `the script error (${want})`,
+        });
+        // Engine errors can trail the script one; give them a moment.
+        await new Promise((r) => setTimeout(r, 3000));
+        const rows = await driver.executeScript(`
+          return [...document.querySelectorAll('[data-testid="game-error"]')].map((row) => ({
+            text: (row.innerText || row.textContent || "").trim(),
+            fixable: row.dataset.fixable,
+            hasButton: !!row.querySelector('[data-testid="ask-ai-to-fix"]'),
+            hasNote: !!row.querySelector('[data-testid="game-error-engine-note"]'),
+          }));
+        `);
+        for (const r of rows) run.note(`row (fixable=${r.fixable}, button=${r.hasButton}): ${r.text.replace(/\n/g, " | ")}`);
+        const wrong = rows.filter((r) => r.hasButton !== r.text.includes("res://") || r.hasNote === r.hasButton);
+        if (wrong.length > 0) {
+          throw new Error(`"Ask AI to fix" should show exactly on rows naming a res:// file: ${JSON.stringify(wrong)}`);
+        }
+        const engine = rows.filter((r) => !r.hasButton);
+        if (engine.length === 0) {
+          run.note("no engine error appeared on this machine (it has a working sound device?) — only the game's own error was checked");
+        } else {
+          run.note(`${engine.length} engine error row(s) without "Ask AI to fix"`);
+        }
+        await run.shot("engine-error");
+      } finally {
+        fs.writeFileSync(asoundrc, saved);
+        const stop = await driver.findElements(tid("game-stop"));
+        if (stop.length > 0) {
+          await clickWhenEnabled(driver, tid("game-stop"));
+          await waitAttr(driver, tid("play-panel"), "data-game-state", "stopped", { timeoutMs: 30_000 });
+        }
+      }
+    },
+    { needs: ["5b"], after: saveGameLog("5c") },
+  );
+}
+
+/** Exactly one error row mentions `file`, and it shows `location`. */
+async function expectOneRowFor(driver, file, location) {
+  const rows = (await visibleTexts(driver, tid("game-error"))).filter((t) => t.includes(file));
+  if (rows.length !== 1 || !rows[0].includes(location)) {
+    throw new Error(`expected one error row about ${file} showing "${location}", got ${JSON.stringify(rows)}`);
+  }
+}
+
+/** The panels' reorder grips don't sit on top of any control (the Play
+ * header's Restart, the Chat header's conversation picker, …). Measured
+ * from the real layout; the grips are laid out even while invisible. */
+async function expectGripClear(run, driver) {
+  const clashes = await driver.executeScript(`
+    const hit = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    const out = [];
+    const grips = [...document.querySelectorAll('[data-testid="panel-reorder-grip"]')];
+    const controls = [...document.querySelectorAll('button, [role="button"], [role="combobox"], a, input, textarea, select')];
+    for (const grip of grips) {
+      const g = grip.getBoundingClientRect();
+      if (g.width === 0 || grip.closest('[inert]')) continue;
+      for (const c of controls) {
+        if (c.closest('[inert]')) continue;
+        const r = c.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0 && hit(g, r)) out.push((c.innerText || c.getAttribute('aria-label') || c.tagName).trim());
+      }
+    }
+    return { grips: grips.filter((g) => !g.closest('[inert]')).length, clashes: out };
+  `);
+  run.note(`reorder grips checked: ${clashes.grips}; overlapping controls: ${JSON.stringify(clashes.clashes)}`);
+  if (clashes.clashes.length > 0) throw new Error(`a panel's reorder grip covers ${JSON.stringify(clashes.clashes)}`);
 }

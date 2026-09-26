@@ -31,12 +31,19 @@ import {
 // view. Backend failures are shown with their real error text, never
 // papered over.
 
+/** What a registered send actually did with the text: sent it to the AI
+ * as a message, or (when the chat couldn't send right then — still
+ * loading, failed to load, or the AI is mid-turn) put it in the chat box
+ * as a draft for the user to send. Callers report this truthfully. */
+export type ChatSendOutcome = "sent" | "drafted";
+
 export interface ChatPanelProps {
   projectPath: string;
   /** Called once on mount with a function that sends `text` as a user
    * message in the active thread — how the Play panel's "Ask AI to fix"
-   * reaches the chat without the two panels sharing state. */
-  onRegisterSend: (send: (text: string) => void) => void;
+   * reaches the chat without the two panels sharing state. It returns
+   * what happened to the text. */
+  onRegisterSend: (send: (text: string) => ChatSendOutcome) => void;
 }
 
 /** What a brand-new project's first conversation is called. */
@@ -205,17 +212,18 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
     };
   }, [showThread]);
 
+  // Decides synchronously whether the text goes to the AI or stays as a
+  // draft (so the caller can say which), then sends in the background.
   const send = useCallback(
-    async (text: string) => {
+    (text: string): ChatSendOutcome => {
       const message = text.trim();
-      if (!message) return;
       const threadId = activeRef.current;
       // Not ready to send (still loading, failed to load, or the AI is
       // mid-turn): keep the text as a draft rather than dropping it — this
       // is also where an "Ask AI to fix" lands while the AI is busy.
-      if (!threadId || loadingRef.current || busyRef.current) {
-        setDraft((d) => (d.trim() ? `${d}\n\n${message}` : message));
-        return;
+      if (!message || !threadId || loadingRef.current || busyRef.current) {
+        if (message) setDraft((d) => (d.trim() ? `${d}\n\n${message}` : message));
+        return "drafted";
       }
       busyRef.current = true;
       stickToBottom.current = true;
@@ -225,12 +233,13 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
       loadSeq.current++;
       setView((v) => applyUserMessage(v, message));
       markRunning(threadId, true);
-      try {
-        await agentSend(projectPath, threadId, message);
-      } catch (err) {
+      // A send that fails from here on still went to the chat: its error
+      // shows in the transcript, right under the message.
+      agentSend(projectPath, threadId, message).catch((err) => {
         markRunning(threadId, false);
         if (activeRef.current === threadId) setView((v) => applyLocalError(v, String(err)));
-      }
+      });
+      return "sent";
     },
     [projectPath],
   );
@@ -241,7 +250,7 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
   useEffect(() => {
     sendRef.current = send;
   }, [send]);
-  const stableSend = useCallback((text: string) => void sendRef.current(text), []);
+  const stableSend = useCallback((text: string) => sendRef.current(text), []);
   useEffect(() => {
     onRegisterSend(stableSend);
   }, [onRegisterSend, stableSend]);
@@ -249,7 +258,7 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
   function handleComposerSend() {
     const text = draft;
     setDraft("");
-    void send(text);
+    send(text);
   }
 
   async function handleStop() {

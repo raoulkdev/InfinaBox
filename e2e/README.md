@@ -16,18 +16,21 @@ except the AI chat turn itself:
 | Step | Checks |
 |---|---|
 | 1 | App starts on Home; `claude` and `git` show as installed |
-| 2 | New Project (through the real native folder dialog) creates `project.godot`, `.ibproject/.ibx`, the addon, and exactly one snapshot, "New project" (checked with `git log`); the app lands on Studio |
-| 3 | Play panel shows Godot installed; Play → running, output shows `[infinabox] ready 1`, a Godot window exists (screenshot); Stop → stopped and the process is gone |
-| 4 | A script error is written to disk and snapshotted through the app's `snapshot_create` command (as an AI turn would); Play → the error shows with `res://player.gd, line N`; "Ask AI to fix" puts the request in the chat |
+| 2 | New Project (through the real native folder dialog) creates `project.godot`, `.ibproject/.ibx`, the addon, and exactly one snapshot, "New project" (checked with `git log`); the app lands on Studio; no panel reorder grip covers a header control |
+| 3 | Play panel shows Godot installed; Play → running, output shows `[infinabox] ready 1`, a Godot window exists (screenshot) and, when the screen has room beside the app, doesn't overlap it; Stop → stopped and the process is gone |
+| 4 | A script error is written to disk and snapshotted through the app's `snapshot_create` command (as an AI turn would); Play → the error shows as one row with `res://player.gd, line N` (Godot's follow-up messages grouped under it); "Ask AI to fix" puts the request in the chat, and its label says truthfully whether it was sent or only added to the chat box |
 | 5a | History "Undo last change" restores the file on disk, the list updates, the running game restarts (new process) without errors |
 | 5b | History "Go back" (through its confirm dialog) puts the broken version back, and the game restarts with the error again |
+| 5c | Without the null sound device (see Sound below), Godot's real engine error (ALSA, no file in the project) shows without "Ask AI to fix", while the script error keeps it; on a machine with a sound card only the script error is checked |
 | 6a–c | Fresh app data and no `INFINABOX_GODOT`: the Play panel offers "Install Godot"; installing shows real byte progress and ends installed; the managed Godot runs the game |
 
 Scenario 6 downloads the real Godot release (~75 MB) from GitHub.
 
 ## Prerequisites
 
-- An X display. On a headless machine: `Xvfb :99 -screen 0 1600x1000x24 &` and `export DISPLAY=:99`.
+- An X display. On a headless machine: `Xvfb :99 -screen 0 2560x1440x24 &` and `export DISPLAY=:99`.
+  The app window is 1280x800, so a screen under ~1810px wide has no room
+  for the game beside it, and step 3 can only note (not check) placement.
 - `webkit2gtk-driver` (provides `WebKitWebDriver`): `apt install webkit2gtk-driver`.
 - `tauri-driver`: `cargo install tauri-driver --locked`.
 - `xdotool` and ImageMagick (`import`, for screenshots): `apt install xdotool imagemagick`.

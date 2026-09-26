@@ -81,6 +81,18 @@ export function gamePids(project) {
   return gameProcesses(project).map((p) => p.pid);
 }
 
+/** The visible "InfinaBox" windows of processes running `binary` (this
+ * run's app build, matched on its real command line — so another app build
+ * running on the same display isn't mistaken for it). */
+export function appWindows(binary) {
+  const out = execFileSync("ps", ["-eo", "pid=,args="]).toString();
+  return out
+    .split("\n")
+    .map((line) => line.trim().match(/^(\d+)\s+(.*)$/))
+    .filter((m) => m && (m[2] === binary || m[2].startsWith(`${binary} `)))
+    .flatMap((m) => findWindows(["--all", "--pid", m[1], "--name", "^InfinaBox$"]));
+}
+
 /** The game's visible X11 windows (Godot's own window, found by pid). */
 export function gameWindows(project) {
   return gamePids(project).flatMap((pid) => findWindows(["--pid", pid]));
