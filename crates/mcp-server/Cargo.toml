@@ -1,0 +1,17 @@
+[package]
+name = "infinabox-mcp-server"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "infinabox_mcp_server"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+infinabox-core = { path = "../core" }
+rmcp = { version = "3.4.1", features = ["transport-io"] }
+schemars = "1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "io-std", "net", "io-util", "time"] }

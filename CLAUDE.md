@@ -4,7 +4,9 @@ A Tauri v2 + React 19 + TypeScript desktop app for indie game developers. This f
 
 ## What this is
 
-InfinaBox is a **workspace cockpit around the user's own terminal-based coding agent** (`claude`, `codex`, or whatever CLI they already have installed and authenticated). It is explicitly **not a chat-panel product** — there is no custom AI chat UI anywhere in this app, and reviving one is a known anti-pattern here (see `src/components/cockpit/TerminalPanel.tsx`'s own comment and the project's `agent_auth_model` memory). The embedded terminal (`portable-pty` + `xterm.js`) just runs a real shell in the project's real working directory; whatever agent CLI the user runs there is already authenticated outside this app, with zero InfinaBox-managed credentials.
+InfinaBox is becoming an **AI game studio for people with little or no game-dev knowledge** — see `docs/superpowers/specs/2026-09-25-ai-game-studio-product-spec.md` (the product direction) and `docs/superpowers/plans/2026-09-25-phase-a-foundations.md` (Phase A, the current build). The user's **own** AI (their installed, logged-in Claude Code CLI; later Codex, API keys, local models) does the work; InfinaBox never sells or proxies AI access and stores no AI credentials.
+
+Phase A delivers the core loop in a new **Studio** section: a **chat panel** (this is now the primary interface — the older "no chat panel" stance and the `agent_auth_model` memory are superseded by the spec), a **Play** panel running the user's Godot game, and a **History** panel of snapshots with undo. The pre-Phase-A workspace (Build's terminal + code editor, and the docs-style discipline sections) still exists and will move into an "Advanced" area in Phase B.
 
 The stated product discipline, from `docs/superpowers/specs/2026-09-12-workspace-redesign-design.md`:
 
@@ -14,19 +16,28 @@ This is not just doc language — it's load-bearing throughout the real implemen
 
 ## Architecture
 
-Cargo workspace (`Cargo.toml` at repo root) with three members:
+Cargo workspace (`Cargo.toml` at repo root, which also holds the release profile — member crates can't set profiles) with four members:
 
-- **`crates/core`** (`infinabox-core`) — the real logic: filesystem watcher, git indexer, a local SQLite-backed project graph, deterministic grounded Q&A over it, and an MCP client spike. Unit-tested independently of Tauri — no `AppHandle` needed to test this crate.
-- **`crates/cli`** — a thin spike/demo binary plus `mock_godot_mcp` (a fake MCP server used only to prove the stdio round-trip in `crates/core/src/mcp_client.rs` — not a real Godot integration).
-- **`src-tauri`** — the Tauri v2 app. Commands live under `src-tauri/src/commands/` (`fs.rs`, `project.rs`, `terminal.rs`, `overview.rs`, `watcher.rs`, `environment.rs`), each re-exported through `commands/mod.rs` and registered in `src-tauri/src/lib.rs`'s `tauri::generate_handler![...]` list. Adding a new command means: write the `#[tauri::command]` fn, export it from `mod.rs`, add it to the `invoke_handler!` list — all three steps, or the frontend's `invoke()` call fails silently at runtime with no type error.
+- **`crates/core`** (`infinabox-core`) — the real logic, unit-tested without Tauri:
+  - `agent/` — the provider-independent `AgentRuntime` (`types.rs`, a frozen contract) and `ClaudeCodeRuntime` (`claude.rs`), which drives the user's `claude` CLI headless (`-p --output-format stream-json`) with a restricted tool set, `--setting-sources user` (a project's own `.claude/settings.json` never runs), the InfinaBox MCP server, and the Director prompt (`prompts/director.md`) plus the project's `AGENTS.md`. `claude_stream.rs` turns the CLI's JSON lines into `AgentEvent`s; `path.rs` resolves the login-shell PATH (GUI apps on macOS don't inherit it).
+  - `godot/` — managed Godot install (pinned `4.7.2-stable`, SHA-512 verified, into the app data dir), `locate` (managed install, else `INFINABOX_GODOT`), `run` (game process in its own process group, output capture), `errors` (parser for real Godot error blocks), `validate` (headless import/boot).
+  - `snapshot.rs` — snapshots are git commits with `InfinaBox-*` trailers; undo/go back are always new commits; restores never rewind `.ibproject/chat/` or remove `.ibproject/.ibx`; a process-wide lock serializes all history operations.
+  - `chat_store.rs` — chat threads as `.ibproject/chat/<id>.jsonl` (committed with the project), every string passed through `redact.rs` first.
+  - `scaffold.rs` — new projects from `templates/blank-2d/` plus the auto-installed runtime addon from `godot-addon/infinabox/`.
+  - Older pieces: filesystem watcher, git indexer, SQLite project graph + deterministic `ask.rs` Q&A, and an `mcp_client.rs` spike.
+- **`crates/mcp-server`** (`infinabox-mcp-server`) — the MCP server the user's agent gets (10 tools: Context cards, run/stop the game, game status/errors/output, snapshot list). It is **not a separate binary**: the app executable runs it when launched as `<app exe> --mcp-server` (checked in `src-tauri/src/main.rs` before Tauri starts). Game tools reach the running app over a loopback **bridge** (`bridge_protocol.rs`: token-authenticated, newline-delimited JSON).
+- **`crates/cli`** — dev binary: spike subcommands plus `infinabox-cli mcp-server` (same server, for testing); `mock_godot_mcp` is an old spike.
+- **`src-tauri`** — the Tauri v2 app. Commands live under `src-tauri/src/commands/`: `agent.rs` (chat turns: runs the agent on a background thread, persists every event, snapshots after file-changing turns, always emits `agent-turn-finished`), `godot.rs` (install/status/run/stop, events), `bridge.rs` (the MCP bridge server), `snapshot.rs`, `scaffold.rs`, plus the older `fs.rs`, `project.rs`, `terminal.rs`, `overview.rs`, `watcher.rs`, `environment.rs`. Each is re-exported through `commands/mod.rs` and registered in `src-tauri/src/lib.rs`'s `tauri::generate_handler![...]` list. Adding a new command means: write the `#[tauri::command]` fn, export it from `mod.rs`, add it to the `invoke_handler!` list — all three steps, or the frontend's `invoke()` call fails silently at runtime with no type error. **A command doing real work (git, files, child processes) must be `#[tauri::command(async)]`**: in Tauri v2 a plain sync command runs on the main thread and freezes the window.
 
-Frontend: `src/App.tsx` is the app shell; `src/components/cockpit/` holds every panel/section; `src/lib/` holds shared frontend utilities (motion presets, debounce, fs-watch subscription, project picker/validation, recent-projects storage, backend-error classification).
+Frontend: `src/App.tsx` is the app shell; `src/components/studio/` holds Studio (`chat/`, `play/`, `history/`, `StudioSection.tsx`); `src/components/cockpit/` holds the older panels/sections; `src/lib/` holds shared utilities. **Studio calls the backend only through `src/lib/studio-api.ts`** (typed wrappers for every Phase A command and event) with types in `src/lib/studio-types.ts`, which mirror the Rust serde types — change both sides together.
+
+Tauri events used by Studio: `agent-event`, `agent-turn-finished`, `godot-install-progress`, `game-state`, `game-output`, `game-error`, `snapshots-changed` (see `studio-api.ts`).
 
 ### `src/App.tsx`'s persistent-tab crossfade
 
-Read this file in full before touching navigation — it has a genuinely unusual mechanism. Three sections (**Build**, **Design/Documents**, **Graphs**) must never unmount once opened: Build owns the live terminal session (respawning it would kill whatever the user is doing in their shell), and Design/Graphs can each hold unsaved drafts. Every other section (`art`, `audio`, `uiux`, `qa`, `release`, `business`, `marketing`, `community`, `liveops`) mounts only while selected and has nothing worth preserving.
+Read this file in full before touching navigation — it has a genuinely unusual mechanism. Four sections (**Studio**, **Build**, **Design/Documents**, **Graphs**) must never unmount once opened: Studio holds live chat turns and game state, Build owns the live terminal session (respawning it would kill whatever the user is doing in their shell), and Design/Graphs can each hold unsaved drafts. Opening a project from Home lands on Studio. Every other section (`art`, `audio`, `uiux`, `qa`, `release`, `business`, `marketing`, `community`, `liveops`) mounts only while selected and has nothing worth preserving.
 
-Because `AnimatePresence` (Motion's crossfade helper) only animates real mount/unmount, and these three panels never unmount, they can't use it directly. Instead all three sit **absolutely stacked in one slot, permanently mounted**, with only `opacity`/`pointer-events` toggling per the active `section`. Each inactive one also carries the HTML `inert` attribute — not just `pointer-events: none` — which additionally pulls it out of the tab order and accessibility tree, specifically because a prior bug in this codebase's history came from a descendant re-adding its own `pointer-events-auto` inside a "hidden" panel.
+Because `AnimatePresence` (Motion's crossfade helper) only animates real mount/unmount, and these four panels never unmount, they can't use it directly. Instead all four sit **absolutely stacked in one slot, permanently mounted**, with only `opacity`/`pointer-events` toggling per the active `section`. Each inactive one also carries the HTML `inert` attribute — not just `pointer-events: none` — which additionally pulls it out of the tab order and accessibility tree, specifically because a prior bug in this codebase's history came from a descendant re-adding its own `pointer-events-auto` inside a "hidden" panel.
 
 Everything else (Home, and the 9 "simple" sections) goes through ordinary `AnimatePresence mode="wait"` mount/unmount, driven by a data-driven `simpleSections: Record<SimpleSection, () => ReactNode>` render map rather than a growing `{section === "x" && ...}` if-chain.
 
@@ -75,11 +86,15 @@ npx tsc --noEmit                          # type-check the frontend
 npm run build                             # tsc + vite build (currently clean; one chunk-size warning, ~2MB main bundle from MDXEditor+CodeMirror+ReactFlow+xterm all in one chunk — not yet code-split)
 cd src-tauri && cargo check --no-default-features   # established Rust check command
 cargo test --workspace --no-default-features        # from repo root
+INFINABOX_GODOT=/path/to/godot cargo test --workspace --no-default-features -- --ignored   # tests needing a real Godot (and some a logged-in claude)
 ```
+
+- **Parser tests run against real recorded tool output** in `crates/core/tests/fixtures/` (`godot/`, `claude/`; see its README for how each was recorded). If a parser and a fixture disagree, fix the parser. Re-record Claude fixtures with `node scripts/record-claude-fixtures.mjs` when the CLI changes.
+- **End-to-end tests drive the real app** via `e2e/` (tauri-driver + WebKitWebDriver on Linux under Xvfb; see `e2e/README.md`): create a project, Play with real Godot, errors, undo/go back, managed Godot install, and optionally a real AI turn.
 
 `cargo check` (default features, no flag) currently also passes clean locally — there's no CI config in this repo (no `.github/`) codifying why `--no-default-features` specifically is the convention, so treat it as the established local habit rather than a documented hard requirement.
 
-**Known environment-dependent test failure**: several Rust tests (`src-tauri/src/commands/fs.rs`, `src-tauri/src/commands/project.rs`, `src-tauri/src/commands/overview.rs`) assert against a real fixture repo hardcoded at `/Users/raoulkaleba/Developer/hollow-meridian-test` (a genuine Godot-shaped git repo with a tracked file rename, used to prove the graph's rename-aware file identity tracking). Most of these pass on this machine because that fixture exists. One test currently fails here regardless — `commands::fs::tests::reads_a_real_gdd_doc_from_the_fixture` — because the fixture's `.ibproject/docs/gdd/sector-3-verticality.md` file isn't present on disk right now (the fixture repo exists but is missing that specific doc). This is a stale/incomplete local fixture, not a code regression — don't "fix" it by touching `fs.rs`.
+**Known environment-dependent test failures**: several Rust tests (`src-tauri/src/commands/fs.rs`, `src-tauri/src/commands/project.rs`, `src-tauri/src/commands/overview.rs`) assert against a real fixture repo hardcoded at `/Users/raoulkaleba/Developer/hollow-meridian-test` (a genuine Godot-shaped git repo with a tracked file rename, used to prove the graph's rename-aware file identity tracking). Most of these pass on this machine because that fixture exists. One test currently fails here regardless — `commands::fs::tests::reads_a_real_gdd_doc_from_the_fixture` — because the fixture's `.ibproject/docs/gdd/sector-3-verticality.md` file isn't present on disk right now (the fixture repo exists but is missing that specific doc). This is a stale/incomplete local fixture, not a code regression — don't "fix" it by touching `fs.rs`. On any machine without that fixture (e.g. cloud sessions), all 7 fixture-dependent tests fail (`git_indexer` ×2, `fs` ×2, `overview` ×2, `project` ×1); that's expected.
 
 ## What's real vs. placeholder right now
 
@@ -87,6 +102,7 @@ From `src/App.tsx`'s `simpleSections` map — deliberately honest placeholders, 
 
 | Section | State | Why |
 |---|---|---|
+| Studio | real (Phase A) | chat with the user's own Claude Code (streamed events, threads, stop), Play panel (managed Godot install, run/stop, output, parsed errors, "Ask AI to fix"), History panel (snapshots, undo, go back) |
 | Build | real | terminal + git-backed project data + `FileBrowser` code editor |
 | Documents (Design) | real | `FileBrowser` over `.ibproject/docs`, `.md`-only editing |
 | Graphs | real | `FileBrowser` over `.ibproject/graphs`, ReactFlow canvas for `.graph.json` |
@@ -96,10 +112,10 @@ From `src/App.tsx`'s `simpleSections` map — deliberately honest placeholders, 
 | QA | placeholder | bug tracking + grounded commit lookups — waiting on the core agent loop (i.e. the graph/`ask_question` pair) to get a real frontend caller |
 | Live Ops | placeholder | analytics/crash triage need a shipped game generating real data — inherently post-ship |
 
-Home/Dashboard is real: recent-projects list (`localStorage`), real CLI PATH detection (`check_cli_tools`), real New/Open Project flows with `.ibx` validation. Its own "Preferences" sub-panel is a placeholder too.
+Home/Dashboard is real: recent-projects list (`localStorage`), real CLI PATH detection (`check_cli_tools`), real New/Open Project flows — New Project now scaffolds a real blank 2D Godot project (`project_create`) with the addon, `.ibx` v2 and a first snapshot. Its own "Preferences" sub-panel is a placeholder too.
 
 ## Orientation for anything not covered here
 
-- For current build/status and what's genuinely next, read `docs/superpowers/plans/2026-09-22-project-status-and-roadmap.md`.
-- For the "no chat panel, real terminal" decision and why, read the `agent_auth_model` project memory.
+- For the product direction, read `docs/superpowers/specs/2026-09-25-ai-game-studio-product-spec.md`; for what Phase A built, the decisions made along the way and its status, read `docs/superpowers/plans/2026-09-25-phase-a-foundations.md` (its status notes are the most current record). `docs/superpowers/plans/2026-09-22-project-status-and-roadmap.md` describes the pre-Phase-A state.
+- The `agent_auth_model` project memory's "no chat panel" rule is superseded; its credential rule (InfinaBox stores no AI credentials for CLI-based agents) still holds.
 - `crates/core/src/ask.rs` is intentionally a rule-based, deterministic Q&A agent over the local graph — not an LLM call. Its own doc comment explains why (proving the grounding/retrieval loop matters more right now than model fluency) and how a real model call would slot in later.

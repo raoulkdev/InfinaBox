@@ -1,3 +1,16 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/cli", "src-tauri"]
+members = ["crates/core", "crates/cli", "crates/mcp-server", "src-tauri"]
+
+# Release settings for the whole workspace (Cargo ignores [profile] sections
+# in member crates, so they must live here). See
+# https://tauri.app/concept/size/#cargo-configuration
+#
+# `panic` is deliberately left at the default (unwind): the agent turn
+# thread in src-tauri/src/commands/agent.rs catches a panic so the chat can
+# report it and end the turn, instead of the whole app closing.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true

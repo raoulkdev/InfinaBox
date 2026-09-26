@@ -35,7 +35,6 @@ import {
   pickAndOpenExistingProject,
   pickProjectFolder,
   projectFolderName,
-  writeProjectMetadata,
 } from "@/lib/project-picker";
 import {
   loadRecentProjects,
@@ -43,6 +42,7 @@ import {
   removeRecentProject,
   type RecentProject,
 } from "@/lib/recent-projects";
+import { projectCreate } from "@/lib/studio-api";
 
 interface DashboardSectionProps {
   onOpenProject: (path: string) => void;
@@ -141,23 +141,25 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
     if (folder) setNewProjectLocation(folder);
   }
 
-  // The project root itself never needs its own `create_directory` call —
-  // it's just a parent of `.ibproject/docs`/`.ibproject/graphs`, and
-  // `create_directory` already creates missing parents along the way (see
-  // its Rust doc comment). Docs/Graphs are the two disciplines every
-  // project needs from the start; every other `.ibproject/<slug>` folder
-  // (art, audio, business, ...) is created lazily the same way, on first
-  // "New Document" click in that section.
+  // All the real work lives in `project_create` (core's `scaffold`): name
+  // validation, the blank 2D Godot template, the InfinaBox addon, the
+  // `.ibproject/` marker (`.ibx`, which is what `isInfinaBoxProject`
+  // checks), a fresh repository, and the first snapshot. If any step fails
+  // it removes what it wrote, so the user can fix the name and retry. Its
+  // errors are plain sentences meant for users ("the project name can't
+  // start with a dot"), so they're shown as-is. Documents/Graphs folders
+  // aren't pre-created any more: every `.ibproject/<slug>` folder is
+  // already created lazily on first "New Document" in its section.
   async function handleCreateProject() {
     const name = newProjectName.trim();
-    if (!newProjectLocation || !name) return;
+    // `creatingProject` also guards Enter in the name field, which isn't
+    // disabled while a create is in flight the way the button is.
+    if (!newProjectLocation || !name || creatingProject) return;
     setCreatingProject(true);
     setCreateProjectError(null);
-    const path = `${newProjectLocation}/${name}`;
+    let path: string;
     try {
-      await invoke("create_directory", { path: `${path}/.ibproject/docs` });
-      await invoke("create_directory", { path: `${path}/.ibproject/graphs` });
-      await writeProjectMetadata(path, name);
+      path = await projectCreate(newProjectLocation, name);
     } catch (err) {
       setCreateProjectError(err instanceof Error ? err.message : String(err));
       setCreatingProject(false);
@@ -201,6 +203,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
                 <Button
                   type="button"
                   size="sm"
+                  data-testid="new-project"
                   onClick={() => {
                     setOpenError(null);
                     setNewProjectOpen(true);
@@ -309,6 +312,10 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
                 return (
                   <div
                     key={name}
+                    data-testid={`cli-tool-${name}`}
+                    data-status={
+                      state.status === "loading" ? "loading" : state.installed ? "installed" : "missing"
+                    }
                     className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2"
                   >
                     <div className="flex items-center gap-2">
@@ -350,11 +357,15 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
       </ScrollArea>
 
       <Dialog open={newProjectOpen} onOpenChange={handleNewProjectOpenChange}>
-        <DialogContent>
+        {/* `minmax(0,1fr)`: the dialog is a one-column grid, and a grid
+            column's default minimum is its content's width — so a long
+            location path would widen the column past the dialog's edge,
+            dragging the Create button out of reach with it. */}
+        <DialogContent className="grid-cols-[minmax(0,1fr)]">
           <DialogHeader>
             <DialogTitle>New Project</DialogTitle>
             <DialogDescription>
-              Creates a project folder with the Documents and Graphs structure InfinaBox expects.
+              Creates a new folder with a blank 2D Godot game, ready to open in Studio.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">
@@ -363,13 +374,21 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
                 Location
               </span>
               <div className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm text-foreground/90">
+                {/* Wraps rather than truncates: the end of a path (the
+                    folder actually chosen) is the part worth seeing. */}
+                <span
+                  data-testid="new-project-location"
+                  title={newProjectLocation ?? undefined}
+                  className="min-w-0 flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm wrap-anywhere text-foreground/90"
+                >
                   {newProjectLocation ?? "No location chosen"}
                 </span>
                 <Button
                   type="button"
                   size="sm"
                   variant="secondary"
+                  className="shrink-0"
+                  data-testid="new-project-choose-location"
                   onClick={() => void handleChooseLocation()}
                 >
                   Choose…
@@ -380,6 +399,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
               <span className="text-xs font-medium tracking-wide text-muted-foreground">Name</span>
               <Input
                 autoFocus
+                data-testid="new-project-name"
                 value={newProjectName}
                 placeholder="My Game"
                 onChange={(e) => {
@@ -392,7 +412,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
               />
             </div>
             {newProjectLocation && newProjectName.trim() && (
-              <p className="truncate text-xs text-muted-foreground/80">
+              <p className="text-xs wrap-anywhere text-muted-foreground/80">
                 Will create{" "}
                 <span className="font-mono">
                   {newProjectLocation}/{newProjectName.trim()}
@@ -400,9 +420,9 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
               </p>
             )}
             {createProjectError && (
-              <Alert variant="destructive">
+              <Alert variant="destructive" data-testid="new-project-error">
                 <AlertCircle />
-                <AlertDescription>{createProjectError}</AlertDescription>
+                <AlertDescription className="wrap-anywhere">{createProjectError}</AlertDescription>
               </Alert>
             )}
           </div>
@@ -412,6 +432,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
             </Button>
             <Button
               type="button"
+              data-testid="new-project-create"
               disabled={!newProjectLocation || !newProjectName.trim() || creatingProject}
               onClick={() => void handleCreateProject()}
             >
