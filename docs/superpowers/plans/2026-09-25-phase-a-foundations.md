@@ -16,7 +16,17 @@
 
 ---
 
-## Scope
+## Status: Phase A complete (2026-09-26)
+
+All six exit-criterion steps pass end to end in the real app with a real AI turn, verified by the `e2e/` harness (`node run.mjs --scenario all --real-ai`: 12/12 steps; without the real AI: 10/10), on Linux under Xvfb with Godot 4.7.2 and Claude Code 2.1.283. The AI changed the game (dark blue background, "Hello" label) through the chat, using InfinaBox's MCP tools (`run_game`, `get_game_errors`) over the bridge; the change was snapshotted with the chat, the game relaunched, undo restored the previous state, and "Ask AI to fix" fixed a real script error. Rust tests: 218 pass, plus all 15 `--ignored` real-tool tests; the only failures are the 7 known Mac-fixture tests.
+
+Not yet verified: running the app on macOS or Windows (only Linux was exercised), the Windows-specific process and path handling, and HiDPI game-window placement.
+
+Small follow-ups carried into Phase B:
+- Pressing Stop shows a red "Something went wrong — Stopped." card; a user-initiated stop should read as a neutral note (needs a distinct event kind or reducer handling).
+- A turn whose edit exactly reverts an uncommitted hand edit produces a "No files changed" AI snapshot.
+- `snapshot::stage_everything` has no retry if a file is truncated by another writer mid-read.
+
 
 **In Phase A:**
 - Claude Code CLI agent runtime (headless, streaming), behind the `AgentRuntime` interface.
