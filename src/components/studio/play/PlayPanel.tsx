@@ -20,17 +20,19 @@ import {
   onGameError,
   onGameState,
 } from "@/lib/studio-api";
+import type { ChatSendOutcome } from "@/components/studio/chat/ChatPanel";
 import type { GameError, GameState, GodotStatus } from "@/lib/studio-types";
 import { cn } from "@/lib/utils";
 import { GameErrorList, type ErrorEntry } from "./GameErrorList";
 import { GameOutputLog } from "./GameOutputLog";
 import { GodotInstallCard } from "./GodotInstallCard";
-import { errorKey, shortGodotVersion } from "./play-format";
+import { errorKey, isParseError, scriptLoadFailurePath, shortGodotVersion } from "./play-format";
 
 export interface PlayPanelProps {
   projectPath: string;
-  /** Sends a message to the chat (wired to ChatPanel's registered send). */
-  onAskAiToFix: (message: string) => void;
+  /** Sends a message to the chat (wired to ChatPanel's registered send);
+   * returns what the chat did with it, or `null` if the chat isn't there. */
+  onAskAiToFix: (message: string) => ChatSendOutcome | null;
 }
 
 /** Distinct errors kept in the list; repeats of one error only bump its
@@ -60,18 +62,52 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Folds new errors into the list: a repeat bumps its entry's count, a new
- * one goes on top, and the oldest distinct errors fall off past the cap. */
+/** Whether `follow` is a message about the same problem as `entry`'s parse
+ * error, rather than a problem of its own. One broken GDScript line makes
+ * Godot 4.7 print up to three blocks (see the e2e harness's game logs): the
+ * parse error, sometimes a second wording of it at the same file and line,
+ * and `Failed to load script "res://…"` with no location of its own. They
+ * are one problem with one fix, so they share one row, the parse error's. */
+function isFollowUp(entry: ErrorEntry, follow: GameError): boolean {
+  const main = entry.error;
+  if (!isParseError(main)) return false;
+  if (scriptLoadFailurePath(follow) === main.file) return true;
+  return isParseError(follow) && follow.file === main.file && follow.line === main.line;
+}
+
+/** Folds new errors into the list: a repeat bumps its entry's count, a
+ * follow-up to a listed parse error joins that error's row (see
+ * `isFollowUp`), a new one goes on top, and the oldest distinct errors fall
+ * off past the cap. Errors about different things always stay separate. */
 function mergeErrors(prev: ErrorEntry[], incoming: GameError[]): ErrorEntry[] {
   let next = prev;
   for (const error of incoming) {
     const key = errorKey(error);
-    const existing = next.findIndex((e) => e.key === key);
+    const existing = next.findIndex(
+      (e) => e.key === key || e.related.some((r) => errorKey(r) === key),
+    );
     if (existing >= 0) {
-      next = next.map((e, i) => (i === existing ? { ...e, count: e.count + 1 } : e));
-    } else {
-      next = [{ key, error, count: 1 }, ...next].slice(0, MAX_ERRORS);
+      // A repeat of the row's own error counts; a repeated follow-up is
+      // the same message about the same problem, already shown.
+      if (next[existing].key === key) {
+        next = next.map((e, i) => (i === existing ? { ...e, count: e.count + 1 } : e));
+      }
+      continue;
     }
+    const parent = next.findIndex((e) => isFollowUp(e, error));
+    if (parent >= 0) {
+      next = next.map((e, i) => (i === parent ? { ...e, related: [...e.related, error] } : e));
+      continue;
+    }
+    // A parse error can also arrive after its follow-ups (they're separate
+    // stderr blocks): pull any already listed on their own into its row.
+    const entry: ErrorEntry = { key, error, count: 1, related: [] };
+    const rest: ErrorEntry[] = [];
+    for (const e of next) {
+      if (e.related.length === 0 && isFollowUp(entry, e.error)) entry.related.push(e.error);
+      else rest.push(e);
+    }
+    next = [entry, ...rest].slice(0, MAX_ERRORS);
   }
   return next;
 }

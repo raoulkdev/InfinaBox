@@ -1,5 +1,4 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { GripHorizontal } from "lucide-react";
 import { debounce } from "@/lib/debounce";
 import { cn } from "@/lib/utils";
 
@@ -57,6 +56,9 @@ const GAP = 8;
 // mine," which is where a swap starts feeling expected rather than early
 // or sticky.
 const SWAP_THRESHOLD_RATIO = 0.5;
+// Height of the reorder grip, in pixels — see where it's rendered for why
+// it has to stay within a header's top 4px.
+const GRIP_HEIGHT = 4;
 
 interface LayoutState {
   order: string[];
@@ -379,20 +381,24 @@ export function ResizablePanelGroup({ storageKey, panels, className }: Resizable
                * instead of taking a layout row of its own — blocks stay
                * exactly as tall as they'd be without this system, and the
                * grip only appears (and only accepts pointer input) while
-               * hovering the block. Small and centered on purpose: every
-               * content component already puts its own label/buttons at
-               * the left/right edges of its header, so a centered pill
-               * never sits on top of something else clickable. Deliberately
-               * NOT `data-tauri-drag-region`: that would hand the
-               * pointer-down to the OS window-drag handler before this
-               * component's own pointermove/pointerup ever sees it. */}
+               * hovering the block. It's a thin bar inside the top
+               * `GRIP_HEIGHT` pixels, above where any header's controls
+               * start: headers are `h-9` rows with vertically centered
+               * controls at most `h-7` tall, so their top edge sits 4px
+               * down. A taller, centered pill used to cover whatever a
+               * narrow header had in the middle (Studio's Play "Restart",
+               * Chat's "Conversations" picker). Deliberately NOT
+               * `data-tauri-drag-region`: that would hand the pointer-down
+               * to the OS window-drag handler before this component's own
+               * pointermove/pointerup ever sees it. */}
               <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center">
                 <div
+                  data-testid="panel-reorder-grip"
+                  title="Drag to move this panel"
                   onPointerDown={startReorder(id)}
-                  className="pointer-events-none mt-1 flex h-4 w-8 cursor-grab items-center justify-center rounded-full bg-border opacity-0 shadow-sm transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 active:cursor-grabbing"
-                >
-                  <GripHorizontal className="size-3 text-foreground" />
-                </div>
+                  style={{ height: GRIP_HEIGHT }}
+                  className="pointer-events-none w-16 cursor-grab rounded-b-full bg-muted-foreground/50 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 hover:bg-muted-foreground active:cursor-grabbing"
+                />
               </div>
               {!isLast && <ResizeHandle onPointerDown={startResize(id, layout.order[i + 1])} />}
             </div>

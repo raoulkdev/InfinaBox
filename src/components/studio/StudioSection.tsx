@@ -1,7 +1,7 @@
 import { useCallback, useRef } from "react";
 import { Sparkles } from "lucide-react";
 import { ResizablePanelGroup } from "@/components/cockpit/ResizablePanelGroup";
-import { ChatPanel } from "@/components/studio/chat/ChatPanel";
+import { ChatPanel, type ChatSendOutcome } from "@/components/studio/chat/ChatPanel";
 import { HistoryPanel } from "@/components/studio/history/HistoryPanel";
 import { PlayPanel } from "@/components/studio/play/PlayPanel";
 
@@ -23,13 +23,16 @@ export function StudioSection({ projectPath }: StudioSectionProps) {
   // ChatPanel hands over its `send` once on mount; the Play panel's "Ask AI
   // to fix" calls through this ref, so neither panel owns the other's state
   // and a re-registered `send` never re-renders Play.
-  const sendRef = useRef<((text: string) => void) | null>(null);
-  const registerSend = useCallback((send: (text: string) => void) => {
+  // `null` back from `askAiToFix` means the chat hasn't registered yet, so
+  // nothing happened — the caller must not claim otherwise.
+  const sendRef = useRef<((text: string) => ChatSendOutcome) | null>(null);
+  const registerSend = useCallback((send: (text: string) => ChatSendOutcome) => {
     sendRef.current = send;
   }, []);
-  const askAiToFix = useCallback((message: string) => {
-    sendRef.current?.(message);
-  }, []);
+  const askAiToFix = useCallback(
+    (message: string): ChatSendOutcome | null => sendRef.current?.(message) ?? null,
+    [],
+  );
 
   // Honest empty state rather than panels querying a project that isn't
   // there: every Studio panel reads from (and writes to) a real project.
