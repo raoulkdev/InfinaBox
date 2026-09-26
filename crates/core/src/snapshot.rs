@@ -172,6 +172,10 @@ pub fn list_snapshots(project: &Path, limit: usize) -> Result<Vec<Snapshot>> {
 /// Makes the project look like `snapshot_id` again, as a new commit (after
 /// auto-saving any uncommitted work). Returns that commit.
 ///
+/// Uncommitted chat alone doesn't trigger the auto-save: it's carried into
+/// the new commit as it is instead (see below), so going back after a turn
+/// that only talked leaves no empty "Auto-save" entry in the history.
+///
 /// Three things are deliberately *not* taken from the target:
 /// - `.ibproject/chat/` stays as it is now (chat history is a record, and
 ///   the conversation about going back must survive going back);
@@ -205,25 +209,47 @@ fn restore_to_locked(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
     ensure_clean_state(&repo)?;
     let target = resolve_commit(&repo, snapshot_id)?;
 
-    // 1. Nothing uncommitted is ever lost: save it as its own snapshot.
-    create_snapshot_locked(project, AUTO_SAVE_TITLE, None)
-        .context("failed to auto-save uncommitted changes before going back")?;
+    // 1. Nothing uncommitted is ever lost: save it as its own snapshot —
+    // unless the chat is all that's uncommitted (the usual case: the talk
+    // since the last snapshot). The chat is carried into the restore commit
+    // below and never checked out, so an auto-save would only add a history
+    // entry with nothing in it to go back to.
+    let staged_id = stage_everything(&repo)?;
+    let only_chat_dirty = match head_commit(&repo)? {
+        Some(head) => {
+            let head_chat = entry_at(&head.tree()?, &CHAT_DIR);
+            staged_id != head.tree_id()
+                && set_path(&repo, &repo.find_tree(staged_id)?, &CHAT_DIR, head_chat)?
+                    == head.tree_id()
+        }
+        None => false,
+    };
+    if !only_chat_dirty {
+        create_snapshot_locked(project, AUTO_SAVE_TITLE, None)
+            .context("failed to auto-save uncommitted changes before going back")?;
+    }
 
     let head = head_commit(&repo)?
         .context("the project has no history yet, so there is nothing to go back to")?;
-    let head_tree = head.tree()?;
+    // What the index and disk hold now: HEAD's tree after an auto-save, or
+    // HEAD's tree plus the uncommitted chat when only the chat was dirty.
+    let current_tree = if only_chat_dirty {
+        repo.find_tree(staged_id)?
+    } else {
+        head.tree()?
+    };
     let target_tree = target.tree().context("failed to read the target's files")?;
 
     // 2. The tree to go back to: the target's, with today's chat and project
     // marker grafted in and never-committed local files left out.
-    let head_entry = |path: &[&str]| {
-        head_tree
-            .get_path(&path.iter().collect::<PathBuf>())
-            .ok()
-            .map(|e| (e.id(), e.filemode()))
-    };
-    let mut restore_id = set_path(&repo, &target_tree, &CHAT_DIR, head_entry(&CHAT_DIR))?;
-    if let Some(marker) = head_entry(&PROJECT_MARKER) {
+    let current_entry = |path: &[&str]| entry_at(&current_tree, path);
+    let mut restore_id = set_path(
+        &repo,
+        &target_tree,
+        &CHAT_DIR,
+        current_entry(&CHAT_DIR),
+    )?;
+    if let Some(marker) = current_entry(&PROJECT_MARKER) {
         restore_id = set_path(
             &repo,
             &repo.find_tree(restore_id)?,
@@ -236,7 +262,8 @@ fn restore_to_locked(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
         let parts: Vec<&str> = path.split('/').collect();
         restore_id = set_path(&repo, &repo.find_tree(restore_id)?, &parts, None)?;
     }
-    if restore_id == head.tree_id() {
+    // Already there (chat aside): no commit that would only save the chat.
+    if restore_id == current_tree.id() {
         return snapshot_of_any(&repo, &head);
     }
 
@@ -249,12 +276,12 @@ fn restore_to_locked(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
     let oid = commit_tree(&repo, restore_id, Some(&head), &title, &trailers)?;
 
     // 4. Only now, with everything committed, overwrite the working
-    // directory — but only the paths that differ between HEAD and the
-    // restore tree. Everything else (the chat, in particular) is never
-    // touched, so a write that lands between the auto-save and here
+    // directory — but only the paths that differ between the current tree
+    // and the restore tree. Everything else (the chat, in particular) is
+    // never touched, so a write that lands between staging and here
     // survives. Every path holding a never-committed file was removed from
     // the restore tree above, so it can't be in this list.
-    checkout_changed_paths(&repo, &head_tree, &repo.find_tree(restore_id)?)?;
+    checkout_changed_paths(&repo, &current_tree, &repo.find_tree(restore_id)?)?;
 
     let commit = repo.find_commit(oid)?;
     snapshot_of_any(&repo, &commit)
@@ -425,6 +452,14 @@ fn stage_everything(repo: &Repository) -> Result<Oid> {
     index
         .write_tree()
         .context("failed to write the staged tree")
+}
+
+/// The (id, mode) of the entry at `path` (split into components) in `tree`,
+/// or `None` when there's nothing there — the shape `set_path` takes.
+fn entry_at(tree: &Tree, path: &[&str]) -> Option<(Oid, i32)> {
+    tree.get_path(&path.iter().collect::<PathBuf>())
+        .ok()
+        .map(|e| (e.id(), e.filemode()))
 }
 
 /// Returns a copy of `base` with the entry at `path` (split into
@@ -1230,6 +1265,64 @@ mod tests {
     }
 
     #[test]
+    fn uncommitted_chat_alone_does_not_auto_save() {
+        use crate::chat_store::{append, create_thread, load_thread};
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "player.gd", "var speed = 1\n");
+        let thread = create_thread(dir.path(), "Speed", "claude-code").unwrap();
+        append(dir.path(), &thread.id, &user("make it 2", 1)).unwrap();
+        create_snapshot(dir.path(), "Start", None).unwrap().unwrap();
+        write(dir.path(), "player.gd", "var speed = 2\n");
+        create_snapshot(dir.path(), "make it 2", Some((&thread.id, 1)))
+            .unwrap()
+            .unwrap();
+
+        // Only the chat is uncommitted (an existing thread grew, and a new
+        // one started), then undo.
+        append(dir.path(), &thread.id, &user("undo that", 2)).unwrap();
+        let other = create_thread(dir.path(), "Other", "claude-code").unwrap();
+        append(dir.path(), &other.id, &user("hello", 3)).unwrap();
+        let undo = undo_last(dir.path()).unwrap().unwrap();
+        assert_eq!(undo.title, "Went back to: Start");
+        assert_eq!(read(dir.path(), "player.gd"), "var speed = 1\n");
+
+        let titles: Vec<_> = list_snapshots(dir.path(), 10)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.title)
+            .collect();
+        assert_eq!(titles, ["Went back to: Start", "make it 2", "Start"]);
+
+        // The chat on disk is untouched, and the restore commit carries it,
+        // so disk and HEAD agree.
+        let (_, records) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(records, vec![user("make it 2", 1), user("undo that", 2)]);
+        let (_, records) = load_thread(dir.path(), &other.id).unwrap();
+        assert_eq!(records, vec![user("hello", 3)]);
+        assert_eq!(create_snapshot(dir.path(), "Nothing", None).unwrap(), None);
+
+        // Going back to where the project already is (chat aside) with only
+        // the chat dirty makes no commit at all.
+        append(dir.path(), &thread.id, &user("stay", 4)).unwrap();
+        let count = commit_count(dir.path());
+        let same = restore_to(dir.path(), &undo.id).unwrap();
+        assert_eq!(same, undo);
+        assert_eq!(commit_count(dir.path()), count);
+        let (_, records) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(records.len(), 3);
+
+        // A game file dirty alongside the chat still auto-saves.
+        write(dir.path(), "player.gd", "var speed = 7\n");
+        undo_last(dir.path()).unwrap().unwrap();
+        let titles: Vec<_> = list_snapshots(dir.path(), 2)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.title)
+            .collect();
+        assert_eq!(titles[1], AUTO_SAVE_TITLE);
+    }
+
+    #[test]
     fn nested_git_repositories_are_skipped_not_fatal() {
         let dir = TempDir::new().unwrap();
         write(dir.path(), "main.gd", "extends Node\n");
@@ -1515,10 +1608,27 @@ mod tests {
             let project = project.clone();
             let done = done.clone();
             std::thread::spawn(move || {
-                let mut i = 0;
-                while !done.load(Ordering::SeqCst) {
-                    write(&project, &format!(".ibproject/chat/turn-{i}.jsonl"), "{}\n");
-                    create_snapshot(&project, &format!("Turn {i}"), Some(("t", i))).unwrap();
+                // A restore commits whatever chat is on disk, so it can
+                // sweep up a turn's chat file before the turn's own
+                // snapshot runs, leaving that snapshot nothing to commit.
+                // Keep going until at least one turn commit has landed, so
+                // the check below never depends on how the threads happened
+                // to be scheduled.
+                let (mut i, mut committed) = (0, 0);
+                while !done.load(Ordering::SeqCst) || committed == 0 {
+                    // Written the way `chat_store` replaces a file (temp
+                    // file, then rename), never truncated in place: this
+                    // write runs outside the lock, and staging a file that is
+                    // being truncated under it fails in libgit2.
+                    let rel = format!(".ibproject/chat/turn-{i}.jsonl");
+                    write(&project, &format!("{rel}.tmp"), "{}\n");
+                    fs::rename(project.join(format!("{rel}.tmp")), project.join(&rel)).unwrap();
+                    if create_snapshot(&project, &format!("Turn {i}"), Some(("t", i)))
+                        .unwrap()
+                        .is_some()
+                    {
+                        committed += 1;
+                    }
                     i += 1;
                 }
             })

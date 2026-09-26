@@ -33,10 +33,10 @@ Scenario 6 downloads the real Godot release (~75 MB) from GitHub.
 
 | Step | Checks |
 |---|---|
-| 4 | With the game running, the chat gets "make the background dark blue and add a label that says Hello"; the turn finishes (with reply text, no error card, up to 5 minutes); History lists a new snapshot titled from the message; the snapshot's commit carries the chat file and nothing under `.ibproject/chat/` is left uncommitted; the change on disk adds a `Label` saying Hello and a colour; the game restarts (new process id) — screenshot of the game window with its average colour noted |
-| 5 | "Undo last change": the project (chat aside) matches the state before the AI's change, the working tree is clean, the chat still holds the request, the game restarts without errors — screenshot |
-| 6 | A script error made by hand shows as a `res://player.gd, line N` row; "Ask AI to fix" is **sent** (not left as a draft); the AI's turn finishes; the game restarts and no error about the game's own files remains |
-| 5b | "Go back" (through the confirm dialog) to the AI's snapshot restores it exactly (chat aside) and the game restarts |
+| 4 | With the game running, the chat gets "make the background dark blue and add a label that says Hello"; the turn finishes (with reply text, no error card, up to 5 minutes); History lists a new snapshot titled from the message; the snapshot's commit carries the chat file and nothing under `.ibproject/chat/` is left uncommitted; the change on disk adds a `Label` saying Hello and a colour; the game restarts (new process id), and only once when the AI ran the game itself after its last edit — screenshot of the game window with its average colour noted |
+| 5 | "Undo last change": the project (chat aside) matches the state before the AI's change, the working tree is clean, the chat still holds the request, the game restarts exactly once without errors — screenshot |
+| 6 | A script error made by hand shows as a `res://player.gd, line N` row; "Ask AI to fix" is **sent** (not left as a draft); the AI's turn finishes; the game restarts (once, if the AI ran it after its fix) and no error about the game's own files remains |
+| 5b | "Go back" (through the confirm dialog) to the AI's snapshot restores it exactly (chat aside) and the game restarts exactly once |
 | mcp | The saved chat shows the AI calling `mcp__infinabox__*` tools, including at least one game tool (`run_game`, `get_game_errors`, …) that succeeded — which only works if `<app> --mcp-server` started and reached the app's bridge |
 | stop | While a turn runs, History's "Undo last change" and every "Go back" are disabled with "Wait for the AI to finish" shown; pressing Stop keeps the composer on "Stopping…" until the backend's `agent-turn-finished`, and a message sent straight after is taken (not refused as "still working") and answered |
 
@@ -141,7 +141,11 @@ step's result and notes. The exit code is 0 only when every step passed.
   Xvfb) and letting a just-started game draw frames or report errors.
 - **Game processes** are found by their real command line (`ps`), matched
   on the project's path, so a restart is proven by a new process id, and
-  the game window by `xdotool search --pid`.
+  the game window by `xdotool search --pid`. At startup Godot forks
+  short-lived copies of itself (same command line) to probe the GPUs;
+  processes whose parent is a game process are left out, so those aren't
+  mistaken for a second game. Restarts are counted by sampling the game's
+  process ids every 200ms around a turn or a restore.
 - **Standing in for the AI** (without `--real-ai`). Step 4 edits a script
   on disk and then calls the app's own `snapshot_create` command through
   the webview's IPC bridge (`window.__TAURI_INTERNALS__.invoke`), the same

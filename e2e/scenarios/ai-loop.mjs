@@ -143,6 +143,77 @@ async function waitForRestart(run, driver, project, before, what) {
   return now;
 }
 
+/** Records every game process id seen from now until `stop()`, sampled
+ * every 200ms, so a turn's restarts can be counted afterwards (a game run
+ * by the AI mid-turn and a restart after the turn each start a new process;
+ * both live longer than a sample, since each prints its ready line). */
+function watchGamePids(project) {
+  const t0 = Date.now();
+  // The pids in first-seen order, plus (as properties) each one's command
+  // line and the first/last time it was seen, for the notes.
+  const seen = [];
+  const sample = () => {
+    const t = Date.now() - t0;
+    for (const g of gameProcesses(project)) {
+      seen.times = { ...seen.times, [g.pid]: [seen.times?.[g.pid]?.[0] ?? t, t] };
+      if (seen.includes(g.pid)) continue;
+      seen.push(g.pid);
+      seen.details = { ...seen.details, [g.pid]: `parent ${g.ppid}: ${g.args.replace(project, "<project>")}` };
+    }
+  };
+  sample();
+  const timer = setInterval(sample, 200);
+  // A step that fails before `stop()` mustn't keep the run from exiting.
+  timer.unref();
+  return {
+    stop() {
+      clearInterval(timer);
+      sample();
+      return seen;
+    },
+  };
+}
+
+const FILE_WRITING_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit", "mcp__infinabox__write_context_card"];
+
+/** Checks the game started exactly once for a turn whose last game run came
+ * after its last file edit (the app mustn't restart it again), and at least
+ * once otherwise (the app's own restart). */
+function checkTurnRestarts(run, events, pidsBefore, seen) {
+  const uses = events.filter((e) => e.type === "tool_use");
+  const lastEdit = uses.findLastIndex((e) => FILE_WRITING_TOOLS.includes(e.name));
+  const lastRun = uses.findLastIndex((e) => e.name === "mcp__infinabox__run_game");
+  const started = seen.filter((pid) => !pidsBefore.includes(pid));
+  const ranAfterEdit = lastRun > lastEdit && lastEdit >= 0;
+  run.note(
+    `game processes started during and after the turn: ${JSON.stringify(started)} ` +
+      `(the AI ${ranAfterEdit ? "ran the game after its last edit" : "didn't run the game after its last edit"})`,
+  );
+  noteProcessDetails(run, started, seen);
+  if (ranAfterEdit && started.length !== 1) {
+    throw new Error(`the AI already ran the game after its change, but ${started.length} game processes started`);
+  }
+  if (started.length === 0) throw new Error("no game process started for the turn's change");
+}
+
+/** Checks a restore restarted the running game exactly once. */
+function checkRestoreRestart(run, pidsBefore, seen) {
+  const started = seen.filter((pid) => !pidsBefore.includes(pid));
+  run.note(`game processes started: ${JSON.stringify(started)}`);
+  noteProcessDetails(run, started, seen);
+  if (started.length !== 1) throw new Error(`expected the game to restart once, but ${started.length} game processes started`);
+}
+
+/** When more than one game process started, when each was seen and what
+ * it was, to tell a second restart from something else. */
+function noteProcessDetails(run, started, seen) {
+  if (started.length < 2) return;
+  for (const pid of started) {
+    const [first, last] = seen.times?.[pid] ?? [];
+    run.note(`  ${pid} seen ${first}–${last}ms (${seen.details?.[pid]})`);
+  }
+}
+
 /** Screenshot of the game's own window, with its average colour noted. */
 async function shootGame(run, project, label) {
   const windows = await waitUntil(() => gameWindows(project).length > 0 && gameWindows(project), {
@@ -185,6 +256,7 @@ export async function aiLoop(run, app, config, state, saveGameLog) {
       const pidsBefore = gamePids(p());
       run.note(`before: HEAD ${state.beforeAiCommit.slice(0, 8)}, game pid ${pidsBefore.join(",")}`);
 
+      const pidWatch = watchGamePids(p());
       await sendChat(driver, AI_REQUEST);
       await run.shot("ai-turn-started");
       await waitForTurn(run, driver, { startedBy: "typing the request" });
@@ -224,7 +296,9 @@ export async function aiLoop(run, app, config, state, saveGameLog) {
       if (colorLines.length === 0) throw new Error("the change on disk sets no colour");
 
       await waitForRestart(run, driver, p(), pidsBefore, "the game to restart with the AI's change");
-      await new Promise((r) => setTimeout(r, 2000));
+      // Long enough for a second, unwanted restart to have started.
+      await new Promise((r) => setTimeout(r, 5000));
+      checkTurnRestarts(run, events, pidsBefore, pidWatch.stop());
       const errors = await visibleTexts(driver, tid("game-error"));
       run.note(`error rows after the restart: ${JSON.stringify(errors)}`);
       state.aiColor = await shootGame(run, p(), "game-after-ai");
@@ -249,6 +323,7 @@ export async function aiLoop(run, app, config, state, saveGameLog) {
     async () => {
       const before = gamePids(p());
       if (before.length === 0) throw new Error("expected the game to be running before undo");
+      const pidWatch = watchGamePids(p());
       await clickWhenEnabled(driver, tid("undo-last"));
       const notice = await waitVisible(driver, tid("history-notice"), { timeoutMs: 30_000 });
       run.note(`notice: ${await notice.getText()}`);
@@ -262,7 +337,8 @@ export async function aiLoop(run, app, config, state, saveGameLog) {
       run.note(`the chat still holds the request: ${chatKept}`);
       if (!chatKept) throw new Error("undo rewound the chat");
       await waitForRestart(run, driver, p(), before, "the game to restart after undo");
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 3000));
+      checkRestoreRestart(run, before, pidWatch.stop());
       const errors = await visibleTexts(driver, tid("game-error"));
       if (errors.length > 0) throw new Error(`errors listed after undo: ${JSON.stringify(errors)}`);
       const avg = await shootGame(run, p(), "game-after-undo");
@@ -304,6 +380,7 @@ export async function aiLoop(run, app, config, state, saveGameLog) {
       }
       if (!askButton) throw new Error(`no "Ask AI to fix" on the ${where} row`);
       await waitAttr(driver, tid("chat-panel"), "data-busy", "false");
+      const pidWatch = watchGamePids(p());
       await askButton.click();
       const outcome = await waitUntil(async () => (await askButton.getAttribute("data-outcome")) || null, {
         what: "the Ask AI to fix button to report what happened",
@@ -333,8 +410,10 @@ export async function aiLoop(run, app, config, state, saveGameLog) {
 
       // The game was running, so the turn's change restarts it.
       await waitForRestart(run, driver, p(), pidsBefore, "the game to restart after the fix");
-      // Give the restarted game a moment to report any error it has.
-      await new Promise((r) => setTimeout(r, 3000));
+      // Give the restarted game a moment to report any error it has (and
+      // a second, unwanted restart time to start).
+      await new Promise((r) => setTimeout(r, 5000));
+      checkTurnRestarts(run, events, pidsBefore, pidWatch.stop());
       const errors = await visibleTexts(driver, tid("game-error"));
       run.note(`error rows after the fix: ${JSON.stringify(errors)}`);
       await shootGame(run, p(), "game-after-fix");
@@ -355,6 +434,7 @@ export async function aiLoop(run, app, config, state, saveGameLog) {
       }
       if (!target) throw new Error(`no History row for the AI's snapshot "${want}"`);
       const before = gamePids(p());
+      const pidWatch = watchGamePids(p());
       await driver.executeScript("arguments[0].scrollIntoView({block: 'center'})", target);
       await target.findElement(tid("snapshot-go-back")).click();
       const dialog = await waitVisible(driver, By.css('[role="alertdialog"]'));
@@ -377,7 +457,9 @@ export async function aiLoop(run, app, config, state, saveGameLog) {
       if (before.length > 0) {
         await waitForRestart(run, driver, p(), before, "the game to restart after going back");
         await shootGame(run, p(), "game-after-go-back");
+        checkRestoreRestart(run, before, pidWatch.stop());
       }
+      pidWatch.stop();
       await clickWhenEnabled(driver, tid("game-stop"));
       await waitAttr(driver, tid("play-panel"), "data-game-state", "stopped", { timeoutMs: 30_000 });
     },
