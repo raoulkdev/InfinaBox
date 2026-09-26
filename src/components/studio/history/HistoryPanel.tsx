@@ -27,7 +27,14 @@ import { absoluteTime, relativeTime } from "./relative-time";
 
 export interface HistoryPanelProps {
   projectPath: string;
+  /** An AI turn is running in this project's chat. Undo and go back are
+   * held off until it ends: the AI may still be writing files, and its own
+   * snapshot of the turn lands only when the turn finishes. */
+  aiWorking?: boolean;
 }
+
+/** Why undo / go back are unavailable while the AI works — said as-is. */
+const AI_WORKING_REASON = "Wait for the AI to finish";
 
 /** How many snapshots to list. One extra is requested so the panel knows
  * whether there are more, and says it's showing only the latest ones only
@@ -59,10 +66,12 @@ interface SnapshotRowProps {
   latest: boolean;
   now: number;
   disabled: boolean;
+  /** Shown as the Go back button's tooltip when set (why it's disabled). */
+  disabledReason: string | null;
   onGoBack: (snapshot: Snapshot) => void;
 }
 
-function SnapshotRow({ snapshot, latest, now, disabled, onGoBack }: SnapshotRowProps) {
+function SnapshotRow({ snapshot, latest, now, disabled, disabledReason, onGoBack }: SnapshotRowProps) {
   // `thread_id` is set only on snapshots an AI chat turn produced, so this
   // tells "the AI did this" apart from a save point made any other way. Said
   // in visible text; the icon is just decoration beside it.
@@ -97,24 +106,27 @@ function SnapshotRow({ snapshot, latest, now, disabled, onGoBack }: SnapshotRowP
           {byAi ? "by your AI" : "save point"}
         </span>
       </div>
-      <Button
-        type="button"
-        size="xs"
-        variant="ghost"
-        data-testid="snapshot-go-back"
-        disabled={disabled}
-        className="shrink-0 opacity-60 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
-        aria-label={`Go back to this point: ${snapshot.title}`}
-        onClick={() => onGoBack(snapshot)}
-      >
-        <History data-icon="inline-start" />
-        Go back
-      </Button>
+      {/* The wrapper carries the tooltip: a disabled button gets no hover. */}
+      <span className="shrink-0" title={disabledReason ?? undefined}>
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          data-testid="snapshot-go-back"
+          disabled={disabled}
+          className="opacity-60 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
+          aria-label={`Go back to this point: ${snapshot.title}`}
+          onClick={() => onGoBack(snapshot)}
+        >
+          <History data-icon="inline-start" />
+          Go back
+        </Button>
+      </span>
     </li>
   );
 }
 
-export function HistoryPanel({ projectPath }: HistoryPanelProps) {
+export function HistoryPanel({ projectPath, aiWorking = false }: HistoryPanelProps) {
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [refreshToken, setRefreshToken] = useState(0);
   const [busy, setBusy] = useState<"undo" | "restore" | null>(null);
@@ -175,6 +187,12 @@ export function HistoryPanel({ projectPath }: HistoryPanelProps) {
   }, [notice]);
 
   const snapshots = list.status === "ready" ? list.snapshots : [];
+  const blockedReason = aiWorking ? AI_WORKING_REASON : null;
+
+  // A go-back confirmation left open when a turn starts can't be confirmed.
+  useEffect(() => {
+    if (aiWorking) setConfirming(null);
+  }, [aiWorking]);
 
   async function undoLast() {
     setBusy("undo");
@@ -221,21 +239,28 @@ export function HistoryPanel({ projectPath }: HistoryPanelProps) {
       <div data-tauri-drag-region className="flex h-9 shrink-0 items-center gap-2 px-3">
         <span className="text-xs font-medium tracking-wide text-muted-foreground">History</span>
         <div className="flex-1" />
-        <Button
-          type="button"
-          size="xs"
-          variant="outline"
-          data-testid="undo-last"
-          disabled={busy !== null || snapshots.length === 0}
-          onClick={() => void undoLast()}
-        >
-          {busy === "undo" ? (
-            <Loader2 data-icon="inline-start" className="animate-spin" />
-          ) : (
-            <Undo2 data-icon="inline-start" />
-          )}
-          Undo last change
-        </Button>
+        {aiWorking && (
+          <span data-testid="history-ai-working" className="truncate text-[11px] text-muted-foreground">
+            {AI_WORKING_REASON}
+          </span>
+        )}
+        <span className="shrink-0" title={blockedReason ?? undefined}>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            data-testid="undo-last"
+            disabled={busy !== null || snapshots.length === 0 || aiWorking}
+            onClick={() => void undoLast()}
+          >
+            {busy === "undo" ? (
+              <Loader2 data-icon="inline-start" className="animate-spin" />
+            ) : (
+              <Undo2 data-icon="inline-start" />
+            )}
+            Undo last change
+          </Button>
+        </span>
       </div>
 
       <AnimatePresence initial={false}>
@@ -295,7 +320,8 @@ export function HistoryPanel({ projectPath }: HistoryPanelProps) {
                 snapshot={snapshot}
                 latest={i === 0}
                 now={now}
-                disabled={busy !== null}
+                disabled={busy !== null || aiWorking}
+                disabledReason={blockedReason}
                 onGoBack={setConfirming}
               />
             ))}

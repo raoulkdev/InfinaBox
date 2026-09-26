@@ -44,7 +44,17 @@ export interface ChatPanelProps {
    * reaches the chat without the two panels sharing state. It returns
    * what happened to the text. */
   onRegisterSend: (send: (text: string) => ChatSendOutcome) => void;
+  /** Told whether any AI turn is running in this chat (any thread, until
+   * its `agent-turn-finished`) — so History can hold off undo/go back
+   * while the AI is still editing files. */
+  onTurnRunningChange?: (running: boolean) => void;
 }
+
+/** How long after a confirmed Stop the composer waits for the backend's
+ * `agent-turn-finished` before re-enabling itself anyway. The backend holds
+ * a stopped turn for a few seconds (the CLI's SIGTERM grace, then the
+ * post-turn snapshot), so this is comfortably longer than that. */
+const STOP_FALLBACK_MS = 15_000;
 
 /** What a brand-new project's first conversation is called. */
 const DEFAULT_THREAD_TITLE = "Main";
@@ -60,7 +70,7 @@ function latestThread(threads: ThreadSummary[]): ThreadSummary {
   return threads.reduce((a, b) => (b.created_at > a.created_at ? b : a));
 }
 
-export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
+export function ChatPanel({ projectPath, onRegisterSend, onTurnRunningChange }: ChatPanelProps) {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [view, setView] = useState<ChatView>(emptyChatView);
@@ -87,6 +97,9 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
   // mount), so an empty project never ends up with two "Main" threads.
   const initRequest = useRef<{ key: string; promise: Promise<ThreadSummary[]> } | null>(null);
 
+  // The fallback timer armed by a confirmed Stop (see `handleStop`).
+  const stopFallback = useRef<number | null>(null);
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
 
@@ -98,6 +111,14 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
     runningRef.current = running;
     busyRef.current = busy;
   });
+
+  function clearStopFallback() {
+    if (stopFallback.current !== null) {
+      window.clearTimeout(stopFallback.current);
+      stopFallback.current = null;
+    }
+  }
+  useEffect(() => clearStopFallback, []);
 
   function markRunning(threadId: string, isRunning: boolean) {
     // Computed from the ref (updated right away) rather than a state
@@ -202,6 +223,7 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
     const stopFinished = onAgentTurnFinished(({ threadId }) => {
       markRunning(threadId, false);
       if (threadId !== activeRef.current) return;
+      clearStopFallback();
       setStopping(false);
       setView((v) => endTurn(v));
       void showThread(threadId, { quiet: true });
@@ -255,6 +277,11 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
     onRegisterSend(stableSend);
   }, [onRegisterSend, stableSend]);
 
+  const anyRunning = running.size > 0;
+  useEffect(() => {
+    onTurnRunningChange?.(anyRunning);
+  }, [onTurnRunningChange, anyRunning]);
+
   function handleComposerSend() {
     const text = draft;
     setDraft("");
@@ -267,15 +294,24 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
     setStopping(true);
     try {
       await agentCancel(threadId);
-      // `agent-turn-finished` should follow a cancel, but don't rely on it:
-      // once the backend has confirmed the stop, the composer must never
-      // stay stuck on "Stop".
-      markRunning(threadId, false);
-      if (activeRef.current === threadId) {
-        busyRef.current = false;
-        setStopping(false);
-        setView((v) => endTurn(v));
-      }
+      // The cancel only asks the AI to stop: the backend still holds the
+      // turn while the CLI exits (a few seconds' grace) and the post-turn
+      // snapshot is taken, and refuses a new message until then. So the
+      // composer stays on "Stopping…" until `agent-turn-finished` for this
+      // thread (handled above). That should always follow, but don't rely
+      // on it: after STOP_FALLBACK_MS the composer frees itself so it can
+      // never stay stuck (a send that's still too early then gets the
+      // backend's own "still working" error in the transcript).
+      clearStopFallback();
+      stopFallback.current = window.setTimeout(() => {
+        stopFallback.current = null;
+        markRunning(threadId, false);
+        if (activeRef.current === threadId) {
+          busyRef.current = false;
+          setStopping(false);
+          setView((v) => endTurn(v));
+        }
+      }, STOP_FALLBACK_MS);
     } catch (err) {
       setStopping(false);
       setView((v) => applyEvent(v, { type: "error", kind: "other", message: `Couldn't stop the AI: ${String(err)}` }));
@@ -285,12 +321,14 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
   async function handleCreateThread(title: string) {
     const thread = await chatCreateThread(projectPath, title);
     setThreads((prev) => [...prev, thread]);
+    clearStopFallback();
     setStopping(false);
     await showThread(thread.id);
   }
 
   function handleSelectThread(threadId: string) {
     if (threadId === activeRef.current) return;
+    clearStopFallback();
     setStopping(false);
     void showThread(threadId);
   }
@@ -304,7 +342,12 @@ export function ChatPanel({ projectPath, onRegisterSend }: ChatPanelProps) {
   const ready = !loading && problem === null && activeThreadId !== null;
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <div
+      data-testid="chat-panel"
+      data-busy={busy ? "true" : "false"}
+      data-ready={ready ? "true" : "false"}
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+    >
       <div data-tauri-drag-region className="flex h-9 shrink-0 items-center gap-2 px-3">
         <span className="text-xs font-medium tracking-wide text-muted-foreground">Chat</span>
         <ThreadPicker

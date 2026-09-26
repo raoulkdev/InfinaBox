@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { ResizablePanelGroup } from "@/components/cockpit/ResizablePanelGroup";
 import { ChatPanel, type ChatSendOutcome } from "@/components/studio/chat/ChatPanel";
@@ -34,6 +34,10 @@ export function StudioSection({ projectPath }: StudioSectionProps) {
     [],
   );
 
+  // Whether an AI turn is running (reported by the chat): History holds off
+  // undo/go back meanwhile, since the AI may still be writing files.
+  const [aiWorking, setAiWorking] = useState(false);
+
   // Honest empty state rather than panels querying a project that isn't
   // there: every Studio panel reads from (and writes to) a real project.
   if (!projectPath) {
@@ -67,7 +71,11 @@ export function StudioSection({ projectPath }: StudioSectionProps) {
           // so it gets the same card shell here.
           content: (
             <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card">
-              <ChatPanel projectPath={projectPath} onRegisterSend={registerSend} />
+              <ChatPanel
+                projectPath={projectPath}
+                onRegisterSend={registerSend}
+                onTurnRunningChange={setAiWorking}
+              />
             </div>
           ),
         },
@@ -85,7 +93,7 @@ export function StudioSection({ projectPath }: StudioSectionProps) {
                 <PlayPanel projectPath={projectPath} onAskAiToFix={askAiToFix} />
               </div>
               <div className="min-h-0 flex-[2]">
-                <HistoryPanel projectPath={projectPath} />
+                <HistoryPanel projectPath={projectPath} aiWorking={aiWorking} />
               </div>
             </div>
           ),
