@@ -167,7 +167,14 @@ fn last_newline_before(file: &mut File, len: u64) -> std::io::Result<Option<u64>
     Ok(None)
 }
 
-pub fn set_provider_session(project: &Path, thread_id: &str, session_id: &str) -> Result<()> {
+/// Rewrites the thread header's `provider_session_id`. `None` clears it
+/// (written as JSON `null`), e.g. when the provider no longer has that
+/// conversation and the next turn must start a fresh one.
+pub fn set_provider_session(
+    project: &Path,
+    thread_id: &str,
+    session_id: Option<&str>,
+) -> Result<()> {
     let path = thread_path(project, thread_id)?;
     let _guard = write_lock();
     remove_stale_temp_files(&path);
@@ -180,7 +187,7 @@ pub fn set_provider_session(project: &Path, thread_id: &str, session_id: &str) -
     };
     let mut summary = parse_header(first)
         .with_context(|| format!("chat thread '{}' has an invalid header", path.display()))?;
-    summary.provider_session_id = Some(session_id.to_string());
+    summary.provider_session_id = session_id.map(str::to_string);
 
     let mut new_content = header_line(&summary)?;
     new_content.push_str(rest);
@@ -543,7 +550,7 @@ mod tests {
             append(dir.path(), &thread.id, r).unwrap();
         }
 
-        set_provider_session(dir.path(), &thread.id, "session-abc-123").unwrap();
+        set_provider_session(dir.path(), &thread.id, Some("session-abc-123")).unwrap();
         let (loaded, loaded_records) = load_thread(dir.path(), &thread.id).unwrap();
         assert_eq!(
             loaded.provider_session_id.as_deref(),
@@ -559,7 +566,7 @@ mod tests {
         assert_eq!(loaded_records, records);
 
         // Rewriting again replaces it; no temp file is left behind.
-        set_provider_session(dir.path(), &thread.id, "session-def-456").unwrap();
+        set_provider_session(dir.path(), &thread.id, Some("session-def-456")).unwrap();
         let (loaded, _) = load_thread(dir.path(), &thread.id).unwrap();
         assert_eq!(
             loaded.provider_session_id.as_deref(),
@@ -583,6 +590,35 @@ mod tests {
         .unwrap();
         let (_, loaded_records) = load_thread(dir.path(), &thread.id).unwrap();
         assert_eq!(loaded_records.len(), records.len() + 1);
+    }
+
+    #[test]
+    fn clearing_the_provider_session_writes_null_and_keeps_records() {
+        let dir = TempDir::new().unwrap();
+        let thread = create_thread(dir.path(), "Chat", "claude-code").unwrap();
+        let records = sample_records();
+        for r in &records {
+            append(dir.path(), &thread.id, r).unwrap();
+        }
+        set_provider_session(dir.path(), &thread.id, Some("dead-session")).unwrap();
+
+        set_provider_session(dir.path(), &thread.id, None).unwrap();
+        let (loaded, loaded_records) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(loaded, thread, "back to the header it was created with");
+        assert_eq!(loaded_records, records);
+        let file = dir
+            .path()
+            .join(".ibproject/chat")
+            .join(format!("{}.jsonl", thread.id));
+        let header: Value =
+            serde_json::from_str(fs::read_to_string(&file).unwrap().lines().next().unwrap())
+                .unwrap();
+        assert_eq!(header["provider_session_id"], Value::Null);
+        assert_eq!(list_threads(dir.path()).unwrap(), vec![thread.clone()]);
+
+        // Clearing an already-clear session is harmless.
+        set_provider_session(dir.path(), &thread.id, None).unwrap();
+        assert_eq!(load_thread(dir.path(), &thread.id).unwrap().0, thread);
     }
 
     #[test]
@@ -630,7 +666,7 @@ mod tests {
         assert!(append(dir.path(), "../../etc/passwd", &rec).is_err());
         assert!(load_thread(dir.path(), "a/b").is_err());
         assert!(append(dir.path(), "20260101T000000000-deadbeef", &rec).is_err());
-        assert!(set_provider_session(dir.path(), "20260101T000000000-deadbeef", "s").is_err());
+        assert!(set_provider_session(dir.path(), "20260101T000000000-deadbeef", Some("s")).is_err());
     }
 
     #[test]
@@ -717,7 +753,7 @@ mod tests {
             let (project, id) = (project.clone(), thread.id.clone());
             std::thread::spawn(move || {
                 for i in 0..N {
-                    set_provider_session(&project, &id, &format!("s{i}")).unwrap();
+                    set_provider_session(&project, &id, Some(&format!("s{i}"))).unwrap();
                 }
             })
         };
@@ -746,7 +782,7 @@ mod tests {
         fs::write(&stale, "leftover").unwrap();
         fs::write(&other, "someone else's").unwrap();
 
-        set_provider_session(dir.path(), &thread.id, "s").unwrap();
+        set_provider_session(dir.path(), &thread.id, Some("s")).unwrap();
         assert!(!stale.exists());
         assert!(other.exists(), "only this thread's temp files are touched");
         assert_eq!(list_threads(dir.path()).unwrap().len(), 1);
