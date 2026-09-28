@@ -84,12 +84,28 @@ fn builds_the_expected_arguments() {
 }
 
 #[test]
-fn system_prompt_appends_the_projects_agents_md() {
+fn system_prompt_follows_the_turn_options_and_appends_the_projects_agents_md() {
+    use crate::agent::{MessageOrigin, PlanPolicy, TurnOptions};
     let dir = tempfile::tempdir().unwrap();
-    assert_eq!(system_prompt(dir.path()), DIRECTOR_PROMPT);
+    let mut req = request(dir.path(), "hi");
+    assert_eq!(
+        turn_system_prompt(&req),
+        prompt::system_prompt(&TurnOptions::default(), None)
+    );
     std::fs::write(dir.path().join("AGENTS.md"), "# My game\nUse tabs.\n").unwrap();
-    let prompt = system_prompt(dir.path());
-    assert!(prompt.starts_with(DIRECTOR_PROMPT));
+    req.options = TurnOptions {
+        plan_policy: PlanPolicy::SmallChangesDirect,
+        teach: true,
+        origin: MessageOrigin::AutoFix,
+    };
+    let prompt = turn_system_prompt(&req);
+    assert_eq!(
+        prompt,
+        prompt::system_prompt(&req.options, Some("# My game\nUse tabs.\n"))
+    );
+    assert!(prompt.starts_with(prompt::DIRECTOR_PROMPT.trim_end()));
+    assert!(prompt.contains("## This message: the game hit errors"));
+    assert!(prompt.contains("## Teach me"));
     assert!(prompt.ends_with("# This project's AGENTS.md\n\n# My game\nUse tabs.\n"));
 }
 
@@ -132,19 +148,6 @@ fn mcp_config_registers_the_infinabox_server() {
 }
 
 #[test]
-fn director_prompt_covers_the_phase_a_rules() {
-    for needle in [
-        "run_game",
-        "get_game_errors",
-        ".ibproject/context/",
-        "git commits",
-        "2–4",
-    ] {
-        assert!(DIRECTOR_PROMPT.contains(needle), "{needle}");
-    }
-}
-
-#[test]
 fn parses_versions() {
     assert_eq!(
         parse_version("2.1.283 (Claude Code)\n").as_deref(),
@@ -155,6 +158,31 @@ fn parses_versions() {
         Some("claude dev build")
     );
     assert_eq!(parse_version("  \n"), None);
+}
+
+#[test]
+fn parses_the_auth_status_json() {
+    // The real 2.1.283 output (directories shortened).
+    let real = r#"{
+  "loggedIn": true,
+  "authMethod": "oauth_token",
+  "apiProvider": "firstParty",
+  "analyticsDisabled": false,
+  "projectsDirectory": "<HOME>/.claude/projects",
+  "configDirectory": "<HOME>/.claude"
+}
+"#;
+    assert_eq!(parse_logged_in(real), Some(true));
+    assert_eq!(parse_logged_in(r#"{"loggedIn": false}"#), Some(false));
+    for unknown in [
+        "",
+        "Login method: Claude API account",
+        r#"{"loggedIn": "yes"}"#,
+        r#"{"authMethod": "none"}"#,
+        "[true]",
+    ] {
+        assert_eq!(parse_logged_in(unknown), None, "{unknown}");
+    }
 }
 
 #[test]
@@ -222,7 +250,8 @@ fn cancel_without_a_running_turn_does_nothing() {
 
 /// A stand-in `claude` in its own temp dir. It records its arguments
 /// (NUL-separated), working directory and MCP config next to itself, then
-/// runs `body`, which can read `$dir/stream.jsonl`.
+/// runs `body`, which can read `$dir/stream.jsonl`. `claude auth ...` runs
+/// `$dir/auth.sh` if a test wrote one, else fails with no output.
 #[cfg(unix)]
 struct FakeClaude {
     dir: tempfile::TempDir,
@@ -239,6 +268,11 @@ impl FakeClaude {
             r#"#!/bin/sh
 dir="$(dirname "$0")"
 if [ "$1" = "--version" ]; then echo "2.1.283 (Claude Code)"; exit 0; fi
+if [ "$1" = "auth" ]; then
+  printf '%s ' "$@" > "$dir/auth_args.txt"
+  if [ -f "$dir/auth.sh" ]; then . "$dir/auth.sh"; fi
+  exit 1
+fi
 : > "$dir/args.bin"
 prev=""
 for a in "$@"; do
@@ -273,8 +307,9 @@ pwd -P > "$dir/cwd.txt"
 
 #[cfg(unix)]
 #[test]
-fn detect_runs_the_version_command() {
+fn detect_runs_the_version_and_auth_status_commands() {
     let fake = FakeClaude::new("exit 0", "");
+    // No answer from `auth status`: can't tell.
     let status = fake.runtime().detect();
     assert_eq!(
         status,
@@ -285,6 +320,49 @@ fn detect_runs_the_version_command() {
             logged_in: None,
         }
     );
+    assert_eq!(fake.read("auth_args.txt"), "auth status --json ");
+
+    let auth = |script: &str| {
+        std::fs::write(fake.dir.path().join("auth.sh"), script).unwrap();
+        fake.runtime().detect().logged_in
+    };
+    assert_eq!(
+        auth(
+            "printf '{\\n  \"loggedIn\": true,\\n  \"authMethod\": \"oauth_token\"\\n}\\n'; exit 0"
+        ),
+        Some(true)
+    );
+    // The field counts, whatever the exit code.
+    assert_eq!(auth(r#"echo '{"loggedIn": false}'; exit 1"#), Some(false));
+    assert_eq!(auth("echo 'Not logged in'; exit 1"), None);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_command_that_hangs_is_given_up_on() {
+    let started = Instant::now();
+    assert_eq!(
+        capture(
+            Path::new("/bin/sh"),
+            &["-c", "exec sleep 30"],
+            Duration::from_millis(300)
+        ),
+        None
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    let (status, out) = capture(
+        Path::new("/bin/sh"),
+        &["-c", "echo hi; exit 2"],
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    assert_eq!((status.code(), out.as_str()), (Some(2), "hi\n"));
+}
+
+#[test]
+fn a_missing_cli_is_not_logged_in_as_far_as_anyone_can_tell() {
+    let runtime = ClaudeCodeRuntime::with_program("/nonexistent/dir/claude");
+    assert_eq!(runtime.detect().logged_in, None);
 }
 
 #[cfg(unix)]
@@ -328,7 +406,7 @@ fn runs_the_cli_and_streams_its_events() {
     let expected: Vec<String> = build_args(
         &request(fake.project.path(), message),
         Path::new(&mcp_path),
-        DIRECTOR_PROMPT,
+        &turn_system_prompt(&request(fake.project.path(), message)),
     )
     .into_iter()
     .map(|a| a.into_string().unwrap())
@@ -425,7 +503,7 @@ fn cancel_stops_the_cli_and_ends_the_turn() {
         &events[1..],
         &[
             AgentEvent::Error {
-                kind: AgentErrorKind::Other,
+                kind: AgentErrorKind::Cancelled,
                 message: "Stopped.".into()
             },
             AgentEvent::TurnCompleted {
@@ -575,6 +653,8 @@ fn real_turn_edits_a_file_and_resumes() {
     let runtime = ClaudeCodeRuntime::new();
     let status = runtime.detect();
     assert!(status.installed, "claude not found");
+    // The real `claude auth status --json` of a signed-in CLI.
+    assert_eq!(status.logged_in, Some(true), "{status:?}");
     eprintln!("detected: {status:?}");
 
     let mut req = request(
@@ -671,7 +751,7 @@ fn real_turn_can_be_cancelled() {
         &events[events.len() - 2..],
         &[
             AgentEvent::Error {
-                kind: AgentErrorKind::Other,
+                kind: AgentErrorKind::Cancelled,
                 message: "Stopped.".into()
             },
             AgentEvent::TurnCompleted {

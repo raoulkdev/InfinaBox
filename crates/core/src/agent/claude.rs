@@ -12,7 +12,7 @@
 //!        --tools Read,Edit,Write,Glob,Grep
 //!        --allowedTools Read,Edit,Write,Glob,Grep,mcp__infinabox__*
 //!        --permission-mode acceptEdits
-//!        --append-system-prompt <prompts/director.md + the project's AGENTS.md>
+//!        --append-system-prompt <prompt::system_prompt(turn options, the project's AGENTS.md)>
 //!        -- <the user's message>
 //! ```
 //!
@@ -42,6 +42,12 @@
 //! The message is passed as a plain argument (never through a shell), and
 //! stdout is parsed line by line by `claude_stream::ClaudeStream` as it
 //! arrives.
+//!
+//! `detect()` asks the CLI itself whether it's signed in: `claude auth
+//! status --json` prints `{"loggedIn": true, "authMethod": ..., ...}`
+//! (verified against 2.1.283; `--json` is also its default). Only the
+//! `loggedIn` boolean is read, whatever the exit code; anything else — a
+//! failure, a timeout, output without that field — is "can't tell".
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -56,12 +62,10 @@ use anyhow::Context as _;
 
 use super::claude_stream::{ClaudeStream, StreamEnd};
 use super::path::{find_on_path, login_shell_path};
+use super::prompt;
 use super::types::{
     AgentErrorKind, AgentEvent, AgentRuntime, McpLaunch, RuntimeStatus, TurnRequest,
 };
-
-/// The Director system prompt, appended to Claude Code's own.
-pub const DIRECTOR_PROMPT: &str = include_str!("prompts/director.md");
 
 /// The name the InfinaBox MCP server is registered under, which makes its
 /// tools `mcp__infinabox__<tool>` (the naming seen in the `d_mcp_tool`
@@ -73,8 +77,8 @@ pub const MCP_SERVER_NAME: &str = "infinabox";
 pub const BUILTIN_TOOLS: &str = "Read,Edit,Write,Glob,Grep";
 
 /// Pre-approved tools: the built-ins above plus every InfinaBox MCP tool
-/// (the ten in `TOOL_NAMES` in `crates/mcp-server/src/server.rs`), via the
-/// server wildcard verified against a real run.
+/// (all of `TOOL_NAMES` in `crates/mcp-server/src/server.rs`, including
+/// `propose_plan`), via the server wildcard verified against a real run.
 pub const ALLOWED_TOOLS: &str = "Read,Edit,Write,Glob,Grep,mcp__infinabox__*";
 
 /// What the CLI is called on `PATH`.
@@ -82,6 +86,9 @@ const PROGRAM: &str = "claude";
 
 /// How long `claude --version` gets before detection gives up on a version.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long `claude auth status --json` gets before detection says it
+/// can't tell whether the CLI is signed in.
+const AUTH_STATUS_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// After a cancel asks the CLI to stop (SIGTERM), how long it gets before
 /// it's killed outright.
@@ -89,11 +96,6 @@ const CANCEL_GRACE: Duration = Duration::from_secs(3);
 
 /// How much stderr is kept for error classification.
 const MAX_STDERR_BYTES: usize = 64 * 1024;
-
-/// The project's agent instructions, appended after the Director prompt.
-const PROJECT_INSTRUCTIONS_FILE: &str = "AGENTS.md";
-/// More than this much of `AGENTS.md` isn't appended.
-const MAX_PROJECT_INSTRUCTIONS_BYTES: usize = 64 * 1024;
 
 /// Temp MCP configs are named `infinabox-mcp-<uuid>.json`; ones older than
 /// this (left behind by a crash — release builds abort on panic, so no
@@ -157,9 +159,8 @@ impl AgentRuntime for ClaudeCodeRuntime {
         RuntimeStatus {
             name: PROGRAM.to_string(),
             installed: program.is_some(),
-            version: program.and_then(|p| read_version(&p)),
-            // Filled from `claude auth status --json` in Phase B (Task PL).
-            logged_in: None,
+            version: program.as_deref().and_then(read_version),
+            logged_in: program.as_deref().and_then(read_logged_in),
         }
     }
 
@@ -169,7 +170,7 @@ impl AgentRuntime for ClaudeCodeRuntime {
     /// `TurnCompleted`, whatever happened: the CLI not being installed
     /// (`Error{NotInstalled}`), failing to start or dying without a result
     /// (`Error{ProcessFailed}` or a classified kind, with the real stderr
-    /// text), or a cancel (`Error{Other, "Stopped."}`). `FilesChanged`
+    /// text), or a cancel (`Error{Cancelled, "Stopped."}`). `FilesChanged`
     /// always comes just before the `Error`/`TurnCompleted` that end the
     /// turn, including a cancelled one (edits made before the cancel are
     /// real). It returns `Err` without emitting anything only when the turn
@@ -201,7 +202,7 @@ impl AgentRuntime for ClaudeCodeRuntime {
 
         sweep_stale_configs(&std::env::temp_dir(), STALE_TEMP_CONFIG_AGE);
         let config = TempMcpConfig::write(&req.mcp)?;
-        let system_prompt = system_prompt(&req.project_path);
+        let system_prompt = turn_system_prompt(&req);
         let mut cmd = Command::new(&program);
         cmd.args(build_args(&req, config.path(), &system_prompt))
             .current_dir(&req.project_path)
@@ -298,7 +299,7 @@ impl AgentRuntime for ClaudeCodeRuntime {
     /// Stops the thread's in-flight turn: asks the CLI to exit (SIGTERM to
     /// its process group on Unix), then kills it if it's still running after
     /// `CANCEL_GRACE`. `run_turn` then ends the turn with
-    /// `Error{Other, "Stopped."}` + `TurnCompleted{is_error: true}` (unless
+    /// `Error{Cancelled, "Stopped."}` + `TurnCompleted{is_error: true}` (unless
     /// the CLI had already sent its own result).
     ///
     /// A cancel that arrives after the turn is reserved but before the CLI
@@ -357,22 +358,15 @@ impl TurnSlot {
     }
 }
 
-/// The appended system prompt: the Director prompt, then the project's own
-/// `AGENTS.md` if it has one (the CLI no longer reads the project's
-/// `CLAUDE.md` itself; see the module docs).
-pub(crate) fn system_prompt(project: &Path) -> String {
-    let mut prompt = DIRECTOR_PROMPT.to_string();
-    let Ok(bytes) = std::fs::read(project.join(PROJECT_INSTRUCTIONS_FILE)) else {
-        return prompt;
-    };
-    let text = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_PROJECT_INSTRUCTIONS_BYTES)]);
-    if !text.trim().is_empty() {
-        prompt.push_str(&format!(
-            "\n\n---\n\n# This project's {PROJECT_INSTRUCTIONS_FILE}\n\n{}\n",
-            text.trim()
-        ));
-    }
-    prompt
+/// The appended system prompt for one turn: `prompt::system_prompt` for
+/// the turn's options, with the project's own `AGENTS.md` if it has one
+/// (the CLI no longer reads the project's `CLAUDE.md` itself; see the
+/// module docs).
+pub(crate) fn turn_system_prompt(req: &TurnRequest) -> String {
+    prompt::system_prompt(
+        &req.options,
+        prompt::read_agents_md(&req.project_path).as_deref(),
+    )
 }
 
 /// Removes `infinabox-mcp-<uuid>.json` files in `dir` older than `max_age`
@@ -638,11 +632,12 @@ fn read_capped(mut source: impl Read, max: usize) -> String {
     String::from_utf8_lossy(&kept).into_owned()
 }
 
-/// `<program> --version`, e.g. `2.1.283 (Claude Code)` → `2.1.283`. `None`
-/// if it fails, prints nothing, or takes longer than `VERSION_TIMEOUT`.
-fn read_version(program: &Path) -> Option<String> {
+/// Runs `<program> <args>` and returns its exit status and (up to 4 KiB
+/// of) stdout, or `None` if it can't start or runs longer than `timeout`
+/// (it's killed then).
+fn capture(program: &Path, args: &[&str], timeout: Duration) -> Option<(ExitStatus, String)> {
     let mut cmd = Command::new(program);
-    cmd.arg("--version")
+    cmd.args(args)
         .env("PATH", login_shell_path())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -655,7 +650,7 @@ fn read_version(program: &Path) -> Option<String> {
     let mut child = cmd.spawn().ok()?;
     let stdout = child.stdout.take()?;
     let reader = std::thread::spawn(move || read_capped(stdout, 4096));
-    let deadline = Instant::now() + VERSION_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -667,10 +662,32 @@ fn read_version(program: &Path) -> Option<String> {
             }
         }
     };
+    Some((status, reader.join().ok()?))
+}
+
+/// `<program> --version`, e.g. `2.1.283 (Claude Code)` → `2.1.283`. `None`
+/// if it fails, prints nothing, or takes longer than `VERSION_TIMEOUT`.
+fn read_version(program: &Path) -> Option<String> {
+    let (status, stdout) = capture(program, &["--version"], VERSION_TIMEOUT)?;
     if !status.success() {
         return None;
     }
-    parse_version(&reader.join().ok()?)
+    parse_version(&stdout)
+}
+
+/// Whether the CLI says it's signed in, from `<program> auth status --json`
+/// (see the module docs). `None` when it can't tell.
+fn read_logged_in(program: &Path) -> Option<bool> {
+    let (_, stdout) = capture(program, &["auth", "status", "--json"], AUTH_STATUS_TIMEOUT)?;
+    parse_logged_in(&stdout)
+}
+
+/// The `loggedIn` boolean of `claude auth status --json` output.
+fn parse_logged_in(output: &str) -> Option<bool> {
+    serde_json::from_str::<serde_json::Value>(output.trim())
+        .ok()?
+        .get("loggedIn")?
+        .as_bool()
 }
 
 fn parse_version(output: &str) -> Option<String> {

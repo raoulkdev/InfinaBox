@@ -35,13 +35,20 @@ pub const TOOL_NAMES: &[&str] = &[
     "get_game_errors",
     "get_game_output",
     "list_snapshots",
+    "propose_plan",
 ];
+
+/// What the agent is told after a plan was accepted.
+pub const PLAN_SHOWN: &str = "The plan is now shown to the person with Approve and Change \
+buttons. End your turn now with one short sentence, and don't change anything: you'll get a \
+new message when they approve it or ask for changes.";
 
 const INSTRUCTIONS: &str = "Tools for the InfinaBox game project you are working in. \
 Context cards (markdown in .ibproject/context/) hold the game's design: read or search them \
 before making design decisions, and update them when a decision changes. The game tools run \
 the Godot game inside the InfinaBox app and read its errors and output; use them to check \
-your changes actually work. list_snapshots shows the project's saved history.";
+your changes actually work. list_snapshots shows the project's saved history. propose_plan \
+shows the person a plan to approve before you change the game.";
 
 const DEFAULT_ERROR_LIMIT: usize = 20;
 const DEFAULT_OUTPUT_LINES: usize = 100;
@@ -83,6 +90,15 @@ pub struct OutputParams {
 pub struct SnapshotParams {
     /// How many snapshots to return, newest first. Defaults to 20.
     pub limit: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PlanParams {
+    /// A short title in plain words, at most 80 characters, e.g. "Add a double jump".
+    pub title: String,
+    // One doc line on purpose: schemars keeps a doc comment's line breaks.
+    /// The steps in order, as plain sentences about what will change in the game (no code). 2-6 steps is best; at most 8, each at most 200 characters.
+    pub steps: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -267,6 +283,25 @@ with title, time, and files changed. Read-only: InfinaBox creates snapshots itse
         .await?;
         Ok(to_json(&snapshots))
     }
+
+    /// Nothing is stored here: the agent runtime sees this call in the
+    /// CLI's own stream and shows it as a plan card (`PlanProposed`). The
+    /// checks are `infinabox_core::agent::prompt::validate_plan`, the same
+    /// ones the stream parsers make, so every accepted plan becomes a card.
+    #[tool(
+        description = "Show the person a plan for a change to their game, as a card with \
+Approve and Change buttons. Use it before changing the game (unless your instructions say \
+this turn doesn't need a plan): read the relevant Context cards first, then give a short \
+title and 2-6 plain-language steps (no code, no file paths unless they help). After calling \
+it, end your turn with one short sentence and make no changes until the person approves."
+    )]
+    async fn propose_plan(
+        &self,
+        Parameters(PlanParams { title, steps }): Parameters<PlanParams>,
+    ) -> Result<String, String> {
+        infinabox_core::agent::prompt::validate_plan(&title, &steps)?;
+        Ok(PLAN_SHOWN.to_string())
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -396,6 +431,71 @@ mod tests {
             let e = result.unwrap_err();
             assert!(e.starts_with(bridge_client::APP_NOT_RUNNING), "{e}");
         }
+    }
+
+    fn plan(title: &str, steps: &[&str]) -> Parameters<PlanParams> {
+        Parameters(PlanParams {
+            title: title.into(),
+            steps: steps.iter().map(|s| s.to_string()).collect(),
+        })
+    }
+
+    #[tokio::test]
+    async fn propose_plan_accepts_a_valid_plan_without_a_project_or_app() {
+        let server = InfinaBoxServer::new(None, None);
+        let text = server
+            .propose_plan(plan(
+                "Add a double jump",
+                &[
+                    "Let the player jump once more in the air.",
+                    "Tune the height.",
+                ],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(text, PLAN_SHOWN);
+        assert!(text.contains("Approve") && text.contains("End your turn now"));
+    }
+
+    #[tokio::test]
+    async fn propose_plan_rejects_plans_outside_the_limits() {
+        let server = InfinaBoxServer::new(None, None);
+        let long_step = "x".repeat(201);
+        let nine = ["s"; 9];
+        for (title, steps, needle) in [
+            (" ", &["A step."][..], "title"),
+            (&"t".repeat(81)[..], &["A step."][..], "80"),
+            ("Plan", &[][..], "at least one step"),
+            ("Plan", &nine[..], "8"),
+            ("Plan", &["Fine.", ""][..], "Step 2"),
+            ("Plan", &[long_step.as_str()][..], "200"),
+        ] {
+            let e = server.propose_plan(plan(title, steps)).await.unwrap_err();
+            assert!(e.contains(needle), "{e}");
+        }
+    }
+
+    #[test]
+    fn propose_plan_schema_has_title_and_steps() {
+        let server = InfinaBoxServer::new(None, None);
+        let tool = server
+            .tool_router
+            .list_all()
+            .into_iter()
+            .find(|t| t.name == "propose_plan")
+            .unwrap();
+        let schema = serde_json::to_value(&*tool.input_schema).unwrap();
+        assert_eq!(schema["properties"]["title"]["type"], "string");
+        assert_eq!(schema["properties"]["steps"]["type"], "array");
+        assert_eq!(schema["properties"]["steps"]["items"]["type"], "string");
+        let mut required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        required.sort();
+        assert_eq!(required, ["steps", "title"]);
     }
 
     /// Calls straight through to `infinabox_core::snapshot::list_snapshots`
