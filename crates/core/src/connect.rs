@@ -207,7 +207,7 @@ pub fn recommend(infos: &[ProviderInfo]) -> ProviderId {
 /// a parameter (not a `cfg!`) so each one's commands are testable anywhere.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Os {
-    MacOs,
+    Mac,
     Linux,
     Windows,
 }
@@ -217,7 +217,7 @@ impl Os {
         if cfg!(windows) {
             Os::Windows
         } else if cfg!(target_os = "macos") {
-            Os::MacOs
+            Os::Mac
         } else {
             Os::Linux
         }
@@ -549,16 +549,16 @@ fn install_plan(
             })
         }
         (ProviderId::Codex, _) => {
-            if os == Os::MacOs {
-                if let Some(brew) = find_program("brew", os, path_var) {
-                    let args = ["install", "--cask", "codex"];
-                    let (program, args) = with_path(&brew, &args, os, path_var);
-                    return Ok(InstallPlan {
-                        program,
-                        args,
-                        display: "brew install --cask codex".into(),
-                    });
-                }
+            if os == Os::Mac
+                && let Some(brew) = find_program("brew", os, path_var)
+            {
+                let args = ["install", "--cask", "codex"];
+                let (program, args) = with_path(&brew, &args, os, path_var);
+                return Ok(InstallPlan {
+                    program,
+                    args,
+                    display: "brew install --cask codex".into(),
+                });
             }
             if let Some(npm) = find_program("npm", os, path_var) {
                 let args = ["install", "-g", CODEX_NPM_PACKAGE];
@@ -914,7 +914,7 @@ esac"#;
         let bin = FakeBin::new();
         let bash = bin.add("bash", "exit 0");
         bin.add("curl", "exit 0");
-        for os in [Os::Linux, Os::MacOs] {
+        for os in [Os::Linux, Os::Mac] {
             let plan = install_plan(ProviderId::ClaudeCode, os, &bin.path_only()).unwrap();
             assert_eq!(plan.program, bash.to_string_lossy());
             assert_eq!(
@@ -991,7 +991,7 @@ esac"#;
         let path = bin.path_only();
         let path_arg = format!("PATH={}", path.to_string_lossy());
 
-        let mac = install_plan(ProviderId::Codex, Os::MacOs, &path).unwrap();
+        let mac = install_plan(ProviderId::Codex, Os::Mac, &path).unwrap();
         assert_eq!(mac.program, "/usr/bin/env");
         assert_eq!(
             mac.args,
@@ -1022,7 +1022,7 @@ esac"#;
 
         let npm_only = FakeBin::new();
         npm_only.add("npm", "exit 0");
-        let mac = install_plan(ProviderId::Codex, Os::MacOs, &npm_only.path_only()).unwrap();
+        let mac = install_plan(ProviderId::Codex, Os::Mac, &npm_only.path_only()).unwrap();
         assert_eq!(mac.display, "npm install -g @openai/codex");
     }
 
@@ -1030,7 +1030,7 @@ esac"#;
     #[test]
     fn codex_install_without_node_says_to_get_node_first() {
         let empty = FakeBin::new();
-        for os in [Os::MacOs, Os::Linux, Os::Windows] {
+        for os in [Os::Mac, Os::Linux, Os::Windows] {
             let blocker = install_plan(ProviderId::Codex, os, &empty.path_only()).unwrap_err();
             assert!(blocker.contains("Node.js"), "{blocker}");
             assert!(blocker.contains("https://nodejs.org"), "{blocker}");
@@ -1081,7 +1081,7 @@ esac"#;
             ]
         );
 
-        let (program, args) = login_invocation_in(ProviderId::Codex, Os::MacOs, &path).unwrap();
+        let (program, args) = login_invocation_in(ProviderId::Codex, Os::Mac, &path).unwrap();
         assert_eq!(program, "/usr/bin/env");
         assert_eq!(args, [path_arg.as_str(), &codex.to_string_lossy(), "login"]);
 
