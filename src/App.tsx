@@ -1,39 +1,35 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
-import { Palette, Music2, LayoutTemplate, ShieldCheck, Radio } from "lucide-react";
-import { BuildRow } from "@/components/cockpit/BuildRow";
+import { Images, Rocket } from "lucide-react";
 import { Sidebar, type Section } from "@/components/cockpit/Sidebar";
 import { DashboardSection } from "@/components/cockpit/DashboardSection";
-import { DesignSection } from "@/components/cockpit/DesignSection";
-import { GraphsSection } from "@/components/cockpit/GraphsSection";
-import { BusinessSection } from "@/components/cockpit/BusinessSection";
-import { MarketingSection } from "@/components/cockpit/MarketingSection";
-import { CommunitySection } from "@/components/cockpit/CommunitySection";
-import { ReleaseSection } from "@/components/cockpit/ReleaseSection";
 import { NotBuiltYetSection } from "@/components/cockpit/NotBuiltYetSection";
+import { AdvancedSection } from "@/components/advanced/AdvancedSection";
+import { ContextSection } from "@/components/context/ContextSection";
 import { StudioSection } from "@/components/studio/StudioSection";
 import { fadeRise, fadeTransition, springTransition } from "@/lib/motion";
 import { recordProjectOpened } from "@/lib/recent-projects";
+import type { PendingTurn } from "@/lib/studio-types";
 import { cn } from "@/lib/utils";
 
-// Every section besides Home/Studio/Build/Design/Graphs mounts only when
+// Every section besides Home/Studio/Context/Advanced mounts only when
 // selected — none of them own state worth preserving across a tab switch.
-// Studio's live AI turn stream and game tracking, Build's live terminal,
-// Design's unsaved draft, and Graphs' unsaved canvas edits are the real
-// exceptions, handled separately below by staying permanently mounted.
-// Real docs-backed sections and "not built yet" placeholders share this
-// one render map so adding another discipline later doesn't mean
+// Studio's live AI turn stream and game tracking, Context's unsaved card
+// and graph edits, and Advanced's live terminal are the real exceptions,
+// handled separately below by staying permanently mounted. The rest (today
+// Assets and Playtest & Launch, both honest "not built yet" placeholders)
+// share this one render map so adding a real one later doesn't mean
 // copy-pasting another `{section === "x" && (...)}` block into an
 // ever-growing if-chain.
-type SimpleSection = Exclude<Section, "home" | "studio" | "build" | "design" | "graphs">;
+type SimpleSection = Exclude<Section, "home" | "studio" | "context" | "advanced">;
 
-// The four panels that stay permanently mounted (see the comment further
+// The three panels that stay permanently mounted (see the comment further
 // down) crossfade between each other via opacity instead of the instant
 // `hidden` swap every other section uses — the one place in this file
 // where a real DOM mount/unmount (what AnimatePresence needs) would lose
 // state, so the animation has to be opacity-driven instead.
-const PERSISTENT_SECTIONS = ["studio", "build", "design", "graphs"] as const;
+const PERSISTENT_SECTIONS = ["studio", "context", "advanced"] as const;
 type PersistentSection = (typeof PERSISTENT_SECTIONS)[number];
 
 function isPersistentSection(section: Section): section is PersistentSection {
@@ -46,13 +42,19 @@ function App() {
   // the Sidebar's project button, rather than dropping straight into
   // Studio.
   const [section, setSection] = useState<Section>("home");
-  // The currently open project folder — shared by the Build tab's code
-  // browser and terminal starting directory, and every docs-style section.
+  // The currently open project folder — shared by Studio, Context, and
+  // Advanced's code browser and terminal starting directory.
   // Starts `null` on every launch — no project is auto-restored, even if
   // one was open last time — so Home always lands with nothing selected;
   // it only becomes real, user-driven state once the user opens a project
   // via the Sidebar's picker or the Home dashboard.
   const [projectPath, setProjectPath] = useState<string | null>(null);
+  // A turn Studio should start as soon as it shows this project — the
+  // first build a brand-new game from the onboarding interview hands over
+  // (see DashboardSection). Kept with the project it belongs to, and only
+  // passed to Studio while that project is the open one, so opening some
+  // other project first can never send it to the wrong game.
+  const [pendingTurn, setPendingTurn] = useState<{ projectPath: string; turn: PendingTurn } | null>(null);
 
   // Every panel that reads from disk (file trees, open file content, git
   // Overview/Changes) listens for `project-fs-changed` — this is what
@@ -72,46 +74,28 @@ function App() {
   function handleOpenProject(path: string) {
     recordProjectOpened(path);
     setProjectPath(path);
+    // Opening any project drops a first build Studio hasn't started yet —
+    // it belongs to the moment its game was created, not to a later visit.
+    setPendingTurn(null);
   }
 
-  function handleOpenProjectFromDashboard(path: string) {
+  function handleOpenProjectFromDashboard(path: string, turn?: PendingTurn) {
     handleOpenProject(path);
+    setPendingTurn(turn ? { projectPath: path, turn } : null);
     setSection("studio");
   }
 
   const simpleSections: Record<SimpleSection, () => ReactNode> = {
-    art: () => (
+    assets: () => (
       <NotBuiltYetSection
-        icon={Palette}
-        description="Asset briefs and previews arrive once the file browser can render images, not just markdown."
+        icon={Images}
+        description="Browsing free asset libraries, previews and one-click import are coming in a later update."
       />
     ),
-    audio: () => (
+    launch: () => (
       <NotBuiltYetSection
-        icon={Music2}
-        description="Asset briefs and playback arrive once the file browser can render audio, not just markdown."
-      />
-    ),
-    uiux: () => (
-      <NotBuiltYetSection
-        icon={LayoutTemplate}
-        description="Flow docs and mockup previews arrive once the file browser can render images, not just markdown."
-      />
-    ),
-    qa: () => (
-      <NotBuiltYetSection
-        icon={ShieldCheck}
-        description="Bug tracking and grounded commit lookups arrive in a later phase, once the core agent loop is proven."
-      />
-    ),
-    release: () => <ReleaseSection projectPath={projectPath} />,
-    business: () => <BusinessSection projectPath={projectPath} />,
-    marketing: () => <MarketingSection projectPath={projectPath} />,
-    community: () => <CommunitySection projectPath={projectPath} />,
-    liveops: () => (
-      <NotBuiltYetSection
-        icon={Radio}
-        description="Analytics, crash triage, and live events connect once there's a shipped game generating real data."
+        icon={Rocket}
+        description="Sharing test builds, collecting feedback, release builds and publishing your game are coming in a later update."
       />
     ),
   };
@@ -182,22 +166,25 @@ function App() {
           )}
         </AnimatePresence>
 
-        {/* Studio, Build, Design, and Graphs stay mounted even when
-            hidden — Studio holds a live AI turn stream (events arrive only
-            once; a remounted chat would miss the rest of a turn) and the
-            Play panel's view of a running game, Build owns the live
-            terminal session (never respawn/re-cwd it, see TerminalPanel's
-            own comment), and Design/Graphs can each hold an unsaved draft.
-            Because none of the four ever actually unmounts, AnimatePresence
+        {/* Studio, Context, and Advanced stay mounted even when hidden —
+            Studio holds a live AI turn stream (events arrive only once; a
+            remounted chat would miss the rest of a turn) and the Play
+            panel's view of a running game, Context can hold an unsaved
+            card or graph edit, and Advanced owns the live terminal session
+            (never respawn/re-cwd it, see TerminalPanel's own comment).
+            Because none of the three ever actually unmounts, AnimatePresence
             (which animates mount/unmount) can't crossfade between them —
-            instead all four sit absolutely
+            instead all three sit absolutely
             stacked in this one slot, permanently mounted, and only their
             opacity/pointer-events toggle with `section`. The slot itself
             still collapses via `hidden` exactly like every other section
-            when none of the four is active, so it never steals flex
+            when none of the three is active, so it never steals flex
             space from Home or a simple section. (With no project open,
-            Studio just renders its own "No project open" card, so there's
-            nothing to defer mounting for — unlike Build's terminal.)
+            Studio and Context just render their own "No project open"
+            card, so there's nothing to defer mounting for — unlike
+            Advanced's terminal, which AdvancedSection holds back itself.)
+            Context and Advanced each stack their own two tabs the same way
+            inside, for the same reasons.
 
             Each inactive wrapper also carries the `inert` HTML attribute,
             not just `pointer-events: none` — belt and suspenders. `inert`
@@ -225,39 +212,29 @@ function App() {
             transition={fadeTransition}
             inert={section !== "studio"}
           >
-            <StudioSection projectPath={projectPath} pendingTurn={null} onPendingTurnTaken={() => {}} />
+            <StudioSection
+              projectPath={projectPath}
+              pendingTurn={pendingTurn && pendingTurn.projectPath === projectPath ? pendingTurn.turn : null}
+              onPendingTurnTaken={() => setPendingTurn(null)}
+            />
           </motion.div>
           <motion.div
             className="absolute inset-0 flex min-h-0 min-w-0 overflow-hidden"
-            animate={{ opacity: section === "build" ? 1 : 0 }}
-            style={{ pointerEvents: section === "build" ? "auto" : "none" }}
+            animate={{ opacity: section === "context" ? 1 : 0 }}
+            style={{ pointerEvents: section === "context" ? "auto" : "none" }}
             transition={fadeTransition}
-            inert={section !== "build"}
+            inert={section !== "context"}
           >
-            {/* TerminalPanel spawns its shell once, on mount, using
-                whatever projectPath it was given at that instant (see its
-                own comment on why it never re-cwds later) — so it must
-                not mount at all until a real project is chosen, or it'd
-                spawn in the user's home directory instead. */}
-            <BuildRow projectPath={projectPath} showTerminal={projectPath !== null} />
+            <ContextSection projectPath={projectPath} />
           </motion.div>
           <motion.div
             className="absolute inset-0 flex min-h-0 min-w-0 overflow-hidden"
-            animate={{ opacity: section === "design" ? 1 : 0 }}
-            style={{ pointerEvents: section === "design" ? "auto" : "none" }}
+            animate={{ opacity: section === "advanced" ? 1 : 0 }}
+            style={{ pointerEvents: section === "advanced" ? "auto" : "none" }}
             transition={fadeTransition}
-            inert={section !== "design"}
+            inert={section !== "advanced"}
           >
-            <DesignSection projectPath={projectPath} />
-          </motion.div>
-          <motion.div
-            className="absolute inset-0 flex min-h-0 min-w-0 overflow-hidden"
-            animate={{ opacity: section === "graphs" ? 1 : 0 }}
-            style={{ pointerEvents: section === "graphs" ? "auto" : "none" }}
-            transition={fadeTransition}
-            inert={section !== "graphs"}
-          >
-            <GraphsSection projectPath={projectPath} />
+            <AdvancedSection projectPath={projectPath} />
           </motion.div>
         </div>
 

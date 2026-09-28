@@ -3,18 +3,10 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   Home,
   Sparkles,
-  Hammer,
-  FileText,
-  Workflow,
-  Palette,
-  Music2,
-  LayoutTemplate,
-  ShieldCheck,
+  BookOpen,
+  Images,
   Rocket,
-  Briefcase,
-  Megaphone,
-  Users,
-  Radio,
+  Wrench,
   FolderOpen,
   PanelLeftClose,
   PanelLeftOpen,
@@ -56,21 +48,11 @@ function FadeLabel({ show, children }: { show: boolean; children: ReactNode }) {
   );
 }
 
-export type Section =
-  | "home"
-  | "studio"
-  | "build"
-  | "design"
-  | "graphs"
-  | "art"
-  | "audio"
-  | "uiux"
-  | "qa"
-  | "release"
-  | "business"
-  | "marketing"
-  | "community"
-  | "liveops";
+// The six entries of the product spec's navigation (§11). The old
+// per-discipline sections (Documents, Business, Marketing, ...) are gone:
+// their docs now live as Context cards, and their tools arrive as parts of
+// Assets and Playtest & Launch.
+export type Section = "home" | "studio" | "context" | "assets" | "launch" | "advanced";
 
 interface SectionItem {
   id: Section;
@@ -78,51 +60,23 @@ interface SectionItem {
   icon: LucideIcon;
 }
 
-// Home and Studio are pinned above the grouped list, unrelated to any
-// discipline grouping — Home is the landing page, and Studio (chat, the
-// running game, and its history) is where an open project is made now, so
-// it sits above Build instead of inside "Make". The full move to the
-// spec's 6-entry sidebar (§11) is Phase B; until then everything below
-// stays as it was.
-const PINNED: SectionItem[] = [
-  { id: "home", label: "Home", icon: Home },
-  { id: "studio", label: "Studio", icon: Sparkles },
-];
+// Home is pinned above the project button: it's the landing page (your
+// games, your AI, Godot) and the one entry that isn't about the open
+// project.
+const PINNED: SectionItem[] = [{ id: "home", label: "Home", icon: Home }];
 
-// Everything else grouped by discipline category. A flat icon-only rail
-// stopped scaling once Design/QA/Business/Live Ops grew into a dozen
-// named disciplines — labels plus grouping keep it scannable instead of
-// asking the user to memorize a dozen icon glyphs. Build leads Make: it's
-// the terminal/files/git workspace every other discipline in this group
-// ultimately produces or draws on.
-const GROUPS: { label: string; items: SectionItem[] }[] = [
-  {
-    label: "Make",
-    items: [
-      { id: "build", label: "Build", icon: Hammer },
-      { id: "design", label: "Documents", icon: FileText },
-      { id: "graphs", label: "Graphs", icon: Workflow },
-      { id: "art", label: "Art", icon: Palette },
-      { id: "audio", label: "Audio", icon: Music2 },
-      { id: "uiux", label: "UI / UX", icon: LayoutTemplate },
-    ],
-  },
-  {
-    label: "Ship",
-    items: [
-      { id: "qa", label: "QA / Testing", icon: ShieldCheck },
-      { id: "release", label: "Release", icon: Rocket },
-    ],
-  },
-  {
-    label: "Grow",
-    items: [
-      { id: "business", label: "Business", icon: Briefcase },
-      { id: "marketing", label: "Marketing", icon: Megaphone },
-      { id: "community", label: "Community", icon: Users },
-      { id: "liveops", label: "Live Ops", icon: Radio },
-    ],
-  },
+// Everything under the project button is a screen of the open project, in
+// the order a game gets made: Studio (chat + the running game) is where
+// it happens, Context is what InfinaBox and the AI know about the game,
+// then Assets and Playtest & Launch, and Advanced (terminal, code,
+// settings) last, for people who grow into it. A flat list — six entries
+// don't need the discipline groups the old 13-entry sidebar did.
+const PROJECT_SECTIONS: SectionItem[] = [
+  { id: "studio", label: "Studio", icon: Sparkles },
+  { id: "context", label: "Context", icon: BookOpen },
+  { id: "assets", label: "Assets", icon: Images },
+  { id: "launch", label: "Playtest & Launch", icon: Rocket },
+  { id: "advanced", label: "Advanced", icon: Wrench },
 ];
 
 interface SidebarProps {
@@ -198,7 +152,8 @@ function SectionRow({
 }
 
 // Replaces the old top bar's "Open Project" button — now that there's no
-// dedicated header, it lives right under the pinned Home/Studio rows instead, in every section
+// dedicated header, it lives right under the pinned Home row, heading the
+// open project's own screens, in every section
 // that shows the sidebar (Home itself never renders the sidebar; its own
 // dashboard has its own project picker).
 function ProjectButtonRow({
@@ -319,24 +274,15 @@ export function Sidebar({ active, onSelect, projectPath, onOpenProject }: Sideba
         <Separator className="my-1" />
 
         <ScrollArea className="min-h-0 flex-1">
-          <div className={cn("flex flex-col gap-3", !collapsed && "pr-2")}>
-            {GROUPS.map((group) => (
-              <div key={group.label} className="flex flex-col gap-0.5">
-                <FadeLabel show={!collapsed}>
-                  <span className="px-2 py-1 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-                    {group.label}
-                  </span>
-                </FadeLabel>
-                {group.items.map((item) => (
-                  <SectionRow
-                    key={item.id}
-                    item={item}
-                    active={active === item.id}
-                    collapsed={collapsed}
-                    onSelect={() => onSelect(item.id)}
-                  />
-                ))}
-              </div>
+          <div className={cn("flex flex-col gap-0.5", !collapsed && "pr-2")}>
+            {PROJECT_SECTIONS.map((item) => (
+              <SectionRow
+                key={item.id}
+                item={item}
+                active={active === item.id}
+                collapsed={collapsed}
+                onSelect={() => onSelect(item.id)}
+              />
             ))}
           </div>
         </ScrollArea>
