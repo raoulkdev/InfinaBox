@@ -104,6 +104,22 @@ export function applyEvent(view: ChatView, event: AgentEvent): ChatView {
     }
 
     case "tool_use": {
+      // The same tool use seen twice (a live copy the merge in
+      // `unsavedLiveEvents` couldn't match to its saved, redacted copy)
+      // updates its step instead of adding a second one with the same id.
+      if (view.items.some((i) => i.kind === "work" && i.steps.some((s) => s.id === event.id))) {
+        const items = view.items.map((item) =>
+          item.kind === "work" && item.steps.some((s) => s.id === event.id)
+            ? {
+                ...item,
+                steps: item.steps.map((s) =>
+                  s.id === event.id ? { ...s, name: event.name, summary: event.summary } : s,
+                ),
+              }
+            : item,
+        );
+        return { ...view, items };
+      }
       const step: WorkStep = {
         id: event.id,
         name: event.name,

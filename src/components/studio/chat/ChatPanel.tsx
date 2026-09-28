@@ -154,6 +154,13 @@ export function ChatPanel({
   // ones this panel sent, or re-read after the turn began. An event for any
   // other running thread means a turn started elsewhere (an auto-fix).
   const syncedTurns = useRef<Set<string>>(new Set());
+  // Threads of the previously open project that were still running when
+  // the project changed. Their events (which carry no project path) are
+  // ignored until their `agent-turn-finished`, so they can't mark this
+  // project's chat busy or hold off its History.
+  const foreignTurns = useRef<Set<string>>(new Set());
+  // The project `running` describes.
+  const runningFor = useRef<string | null>(null);
   // The pending turn already being handled (content key), so StrictMode's
   // double effects and re-renders send it exactly once.
   const pendingTaken = useRef<string | null>(null);
@@ -221,11 +228,11 @@ export function ChatPanel({
         const isRunning = runningRef.current.has(threadId);
         let next = buildChatView(loaded.records, { running: isRunning });
         for (const event of unsavedLiveEvents(loaded.records, buffered)) next = applyEvent(next, event);
-        // Events that arrived during the read were saved after the turn's
-        // opening message, so the view now has the whole turn. (A running
-        // turn with nothing buffered may not have written its first record
-        // yet; its next event re-reads once more.)
-        if (isRunning && buffered.length > 0) syncedTurns.current.add(threadId);
+        // A thread is only known to be running from its events (or a send
+        // from here), and the backend saves a turn's opening message before
+        // any of them — so the read has the whole turn, with the buffered
+        // events on top. No need to re-read it on its next event.
+        if (isRunning) syncedTurns.current.add(threadId);
         // A quiet resync right after a live turn keeps that turn's error for
         // the status banner; the saved file alone never sets it (see
         // `buildChatView`), so reopening an old failed thread shows no banner.
@@ -275,10 +282,25 @@ export function ChatPanel({
     setComposerHint(null);
     setInitDoneFor(null);
     setAutofix(null);
+    // Running turns belong to the project they started in and can't finish
+    // in another one, so a different project starts idle; the old turns'
+    // later events are ignored (see `foreignTurns`). A retry for the same
+    // project keeps them.
+    if (runningFor.current !== projectPath) {
+      runningFor.current = projectPath;
+      for (const threadId of runningRef.current) foreignTurns.current.add(threadId);
+      const idle: ReadonlySet<string> = new Set();
+      runningRef.current = idle;
+      setRunning(idle);
+      syncedTurns.current.clear();
+    }
 
     initRequest.current.promise.then(
       (list) => {
         if (cancelled) return;
+        // Back in a project whose turn was set aside on switching away: its
+        // events count again (its next one marks the thread running).
+        for (const thread of list) foreignTurns.current.delete(thread.id);
         setThreads(list);
         setInitDoneFor(projectPath);
         void showThread(latestThread(list).id);
@@ -300,6 +322,7 @@ export function ChatPanel({
   // for the active thread that arrive mid-read go into the read's buffer.
   useEffect(() => {
     const stopEvents = onAgentEvent(({ threadId, event }) => {
+      if (foreignTurns.current.has(threadId)) return;
       markRunning(threadId, true);
       if (threadId !== activeRef.current) return;
       if (!loadingRef.current && !syncedTurns.current.has(threadId)) {
@@ -314,6 +337,8 @@ export function ChatPanel({
       if (!loadingRef.current) setView((v) => applyEvent(v, event));
     });
     const stopFinished = onAgentTurnFinished(({ threadId }) => {
+      // The previous project's turn ending: nothing of it is on screen.
+      if (foreignTurns.current.delete(threadId)) return;
       markRunning(threadId, false);
       syncedTurns.current.delete(threadId);
       if (threadId !== activeRef.current) return;
@@ -378,6 +403,9 @@ export function ChatPanel({
     (text: string, origin: MessageOrigin = "user"): ChatSendOutcome => {
       const message = text.trim();
       const threadId = activeRef.current;
+      // A second Approve (a double click) while the first is being sent:
+      // drop it rather than leave the approval text in the chat box.
+      if (origin === "plan_approval" && busyRef.current) return "drafted";
       // Not ready to send (still loading, failed to load, or the AI is
       // mid-turn): keep the text as a draft rather than dropping it — this
       // is also where an "Ask AI to fix" lands while the AI is busy.
