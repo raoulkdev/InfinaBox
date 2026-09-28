@@ -1,0 +1,83 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/talkable.gd" id="1_talkable"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_1"]
+size = Vector2(60, 30)
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_2"]
+radius = 56.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_3"]
+bg_color = Color(1, 0.973, 0.925, 1)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(0.118, 0.106, 0.18, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+
+[node name="Sign" type="StaticBody2D"]
+script = ExtResource("1_talkable")
+speaker_name = ""
+lines = Array[String](["Welcome to the garden!", "Walk with the arrow keys or WASD. Talk and read with E or Space.", "Find the key, open the locked door, and escape!"])
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_1")
+
+[node name="TalkZone" type="Area2D" parent="."]
+collision_layer = 8
+collision_mask = 0
+monitoring = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="TalkZone"]
+shape = SubResource("CircleShape2D_2")
+
+[node name="Visual" type="Node2D" parent="."]
+
+[node name="Shadow" type="Polygon2D" parent="Visual"]
+color = Color(0, 0, 0, 0.2)
+polygon = PackedVector2Array(22, 22, 21.4, 23.6, 19.8, 25, 17.2, 26.4, 13.7, 27.5, 9.5, 28.3, 4.9, 28.8, 0, 29, -4.9, 28.8, -9.5, 28.3, -13.7, 27.5, -17.2, 26.4, -19.8, 25, -21.4, 23.6, -22, 22, -21.4, 20.4, -19.8, 19, -17.2, 17.6, -13.7, 16.5, -9.5, 15.7, -4.9, 15.2, 0, 15, 4.9, 15.2, 9.5, 15.7, 13.7, 16.5, 17.2, 17.6, 19.8, 19, 21.4, 20.4)
+
+[node name="PostOutline" type="Polygon2D" parent="Visual"]
+color = Color(0.118, 0.106, 0.18, 1)
+polygon = PackedVector2Array(-7, -2, 7, -2, 7, 24, -7, 24)
+
+[node name="Post" type="Polygon2D" parent="Visual"]
+color = Color(0.553, 0.353, 0.231, 1)
+polygon = PackedVector2Array(-4, 0, 4, 0, 4, 22, -4, 22)
+
+[node name="BoardOutline" type="Polygon2D" parent="Visual"]
+color = Color(0.118, 0.106, 0.18, 1)
+polygon = PackedVector2Array(-33, -35, 33, -35, 33, 7, -33, 7)
+
+[node name="Board" type="Polygon2D" parent="Visual"]
+color = Color(0.851, 0.604, 0.357, 1)
+polygon = PackedVector2Array(-30, -32, 30, -32, 30, 4, -30, 4)
+
+[node name="Writing1" type="Polygon2D" parent="Visual"]
+color = Color(0.553, 0.353, 0.231, 1)
+polygon = PackedVector2Array(-22, -24, 22, -24, 22, -21, -22, -21)
+
+[node name="Writing2" type="Polygon2D" parent="Visual"]
+color = Color(0.553, 0.353, 0.231, 1)
+polygon = PackedVector2Array(-18, -15, 18, -15, 18, -12, -18, -12)
+
+[node name="Writing3" type="Polygon2D" parent="Visual"]
+color = Color(0.553, 0.353, 0.231, 1)
+polygon = PackedVector2Array(-20, -6, 20, -6, 20, -3, -20, -3)
+
+[node name="Prompt" type="Label" parent="."]
+offset_left = -18.0
+offset_top = -84.0
+offset_right = 18.0
+offset_bottom = -48.0
+theme_override_colors/font_color = Color(0.118, 0.106, 0.18, 1)
+theme_override_font_sizes/font_size = 22
+theme_override_styles/normal = SubResource("StyleBoxFlat_3")
+text = "E"
+horizontal_alignment = 1
+vertical_alignment = 1

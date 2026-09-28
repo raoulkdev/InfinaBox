@@ -1,0 +1,119 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/camera.gd" id="2_camera"]
+[ext_resource type="PackedScene" path="res://scenes/room.tscn" id="3_room"]
+[ext_resource type="PackedScene" path="res://scenes/bush.tscn" id="4_bush"]
+[ext_resource type="PackedScene" path="res://scenes/rock.tscn" id="5_rock"]
+[ext_resource type="PackedScene" path="res://scenes/sign.tscn" id="6_sign"]
+[ext_resource type="PackedScene" path="res://scenes/npc.tscn" id="7_npc"]
+[ext_resource type="PackedScene" path="res://scenes/key.tscn" id="8_key"]
+[ext_resource type="PackedScene" path="res://scenes/locked_door.tscn" id="9_locked_door"]
+[ext_resource type="PackedScene" path="res://scenes/enemy.tscn" id="10_enemy"]
+[ext_resource type="PackedScene" path="res://scenes/exit.tscn" id="11_exit"]
+[ext_resource type="PackedScene" path="res://scenes/player.tscn" id="12_player"]
+[ext_resource type="PackedScene" path="res://scenes/hud.tscn" id="13_hud"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="World" type="Node2D" parent="."]
+
+[node name="Rooms" type="Node2D" parent="World"]
+
+[node name="Garden" parent="World/Rooms" instance=ExtResource("3_room")]
+doorway_east = true
+
+[node name="Hall" parent="World/Rooms" instance=ExtResource("3_room")]
+position = Vector2(1280, 0)
+size = Vector2(1920, 720)
+doorway_north = true
+doorway_west = true
+floor_color = Color(0.89, 0.812, 0.659, 1)
+floor_color_alt = Color(0.859, 0.776, 0.62, 1)
+wall_color = Color(0.357, 0.29, 0.431, 1)
+wall_top_color = Color(0.49, 0.416, 0.58, 1)
+
+[node name="Vault" parent="World/Rooms" instance=ExtResource("3_room")]
+position = Vector2(1600, -720)
+doorway_south = true
+floor_color = Color(0.655, 0.616, 0.847, 1)
+floor_color_alt = Color(0.624, 0.584, 0.816, 1)
+wall_color = Color(0.247, 0.208, 0.345, 1)
+wall_top_color = Color(0.369, 0.314, 0.51, 1)
+
+[node name="Props" type="Node2D" parent="World"]
+
+[node name="Bush1" parent="World/Props" instance=ExtResource("4_bush")]
+position = Vector2(120, 110)
+
+[node name="Bush2" parent="World/Props" instance=ExtResource("4_bush")]
+position = Vector2(190, 150)
+
+[node name="Bush3" parent="World/Props" instance=ExtResource("4_bush")]
+position = Vector2(1150, 120)
+
+[node name="Bush4" parent="World/Props" instance=ExtResource("4_bush")]
+position = Vector2(1100, 600)
+
+[node name="Bush5" parent="World/Props" instance=ExtResource("4_bush")]
+position = Vector2(1170, 540)
+
+[node name="Bush6" parent="World/Props" instance=ExtResource("4_bush")]
+position = Vector2(560, 600)
+
+[node name="Bush7" parent="World/Props" instance=ExtResource("4_bush")]
+position = Vector2(900, 180)
+
+[node name="Rock1" parent="World/Props" instance=ExtResource("5_rock")]
+position = Vector2(1720, 200)
+
+[node name="Rock2" parent="World/Props" instance=ExtResource("5_rock")]
+position = Vector2(1760, 560)
+
+[node name="Rock3" parent="World/Props" instance=ExtResource("5_rock")]
+position = Vector2(2880, 170)
+
+[node name="Rock4" parent="World/Props" instance=ExtResource("5_rock")]
+position = Vector2(2700, 610)
+
+[node name="Rock5" parent="World/Props" instance=ExtResource("5_rock")]
+position = Vector2(1800, -560)
+
+[node name="Rock6" parent="World/Props" instance=ExtResource("5_rock")]
+position = Vector2(2680, -560)
+
+[node name="Rock7" parent="World/Props" instance=ExtResource("5_rock")]
+position = Vector2(1800, -170)
+
+[node name="Rock8" parent="World/Props" instance=ExtResource("5_rock")]
+position = Vector2(2680, -170)
+
+[node name="Sign" parent="World" instance=ExtResource("6_sign")]
+position = Vector2(330, 250)
+
+[node name="Moss" parent="World" instance=ExtResource("7_npc")]
+position = Vector2(760, 380)
+
+[node name="Key" parent="World" instance=ExtResource("8_key")]
+position = Vector2(3040, 580)
+
+[node name="LockedDoor" parent="World" instance=ExtResource("9_locked_door")]
+position = Vector2(2240, 20)
+
+[node name="Slime" parent="World" instance=ExtResource("10_enemy")]
+position = Vector2(2620, 400)
+
+[node name="Exit" parent="World" instance=ExtResource("11_exit")]
+position = Vector2(2240, -380)
+
+[node name="Player" parent="World" instance=ExtResource("12_player")]
+position = Vector2(220, 420)
+
+[node name="Camera" type="Camera2D" parent="." node_paths=PackedStringArray("target")]
+position = Vector2(640, 360)
+zoom = Vector2(1.25, 1.25)
+script = ExtResource("2_camera")
+target = NodePath("../World/Player")
+
+[node name="HUD" parent="." instance=ExtResource("13_hud")]
