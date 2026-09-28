@@ -607,6 +607,7 @@ impl GameHost for AppHost {
     }
 
     fn on_state(&self, state: GameState) {
+        crate::commands::autofix::note_game_state(&self.0, state);
         let _ = self.0.emit(EVENT_GAME_STATE, GameStatePayload { state });
     }
 
@@ -615,6 +616,7 @@ impl GameHost for AppHost {
     }
 
     fn on_error(&self, error: &GameError) {
+        crate::commands::autofix::note_game_error(&self.0, error);
         let _ = self.0.emit(EVENT_GAME_ERROR, error);
     }
 }
@@ -686,6 +688,16 @@ pub async fn godot_install(app: AppHandle) -> Result<GodotStatus, String> {
     })
     .await
     .map_err(|e| format!("The Godot install stopped unexpectedly: {e}"))?
+}
+
+/// Opens the project in the Godot editor, as a separate app the person
+/// can keep using after InfinaBox closes.
+///
+/// Wave 0 stub (Phase B plan, Task C2 fills it in).
+#[tauri::command(async)]
+pub fn godot_open_editor(project_path: String) -> Result<(), String> {
+    let _ = project_path;
+    Err("Not implemented yet (Phase B, Task C2)".into())
 }
 
 #[tauri::command(async)]

@@ -1,0 +1,9 @@
+{
+  "id": "shooter-2d",
+  "name": "Arena shooter",
+  "description": "Survive waves of enemies in an arena: move with one hand, aim and shoot with the other.",
+  "dimension": "2d",
+  "controls": "WASD to move, mouse to aim, click to shoot (or two gamepad sticks)",
+  "features": ["Twin-stick movement and aiming", "Enemies that come in waves", "Score and health", "A game-over screen with restart"],
+  "keywords": ["shooter", "shoot", "shooting", "gun", "arena", "waves", "survive", "survival", "bullet", "twin-stick", "space", "zombies", "enemies", "action", "blast"]
+}

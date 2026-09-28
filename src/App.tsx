@@ -225,7 +225,7 @@ function App() {
             transition={fadeTransition}
             inert={section !== "studio"}
           >
-            <StudioSection projectPath={projectPath} />
+            <StudioSection projectPath={projectPath} pendingTurn={null} onPendingTurnTaken={() => {}} />
           </motion.div>
           <motion.div
             className="absolute inset-0 flex min-h-0 min-w-0 overflow-hidden"

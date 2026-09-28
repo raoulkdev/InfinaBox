@@ -52,6 +52,40 @@ pub struct ProjectMarker {
     pub dimension: String,
 }
 
+/// A starter template, read from its `template.json` (Phase B contract).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct TemplateInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    /// "2d" or "3d".
+    pub dimension: String,
+    /// How to play, in plain words ("Arrow keys to move, Space to jump").
+    pub controls: String,
+    pub features: Vec<String>,
+    /// Words in someone's game idea that point at this template.
+    pub keywords: Vec<String>,
+}
+
+/// Every bundled template, in the order they're offered.
+///
+/// Wave 0 stub (Phase B plan, Task OB fills it in).
+pub fn list_templates() -> Vec<TemplateInfo> {
+    Vec::new()
+}
+
+/// Like `create_project`, from the template `template_id`.
+///
+/// Wave 0 stub (Phase B plan, Task OB fills it in).
+pub fn create_project_from_template(
+    parent_dir: &Path,
+    name: &str,
+    template_id: &str,
+) -> Result<PathBuf> {
+    let _ = (parent_dir, name, template_id);
+    bail!("not implemented yet")
+}
+
 /// Creates `<parent_dir>/<name>` as a new project (Phase A: blank 2D only)
 /// and returns its path. Refuses an existing non-empty directory.
 ///

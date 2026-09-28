@@ -1,11 +1,16 @@
 pub mod agent;
+pub mod autofix;
 pub mod bridge;
+pub mod connect;
 pub mod environment;
 pub mod fs;
 pub mod godot;
+pub mod onboarding;
 pub mod overview;
 pub mod project;
+pub mod project_settings;
 pub mod scaffold;
+pub mod settings;
 pub mod snapshot;
 pub mod terminal;
 pub mod watcher;

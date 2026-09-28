@@ -38,7 +38,8 @@ use std::time::Duration;
 use infinabox_core::agent::claude::ClaudeCodeRuntime;
 use infinabox_core::agent::claude_stream::STOPPED_MESSAGE;
 use infinabox_core::agent::{
-    AgentErrorKind, AgentEvent, AgentRuntime, McpLaunch, RuntimeStatus, TurnRequest,
+    AgentErrorKind, AgentEvent, AgentRuntime, McpLaunch, MessageOrigin, RuntimeStatus,
+    TurnRequest,
 };
 use infinabox_core::chat_store::{self, ChatRecord, ThreadSummary};
 use infinabox_core::snapshot::{self, Snapshot};
@@ -232,6 +233,7 @@ pub(crate) fn start_turn(
     let record = ChatRecord::User {
         text: message.to_string(),
         at: now_unix(),
+        origin: None,
     };
     // On failure `slot` drops here and frees the thread again.
     chat_store::append(project, thread_id, &record)
@@ -457,6 +459,8 @@ fn drive(
         message: message.to_string(),
         resume_provider_session_id: resume,
         mcp,
+        // Phase B (Task G2): from `project_settings` plus the message's origin.
+        options: Default::default(),
     };
 
     let started = AtomicBool::new(false);
@@ -718,7 +722,10 @@ pub fn agent_send(
     project_path: String,
     thread_id: String,
     message: String,
+    // Phase B (Task G2): passed into `TurnOptions` and saved on the user record.
+    origin: Option<MessageOrigin>,
 ) -> Result<(), String> {
+    let _ = origin;
     let state = app.state::<AgentState>();
     let project = PathBuf::from(&project_path);
     let slot = start_turn(&state.active_turns, &project, &thread_id, &message)?;

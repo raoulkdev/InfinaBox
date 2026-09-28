@@ -1,0 +1,9 @@
+{
+  "id": "platformer-2d",
+  "name": "Platformer",
+  "description": "Run and jump through a side-on level: collect coins, avoid hazards, reach the flag.",
+  "dimension": "2d",
+  "controls": "Arrow keys or A/D to move, Space to jump",
+  "features": ["Running and jumping", "Coins and a coin counter", "Hazards and checkpoints", "A goal flag and a level-complete screen"],
+  "keywords": ["platformer", "platform", "jump", "jumping", "run", "side", "side-scroller", "sidescroller", "mario", "celeste", "levels", "coins", "climb"]
+}

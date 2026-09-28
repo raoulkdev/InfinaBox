@@ -2,15 +2,21 @@
 //! graph, grounded question-answering, and MCP client — reusable by both the
 //! `infinabox-cli` spike tool and the Tauri desktop app. Phase A adds the
 //! agent runtime, Godot integration, snapshots, chat storage, and project
-//! scaffolding.
+//! scaffolding; Phase B adds connecting the user's AI, settings, the
+//! onboarding interview, and the automatic error-fix loop.
 
 pub mod agent;
+pub mod app_settings;
 pub mod ask;
+pub mod autofix;
 pub mod chat_store;
+pub mod connect;
 pub mod git_indexer;
 pub mod godot;
 pub mod graph;
 pub mod mcp_client;
+pub mod onboarding;
+pub mod project_settings;
 pub mod redact;
 pub mod scaffold;
 pub mod snapshot;

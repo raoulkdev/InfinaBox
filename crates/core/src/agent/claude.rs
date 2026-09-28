@@ -158,6 +158,8 @@ impl AgentRuntime for ClaudeCodeRuntime {
             name: PROGRAM.to_string(),
             installed: program.is_some(),
             version: program.and_then(|p| read_version(&p)),
+            // Filled from `claude auth status --json` in Phase B (Task PL).
+            logged_in: None,
         }
     }
 

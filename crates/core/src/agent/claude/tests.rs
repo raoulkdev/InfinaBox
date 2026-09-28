@@ -28,6 +28,7 @@ fn request(project: &Path, message: &str) -> TurnRequest {
                 ("INFINABOX_BRIDGE_TOKEN".into(), "token-123".into()),
             ],
         },
+        options: Default::default(),
     }
 }
 
@@ -280,7 +281,8 @@ fn detect_runs_the_version_command() {
         RuntimeStatus {
             name: "claude".into(),
             installed: true,
-            version: Some("2.1.283".into())
+            version: Some("2.1.283".into()),
+            logged_in: None,
         }
     );
 }

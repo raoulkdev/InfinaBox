@@ -1,0 +1,9 @@
+{
+  "id": "topdown-2d",
+  "name": "Top-down adventure",
+  "description": "Explore rooms seen from above: talk to characters, find a key, open doors, dodge enemies.",
+  "dimension": "2d",
+  "controls": "Arrow keys or WASD to move, E to talk or interact",
+  "features": ["Moving in eight directions", "Rooms with walls and doors", "A character to talk to", "A key that opens a door", "A wandering enemy and hearts"],
+  "keywords": ["adventure", "top-down", "topdown", "explore", "exploration", "zelda", "rpg", "quest", "dungeon", "rooms", "npc", "talk", "story", "farm", "cozy", "village"]
+}

@@ -4,6 +4,7 @@ import { ResizablePanelGroup } from "@/components/cockpit/ResizablePanelGroup";
 import { ChatPanel, type ChatSendOutcome } from "@/components/studio/chat/ChatPanel";
 import { HistoryPanel } from "@/components/studio/history/HistoryPanel";
 import { PlayPanel } from "@/components/studio/play/PlayPanel";
+import type { PendingTurn } from "@/lib/studio-types";
 
 // The Studio section (product spec §7.1): the conversation with the user's
 // own AI on one side, the running game and its history on the other. It's
@@ -13,6 +14,10 @@ import { PlayPanel } from "@/components/studio/play/PlayPanel";
 
 export interface StudioSectionProps {
   projectPath: string | null;
+  /** A turn to start as soon as Studio shows this project (the onboarding's
+   * first build; Phase B Task FC); `onPendingTurnTaken` clears it. */
+  pendingTurn: PendingTurn | null;
+  onPendingTurnTaken: () => void;
 }
 
 /** Chat / (Play over History), laid out via the shared

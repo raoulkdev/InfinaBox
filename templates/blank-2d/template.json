@@ -1,0 +1,9 @@
+{
+  "id": "blank-2d",
+  "name": "Start from scratch",
+  "description": "An empty 2D game with a player you can move. Everything else is up to you and the AI.",
+  "dimension": "2d",
+  "controls": "Arrow keys to move",
+  "features": ["A player that moves with the arrow keys"],
+  "keywords": []
+}

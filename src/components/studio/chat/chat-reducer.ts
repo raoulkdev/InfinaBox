@@ -81,6 +81,10 @@ export function applyEvent(view: ChatView, event: AgentEvent): ChatView {
     case "session_started":
       return { ...view, model: event.model ?? view.model };
 
+    // Phase B Wave 0 placeholder: Task FC renders plans as approvable cards.
+    case "plan_proposed":
+      return view;
+
     case "assistant_text": {
       if (!event.text.trim()) return view;
       // The CLI emits one text block per assistant message; back-to-back

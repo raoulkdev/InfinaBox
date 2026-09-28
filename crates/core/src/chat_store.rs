@@ -23,7 +23,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::agent::AgentEvent;
+use crate::agent::{AgentEvent, MessageOrigin};
 use crate::redact::redact;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -39,7 +39,14 @@ pub struct ThreadSummary {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ChatRecord {
-    User { text: String, at: i64 },
+    User {
+        text: String,
+        at: i64,
+        /// Why it was sent (Phase B). Absent in Phase A files and for
+        /// messages the person typed themselves.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<MessageOrigin>,
+    },
     Event { event: AgentEvent, at: i64 },
 }
 
@@ -244,6 +251,16 @@ fn remove_stale_temp_files(thread_file: &Path) {
 
 /// Newest first. Files whose header can't be read are skipped rather than
 /// failing the whole list (one damaged thread shouldn't hide the others).
+/// Switches a thread to another provider (the person changed their AI):
+/// sets `provider` and clears `provider_session_id`, since the old
+/// provider's conversation can't be resumed by the new one.
+///
+/// Wave 0 stub (Phase B plan, Task AF fills it in).
+pub fn set_provider(project: &Path, thread_id: &str, provider: &str) -> Result<()> {
+    let _ = (project, thread_id, provider);
+    anyhow::bail!("not implemented yet")
+}
+
 pub fn list_threads(project: &Path) -> Result<Vec<ThreadSummary>> {
     let dir = chat_dir(project);
     let entries = match fs::read_dir(&dir) {
@@ -397,6 +414,7 @@ mod tests {
             ChatRecord::User {
                 text: "Make the player jump higher".into(),
                 at: 100,
+                origin: None,
             },
             ChatRecord::Event {
                 event: AgentEvent::SessionStarted {
@@ -496,6 +514,7 @@ mod tests {
             &ChatRecord::User {
                 text: format!("here is my key {key}"),
                 at: 1,
+                origin: None,
             },
         )
         .unwrap();
@@ -526,7 +545,8 @@ mod tests {
             records[0],
             ChatRecord::User {
                 text: "here is my key [redacted]".into(),
-                at: 1
+                at: 1,
+                origin: None,
             }
         );
         match &records[1] {
@@ -585,6 +605,7 @@ mod tests {
             &ChatRecord::User {
                 text: "more".into(),
                 at: 9,
+                origin: None,
             },
         )
         .unwrap();
@@ -662,6 +683,7 @@ mod tests {
         let rec = ChatRecord::User {
             text: "x".into(),
             at: 0,
+            origin: None,
         };
         assert!(append(dir.path(), "../../etc/passwd", &rec).is_err());
         assert!(load_thread(dir.path(), "a/b").is_err());
@@ -679,6 +701,7 @@ mod tests {
             &ChatRecord::User {
                 text: "ok".into(),
                 at: 1,
+                origin: None,
             },
         )
         .unwrap();
@@ -706,10 +729,12 @@ mod tests {
         let first = ChatRecord::User {
             text: "one".into(),
             at: 1,
+            origin: None,
         };
         let second = ChatRecord::User {
             text: "two".into(),
             at: 2,
+            origin: None,
         };
         append(dir.path(), &thread.id, &first).unwrap();
         let path = dir
@@ -743,6 +768,7 @@ mod tests {
                         &ChatRecord::User {
                             text: format!("m{i}"),
                             at: i,
+                            origin: None,
                         },
                     )
                     .unwrap();
@@ -799,10 +825,12 @@ mod tests {
         let first = ChatRecord::User {
             text: "one".into(),
             at: 1,
+            origin: None,
         };
         let second = ChatRecord::User {
             text: "two".into(),
             at: 2,
+            origin: None,
         };
         append(dir.path(), &thread.id, &first).unwrap();
         let path = thread_file(dir.path(), &thread.id);
@@ -826,6 +854,7 @@ mod tests {
         let rec = ChatRecord::User {
             text: "hi".into(),
             at: 1,
+            origin: None,
         };
         append(dir.path(), &thread.id, &rec).unwrap();
         let (summary, records) = load_thread(dir.path(), &thread.id).unwrap();
@@ -846,6 +875,7 @@ mod tests {
         let big = ChatRecord::User {
             text: "x".repeat(20_000),
             at: 1,
+            origin: None,
         };
         append(dir.path(), &thread.id, &big).unwrap();
         let path = thread_file(dir.path(), &thread.id);
@@ -858,6 +888,7 @@ mod tests {
         let small = ChatRecord::User {
             text: "after".into(),
             at: 2,
+            origin: None,
         };
         append(dir.path(), &thread.id, &small).unwrap();
         let (_, records) = load_thread(dir.path(), &thread.id).unwrap();
@@ -876,7 +907,8 @@ mod tests {
             "{}\n",
             serde_json::to_string(&ChatRecord::User {
                 text: "z".repeat(20_000),
-                at: 0
+                at: 0,
+                origin: None,
             })
             .unwrap()
         );
@@ -897,6 +929,7 @@ mod tests {
                 &ChatRecord::User {
                     text: "hi".into(),
                     at: i,
+                    origin: None,
                 },
             )
             .unwrap();

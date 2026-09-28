@@ -1168,6 +1168,7 @@ mod tests {
         crate::chat_store::ChatRecord::User {
             text: text.into(),
             at,
+            origin: None,
         }
     }
 

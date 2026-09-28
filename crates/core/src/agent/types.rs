@@ -1,7 +1,8 @@
-//! Phase A contract types (frozen — see
-//! `docs/superpowers/plans/2026-09-25-phase-a-foundations.md`, "Wave 0
-//! contracts"). Mirrored for the frontend in `src/lib/studio-types.ts`;
-//! change both together, and only through the plan's lead.
+//! Agent contract types (frozen — see the "Wave 0 contracts" sections of
+//! `docs/superpowers/plans/2026-09-25-phase-a-foundations.md` and
+//! `docs/superpowers/plans/2026-09-28-phase-b-first-run.md`). Mirrored for
+//! the frontend in `src/lib/studio-types.ts`; change both together, and only
+//! through the plan's lead.
 
 use std::path::PathBuf;
 
@@ -43,6 +44,13 @@ pub enum AgentEvent {
         kind: AgentErrorKind,
         message: String,
     },
+    /// The agent proposed a plan with the `propose_plan` MCP tool and is
+    /// waiting for the person to approve it. Emitted by each runtime's
+    /// stream parser in place of that tool call's `ToolUse`.
+    PlanProposed {
+        title: String,
+        steps: Vec<String>,
+    },
 }
 
 /// Only ever filled from figures the provider actually reported — never
@@ -61,10 +69,13 @@ pub enum AgentErrorKind {
     RateLimited,
     ProcessFailed,
     Other,
+    /// The person pressed Stop. Shown as a neutral note, not an error.
+    Cancelled,
 }
 
-/// The provider-independent interface from spec §8.3. Phase A has one
-/// implementation (Claude Code CLI); Codex/API-key/local come later.
+/// The provider-independent interface from spec §8.3. Implemented by the
+/// Claude Code CLI (Phase A) and the Codex CLI (Phase B); API-key and local
+/// runtimes come later.
 pub trait AgentRuntime: Send + Sync {
     fn detect(&self) -> RuntimeStatus;
     /// Runs one user turn. Blocks the calling thread until the turn ends;
@@ -87,6 +98,46 @@ pub struct TurnRequest {
     /// provider-side conversation.
     pub resume_provider_session_id: Option<String>,
     pub mcp: McpLaunch,
+    pub options: TurnOptions,
+}
+
+/// How the agent should behave this turn: the project's settings plus why
+/// the message was sent. Runtimes turn it into instructions with
+/// `agent::prompt::system_prompt`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TurnOptions {
+    pub plan_policy: PlanPolicy,
+    /// "Teach me" mode: explanations grow into short lessons.
+    pub teach: bool,
+    pub origin: MessageOrigin,
+}
+
+/// When the agent must propose a plan before changing the game (spec §5.4).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanPolicy {
+    /// Every change to the game gets a plan the person approves first.
+    #[default]
+    AlwaysPlan,
+    /// Small, single-step changes are made directly; bigger ones get a plan.
+    SmallChangesDirect,
+}
+
+/// Why a message was sent. Changes the instructions the agent gets (an
+/// approved plan or an auto-fix is never re-planned) and how the chat
+/// shows it.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageOrigin {
+    /// Typed by the person.
+    #[default]
+    User,
+    /// The person pressed Approve on a plan.
+    PlanApproval,
+    /// InfinaBox sent the game's errors back automatically.
+    AutoFix,
+    /// The first build after the onboarding interview.
+    FirstBuild,
 }
 
 /// How the runtime should launch the InfinaBox MCP server for the agent.
@@ -102,4 +153,6 @@ pub struct RuntimeStatus {
     pub name: String,
     pub installed: bool,
     pub version: Option<String>,
+    /// From the CLI's own sign-in status command; None when it can't tell.
+    pub logged_in: Option<bool>,
 }

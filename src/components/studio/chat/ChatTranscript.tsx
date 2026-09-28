@@ -167,6 +167,7 @@ const ERROR_TITLES: Record<AgentErrorKind, string> = {
   rate_limited: "You've reached your plan's limit for now",
   process_failed: "The AI stopped unexpectedly",
   other: "Something went wrong",
+  cancelled: "Stopped",
 };
 
 function ErrorCard({ kind, message }: { kind: AgentErrorKind; message: string }) {

@@ -43,9 +43,12 @@ import {
   type RecentProject,
 } from "@/lib/recent-projects";
 import { projectCreate } from "@/lib/studio-api";
+import type { PendingTurn } from "@/lib/studio-types";
 
 interface DashboardSectionProps {
-  onOpenProject: (path: string) => void;
+  /** `pendingTurn`: a turn Studio starts as soon as it shows the project
+   * (the onboarding's first build). */
+  onOpenProject: (path: string, pendingTurn?: PendingTurn) => void;
 }
 
 // The command-line tools InfinaBox's own terminal actually depends on —
