@@ -43,7 +43,7 @@ pub const EVENT_GAME_ERROR: &str = "game-error";
 /// (e.g. an old-format InfinaBox project).
 pub const NOT_A_GODOT_GAME: &str = "This project isn't a Godot game yet.";
 pub const GODOT_NOT_INSTALLED: &str =
-    "Godot isn't installed yet. Install it from the Play panel, then try again.";
+    "Godot isn't set up yet. Set it up from Home or Studio's Play panel, then try again.";
 pub const STOPPED_WHILE_STARTING: &str = "The game was stopped before it finished starting.";
 pub const CUSTOM_GODOT_BROKEN: &str = "The Godot you chose in Advanced settings doesn't run. \
 Check its path there, or switch back to the managed Godot.";
