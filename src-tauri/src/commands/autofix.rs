@@ -215,7 +215,9 @@ struct ProjectFix {
 
 pub(crate) struct FixLoop {
     debounce: Duration,
-    /// By project path, exactly as the frontend passed it.
+    /// By project path, exactly as the frontend passed it. Entries for
+    /// closed projects are kept on purpose: they're tiny, and reopening the
+    /// project picks its state back up.
     projects: HashMap<String, ProjectFix>,
     /// The project of the game started last.
     game_project: Option<String>,
@@ -328,6 +330,13 @@ impl FixLoop {
                             entry.fixing = Some(thread_id.clone());
                             host.emit(payload(&thread_id, AutoFixPhase::Fixing, attempt));
                         }
+                        // Another turn (usually the person's own message) took
+                        // the thread first: that turn resets the attempts in
+                        // core (`on_turn_started`), so this isn't a failed
+                        // fix and nothing is shown.
+                        Err(e) if host.turn_running(project) => {
+                            eprintln!("autofix: a turn started first in {project}; no fix: {e}");
+                        }
                         Err(e) => {
                             eprintln!("autofix: couldn't start a fix in {project}: {e}");
                             host.emit(payload(&thread_id, AutoFixPhase::GaveUp, attempt));
@@ -419,6 +428,7 @@ mod tests {
         started: RefCell<Vec<(String, String, String)>>,
         emitted: RefCell<Vec<AutoFixStatePayload>>,
         settings_reads: RefCell<usize>,
+        user_turn_wins: RefCell<bool>,
     }
 
     impl FixHost for FakeHost {
@@ -436,6 +446,11 @@ mod tests {
             !self.disabled.borrow().iter().any(|p| p == project)
         }
         fn start_fix(&self, project: &str, thread_id: &str, message: &str) -> Result<(), String> {
+            if *self.user_turn_wins.borrow() {
+                // The person's message took the thread a moment earlier.
+                self.running.borrow_mut().push(project.into());
+                return Err("The AI is still working on this thread".into());
+            }
             if let Some(e) = self.start_error.borrow().clone() {
                 return Err(e);
             }
@@ -622,6 +637,18 @@ mod tests {
                 state(AutoFixPhase::GaveUp, 2),
             ]
         );
+    }
+
+    #[test]
+    fn a_fix_beaten_by_the_persons_own_turn_is_not_reported_as_given_up() {
+        let host = FakeHost::new();
+        *host.user_turn_wins.borrow_mut() = true;
+        let mut fixes = FixLoop::new(DEBOUNCE);
+        let t0 = Instant::now();
+        fixes.handle(Note::GameState(GameState::Starting), &host);
+        fixes.handle(Note::GameError(nil_call(), t0), &host);
+        fixes.tick(t0 + DEBOUNCE, &host);
+        assert_eq!(host.take_emitted(), vec![]);
     }
 
     #[test]
