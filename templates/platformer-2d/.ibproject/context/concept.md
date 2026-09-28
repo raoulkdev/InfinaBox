@@ -5,9 +5,15 @@ status: starting point
 
 # {{PROJECT_NAME}}
 
-> **Starting point.** This card was created with the project and hasn't
-> been filled in yet. Describe the game here (or ask the AI to help), and
-> keep it up to date as the game changes.
+> **Starting point.** This card was created with the project from the
+> Platformer template and hasn't been filled in yet. Describe the game here
+> (or ask the AI to help), and keep it up to date as the game changes.
+
+## What's already here
+
+A side-on platformer with one level: run and jump across platforms,
+collect coins, avoid spikes and pits (you go back to the last checkpoint),
+and reach the flag to finish the level. See the cards in `mechanics/`.
 
 ## Pitch
 
