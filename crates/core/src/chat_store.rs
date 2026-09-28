@@ -8,8 +8,9 @@
 //! millisecond, then 8 random hex chars), so a plain string sort is a
 //! chronological sort and ids are safe as file names.
 //!
-//! Writers (`create_thread`, `append`, `set_provider_session`) serialize on
-//! one in-process lock: `set_provider_session` replaces the file by rename,
+//! Writers (`create_thread`, `append`, and the header rewrites
+//! `set_provider_session` / `set_provider`) serialize on
+//! one in-process lock: a header rewrite replaces the file by rename,
 //! and an `append` racing with it would otherwise write into the old,
 //! about-to-be-replaced inode and be lost. InfinaBox is the only process
 //! that writes these files.
@@ -182,6 +183,30 @@ pub fn set_provider_session(
     thread_id: &str,
     session_id: Option<&str>,
 ) -> Result<()> {
+    rewrite_header(project, thread_id, |summary| {
+        summary.provider_session_id = session_id.map(str::to_string);
+    })
+}
+
+/// Switches a thread to another provider (the person changed their AI):
+/// sets `provider` and clears `provider_session_id`, since the old
+/// provider's conversation can't be resumed by the new one. The records
+/// stay as they are.
+pub fn set_provider(project: &Path, thread_id: &str, provider: &str) -> Result<()> {
+    rewrite_header(project, thread_id, |summary| {
+        summary.provider = provider.to_string();
+        summary.provider_session_id = None;
+    })
+}
+
+/// Rewrites the thread's header line with `change` applied, keeping every
+/// record after it byte for byte. Takes the write lock; the header is
+/// redacted like every other write.
+fn rewrite_header(
+    project: &Path,
+    thread_id: &str,
+    change: impl FnOnce(&mut ThreadSummary),
+) -> Result<()> {
     let path = thread_path(project, thread_id)?;
     let _guard = write_lock();
     remove_stale_temp_files(&path);
@@ -194,7 +219,7 @@ pub fn set_provider_session(
     };
     let mut summary = parse_header(first)
         .with_context(|| format!("chat thread '{}' has an invalid header", path.display()))?;
-    summary.provider_session_id = session_id.map(str::to_string);
+    change(&mut summary);
 
     let mut new_content = header_line(&summary)?;
     new_content.push_str(rest);
@@ -251,16 +276,6 @@ fn remove_stale_temp_files(thread_file: &Path) {
 
 /// Newest first. Files whose header can't be read are skipped rather than
 /// failing the whole list (one damaged thread shouldn't hide the others).
-/// Switches a thread to another provider (the person changed their AI):
-/// sets `provider` and clears `provider_session_id`, since the old
-/// provider's conversation can't be resumed by the new one.
-///
-/// Wave 0 stub (Phase B plan, Task AF fills it in).
-pub fn set_provider(project: &Path, thread_id: &str, provider: &str) -> Result<()> {
-    let _ = (project, thread_id, provider);
-    anyhow::bail!("not implemented yet")
-}
-
 pub fn list_threads(project: &Path) -> Result<Vec<ThreadSummary>> {
     let dir = chat_dir(project);
     let entries = match fs::read_dir(&dir) {
@@ -640,6 +655,177 @@ mod tests {
         // Clearing an already-clear session is harmless.
         set_provider_session(dir.path(), &thread.id, None).unwrap();
         assert_eq!(load_thread(dir.path(), &thread.id).unwrap().0, thread);
+    }
+
+    #[test]
+    fn origin_round_trips_and_is_left_out_when_absent() {
+        let dir = TempDir::new().unwrap();
+        let thread = create_thread(dir.path(), "Fixes", "claude-code").unwrap();
+        let records: Vec<ChatRecord> = [
+            None,
+            Some(MessageOrigin::User),
+            Some(MessageOrigin::PlanApproval),
+            Some(MessageOrigin::AutoFix),
+            Some(MessageOrigin::FirstBuild),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, origin)| ChatRecord::User {
+            text: format!("m{i}"),
+            at: i as i64,
+            origin,
+        })
+        .collect();
+        for r in &records {
+            append(dir.path(), &thread.id, r).unwrap();
+        }
+        let (_, loaded) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(loaded, records);
+
+        let raw = fs::read_to_string(thread_file(dir.path(), &thread.id)).unwrap();
+        let lines: Vec<Value> = raw
+            .lines()
+            .skip(1)
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert!(lines[0].get("origin").is_none(), "no origin key when None");
+        assert_eq!(lines[2]["origin"], "plan_approval");
+        assert_eq!(lines[3]["origin"], "auto_fix");
+        assert_eq!(lines[4]["origin"], "first_build");
+    }
+
+    #[test]
+    fn phase_a_thread_files_without_origin_still_load() {
+        // A thread exactly as Phase A wrote it: no `origin` anywhere.
+        let dir = TempDir::new().unwrap();
+        let chat = dir.path().join(".ibproject/chat");
+        fs::create_dir_all(&chat).unwrap();
+        let id = "20260926T101500123-0a1b2c3d";
+        fs::write(
+            chat.join(format!("{id}.jsonl")),
+            concat!(
+                r#"{"id":"20260926T101500123-0a1b2c3d","title":"Make it blue","created_at":1790000000,"provider":"claude-code","provider_session_id":"5d1e0c7a-1111-4222-8333-944445555666","kind":"thread"}"#,
+                "\n",
+                r#"{"kind":"user","text":"Make the background dark blue","at":1790000001}"#,
+                "\n",
+                r#"{"kind":"event","event":{"type":"assistant_text","text":"Done."},"at":1790000002}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let (summary, records) = load_thread(dir.path(), id).unwrap();
+        assert_eq!(summary.title, "Make it blue");
+        assert_eq!(
+            records[0],
+            ChatRecord::User {
+                text: "Make the background dark blue".into(),
+                at: 1790000001,
+                origin: None,
+            }
+        );
+        assert_eq!(records.len(), 2);
+    }
+
+    #[test]
+    fn set_provider_switches_provider_clears_the_session_and_keeps_records() {
+        let dir = TempDir::new().unwrap();
+        let thread = create_thread(dir.path(), "Switching", "claude-code").unwrap();
+        let records = sample_records();
+        for r in &records {
+            append(dir.path(), &thread.id, r).unwrap();
+        }
+        set_provider_session(dir.path(), &thread.id, Some("claude-session-1")).unwrap();
+
+        set_provider(dir.path(), &thread.id, "codex").unwrap();
+        let (loaded, loaded_records) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(
+            loaded,
+            ThreadSummary {
+                provider: "codex".into(),
+                provider_session_id: None,
+                ..thread.clone()
+            }
+        );
+        assert_eq!(loaded_records, records);
+        assert_eq!(list_threads(dir.path()).unwrap(), vec![loaded.clone()]);
+
+        // No temp file left behind; the new provider's session can be set
+        // and later appends still land after the records.
+        let names: Vec<_> = fs::read_dir(dir.path().join(".ibproject/chat"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(names, [format!("{}.jsonl", thread.id)]);
+        set_provider_session(dir.path(), &thread.id, Some("codex-thread-1")).unwrap();
+        append(dir.path(), &thread.id, &user_rec("next", 50)).unwrap();
+        let (loaded, loaded_records) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(loaded.provider, "codex");
+        assert_eq!(loaded.provider_session_id.as_deref(), Some("codex-thread-1"));
+        assert_eq!(loaded_records.len(), records.len() + 1);
+
+        // Switching back works the same way.
+        set_provider(dir.path(), &thread.id, "claude-code").unwrap();
+        let (loaded, _) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(loaded.provider, "claude-code");
+        assert_eq!(loaded.provider_session_id, None);
+    }
+
+    #[test]
+    fn set_provider_redacts_and_rejects_bad_or_missing_threads() {
+        let dir = TempDir::new().unwrap();
+        let thread = create_thread(dir.path(), "T", "claude-code").unwrap();
+        let key = "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+        set_provider(dir.path(), &thread.id, &format!("custom {key}")).unwrap();
+        let raw = fs::read_to_string(thread_file(dir.path(), &thread.id)).unwrap();
+        assert!(!raw.contains(key));
+        assert_eq!(
+            load_thread(dir.path(), &thread.id).unwrap().0.provider,
+            "custom [redacted]"
+        );
+
+        assert!(set_provider(dir.path(), "../../etc/passwd", "codex").is_err());
+        assert!(set_provider(dir.path(), "20260101T000000000-deadbeef", "codex").is_err());
+    }
+
+    #[test]
+    fn concurrent_appends_and_provider_switches_lose_nothing() {
+        let dir = TempDir::new().unwrap();
+        let project = dir.path().to_path_buf();
+        let thread = create_thread(&project, "Busy", "claude-code").unwrap();
+
+        const N: i64 = 100;
+        let appender = {
+            let (project, id) = (project.clone(), thread.id.clone());
+            std::thread::spawn(move || {
+                for i in 0..N {
+                    append(&project, &id, &user_rec(&format!("m{i}"), i)).unwrap();
+                }
+            })
+        };
+        let switcher = {
+            let (project, id) = (project.clone(), thread.id.clone());
+            std::thread::spawn(move || {
+                for i in 0..N {
+                    let provider = if i % 2 == 0 { "codex" } else { "claude-code" };
+                    set_provider(&project, &id, provider).unwrap();
+                }
+            })
+        };
+        appender.join().unwrap();
+        switcher.join().unwrap();
+
+        let (summary, records) = load_thread(&project, &thread.id).unwrap();
+        assert_eq!(summary.provider, "claude-code");
+        assert_eq!(records.len(), N as usize);
+    }
+
+    fn user_rec(text: &str, at: i64) -> ChatRecord {
+        ChatRecord::User {
+            text: text.into(),
+            at,
+            origin: None,
+        }
     }
 
     #[test]
