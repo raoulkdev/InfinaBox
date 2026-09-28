@@ -24,7 +24,7 @@ export interface StudioSectionProps {
  * `ResizablePanelGroup` system — resizable against each other and dragged
  * into either order, persisted under the "studio" storage key, the same
  * way Build's Agent/Code row is. */
-export function StudioSection({ projectPath }: StudioSectionProps) {
+export function StudioSection({ projectPath, pendingTurn, onPendingTurnTaken }: StudioSectionProps) {
   // ChatPanel hands over its `send` once on mount; the Play panel's "Ask AI
   // to fix" calls through this ref, so neither panel owns the other's state
   // and a re-registered `send` never re-renders Play.
@@ -80,6 +80,11 @@ export function StudioSection({ projectPath }: StudioSectionProps) {
                 projectPath={projectPath}
                 onRegisterSend={registerSend}
                 onTurnRunningChange={setAiWorking}
+                // Studio is permanently mounted, possibly long before the
+                // project opens: the chat starts the pending turn itself
+                // once this project's conversation is open.
+                pendingTurn={pendingTurn}
+                onPendingTurnTaken={onPendingTurnTaken}
               />
             </div>
           ),

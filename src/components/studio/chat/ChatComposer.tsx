@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent, type RefObject } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -18,13 +18,29 @@ interface ChatComposerProps {
   /** The chat isn't ready (still loading, or failed to load) — typing is
    * still allowed so nothing is lost, but sending isn't. */
   disabled: boolean;
+  /** Replaces the usual placeholder (e.g. "What should be different?" after
+   * "Change something" on a plan). */
+  hint?: string | null;
+  /** Lets the chat focus the input (e.g. from a plan's "Change something"). */
+  inputRef?: RefObject<HTMLTextAreaElement | null>;
 }
 
 // Controlled by ChatPanel rather than owning its text, so a message injected
 // while the AI is busy ("Ask AI to fix" from the Play panel) can land here
 // as a draft instead of being dropped.
-export function ChatComposer({ value, onChange, onSend, onStop, busy, stopping, disabled }: ChatComposerProps) {
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+export function ChatComposer({
+  value,
+  onChange,
+  onSend,
+  onStop,
+  busy,
+  stopping,
+  disabled,
+  hint,
+  inputRef,
+}: ChatComposerProps) {
+  const ownRef = useRef<HTMLTextAreaElement | null>(null);
+  const textareaRef = inputRef ?? ownRef;
   const canSend = !busy && !disabled && value.trim().length > 0;
 
   // Auto-grow: reset to one row, then fit the content (capped).
@@ -55,7 +71,7 @@ export function ChatComposer({ value, onChange, onSend, onStop, busy, stopping, 
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={busy ? "The AI is working…" : "Describe what you want to change in your game"}
+        placeholder={busy ? "The AI is working…" : (hint ?? "Describe what you want to change in your game")}
         aria-label="Message the AI"
         className="max-h-[200px] min-h-8 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-muted-foreground"
       />

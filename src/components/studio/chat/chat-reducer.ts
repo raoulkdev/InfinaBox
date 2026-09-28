@@ -1,4 +1,4 @@
-import type { AgentErrorKind, AgentEvent, ChatRecord } from "@/lib/studio-types";
+import type { AgentErrorKind, AgentEvent, ChatRecord, MessageOrigin } from "@/lib/studio-types";
 
 // The chat's view model, folded from two sources that describe the same
 // thing: `ChatRecord`s loaded from the thread's saved `.jsonl` file, and
@@ -23,8 +23,15 @@ export interface WorkStep {
 }
 
 export type ChatItem =
-  | { kind: "user"; key: string; text: string }
+  /** Something sent to the AI. `origin` says why — typed by the person,
+   * their plan approval, an automatic error fix, or the onboarding's first
+   * build — and changes how it's shown. */
+  | { kind: "user"; key: string; text: string; origin: MessageOrigin }
   | { kind: "assistant"; key: string; text: string }
+  /** A plan the AI proposed; whether it's still waiting is `planStatuses`. */
+  | { kind: "plan"; key: string; title: string; steps: string[] }
+  /** The person pressed Stop: a neutral note, not an error. */
+  | { kind: "stopped"; key: string }
   /** A run of consecutive tool uses, shown collapsed as one "working" row. */
   | { kind: "work"; key: string; steps: WorkStep[]; filesChanged: string[] }
   | { kind: "error"; key: string; errorKind: AgentErrorKind; message: string };
@@ -70,9 +77,10 @@ function replaceLast(view: ChatView, item: ChatItem): ChatView {
   return { ...view, items: [...view.items.slice(0, -1), item] };
 }
 
-/** A message the user sent (typed, or injected by "Ask AI to fix"). */
-export function applyUserMessage(view: ChatView, text: string): ChatView {
-  const next = withItem(view, (key) => ({ kind: "user", key, text }));
+/** A message sent to the AI: typed, injected by "Ask AI to fix", a plan
+ * approval, or one the app sent itself (an auto-fix, the first build). */
+export function applyUserMessage(view: ChatView, text: string, origin: MessageOrigin = "user"): ChatView {
+  const next = withItem(view, (key) => ({ kind: "user", key, text, origin }));
   return { ...next, turnInProgress: true, lastTurnError: null };
 }
 
@@ -81,9 +89,8 @@ export function applyEvent(view: ChatView, event: AgentEvent): ChatView {
     case "session_started":
       return { ...view, model: event.model ?? view.model };
 
-    // Phase B Wave 0 placeholder: Task FC renders plans as approvable cards.
     case "plan_proposed":
-      return view;
+      return withItem(view, (key) => ({ kind: "plan", key, title: event.title, steps: event.steps }));
 
     case "assistant_text": {
       if (!event.text.trim()) return view;
@@ -97,6 +104,22 @@ export function applyEvent(view: ChatView, event: AgentEvent): ChatView {
     }
 
     case "tool_use": {
+      // The same tool use seen twice (a live copy the merge in
+      // `unsavedLiveEvents` couldn't match to its saved, redacted copy)
+      // updates its step instead of adding a second one with the same id.
+      if (view.items.some((i) => i.kind === "work" && i.steps.some((s) => s.id === event.id))) {
+        const items = view.items.map((item) =>
+          item.kind === "work" && item.steps.some((s) => s.id === event.id)
+            ? {
+                ...item,
+                steps: item.steps.map((s) =>
+                  s.id === event.id ? { ...s, name: event.name, summary: event.summary } : s,
+                ),
+              }
+            : item,
+        );
+        return { ...view, items };
+      }
       const step: WorkStep = {
         id: event.id,
         name: event.name,
@@ -171,6 +194,10 @@ export function applyEvent(view: ChatView, event: AgentEvent): ChatView {
     }
 
     case "error":
+      // Stop is the person's own choice, not a failure: a quiet note, and
+      // nothing for the status banner to react to. (Its message is the
+      // runtime's fixed "Stopped." — the note says that itself.)
+      if (event.kind === "cancelled") return withItem(view, (key) => ({ kind: "stopped", key }));
       return {
         ...withItem(view, (key) => ({
           kind: "error",
@@ -205,7 +232,9 @@ export function applyLocalError(view: ChatView, message: string): ChatView {
 }
 
 export function applyRecord(view: ChatView, record: ChatRecord): ChatView {
-  return record.kind === "user" ? applyUserMessage(view, record.text) : applyEvent(view, record.event);
+  return record.kind === "user"
+    ? applyUserMessage(view, record.text, record.origin ?? "user")
+    : applyEvent(view, record.event);
 }
 
 /** Folds a whole saved thread. The file alone can't say whether its last
@@ -219,6 +248,74 @@ export function buildChatView(records: ChatRecord[], { running = false } = {}): 
   const folded = records.reduce(applyRecord, emptyChatView);
   const view = running ? { ...folded, turnInProgress: true } : endTurn(folded);
   return { ...view, lastTurnError: null };
+}
+
+/** The live events that arrived while a thread's file was being read and
+ * aren't in it yet. The backend saves each event before emitting it, so the
+ * file always ends somewhere inside the buffered run: the longest tail of
+ * the file's latest turn that matches the start of `live` is what both
+ * have, and only the rest is new. (A match is exact JSON equality, so at
+ * worst an event whose saved copy was redacted shows twice until the next
+ * reload — never one dropped.) */
+export function unsavedLiveEvents(records: ChatRecord[], live: AgentEvent[]): AgentEvent[] {
+  let tailStart = records.length;
+  while (tailStart > 0 && records[tailStart - 1].kind === "event") tailStart--;
+  const saved = records
+    .slice(tailStart)
+    .map((r) => (r.kind === "event" ? JSON.stringify(r.event) : ""));
+  const incoming = live.map((e) => JSON.stringify(e));
+  for (let k = Math.min(saved.length, incoming.length); k > 0; k--) {
+    const tail = saved.slice(saved.length - k);
+    if (tail.every((s, i) => s === incoming[i])) return live.slice(k);
+  }
+  return live;
+}
+
+// --- Derived per-item state (the same from live events or a reloaded file) ---
+
+/** `waiting` — the latest plan, with nothing sent since: the one the person
+ * can act on. Otherwise answered by the next message: `approved` if that was
+ * the plan approval, `changed` if it was anything else; `replaced` if a newer
+ * plan came before any reply. */
+export type PlanStatus = "waiting" | "approved" | "changed" | "replaced";
+
+export function planStatuses(items: ChatItem[]): Map<string, PlanStatus> {
+  const statuses = new Map<string, PlanStatus>();
+  // Walk backwards, remembering the nearest later user message and whether
+  // a later plan exists, so each plan's answer is found in one pass.
+  let nextUser: Extract<ChatItem, { kind: "user" }> | null = null;
+  let laterPlan = false;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.kind === "user") nextUser = item;
+    if (item.kind !== "plan") continue;
+    if (nextUser) statuses.set(item.key, nextUser.origin === "plan_approval" ? "approved" : "changed");
+    else statuses.set(item.key, laterPlan ? "replaced" : "waiting");
+    laterPlan = true;
+  }
+  return statuses;
+}
+
+/** For each turn that really changed files (a `files_changed` was reported
+ * in it), its final assistant reply — the AI's "what I did and why" — keyed
+ * to that turn's changed files, so it can be shown as a "What changed" card.
+ * Other replies aren't in the map and stay plain text. */
+export function changeExplanations(items: ChatItem[]): Map<string, string[]> {
+  const explained = new Map<string, string[]>();
+  let files = new Set<string>();
+  let lastReply: string | null = null;
+  const closeTurn = () => {
+    if (lastReply !== null && files.size > 0) explained.set(lastReply, [...files]);
+    files = new Set();
+    lastReply = null;
+  };
+  for (const item of items) {
+    if (item.kind === "user") closeTurn();
+    else if (item.kind === "assistant") lastReply = item.key;
+    else if (item.kind === "work") for (const path of item.filesChanged) files.add(path);
+  }
+  closeTurn();
+  return explained;
 }
 
 // --- Plain-language summaries for the collapsed "working" row ---
@@ -309,7 +406,7 @@ function hasRunningStep(item: ChatItem): boolean {
 function turnHasError(view: ChatView): boolean {
   for (let i = view.items.length - 1; i >= 0; i--) {
     const item = view.items[i];
-    if (item.kind === "error") return true;
+    if (item.kind === "error" || item.kind === "stopped") return true;
     if (item.kind === "user") return false;
   }
   return false;
