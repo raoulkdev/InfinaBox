@@ -32,9 +32,3 @@ programmer. The project in your working directory is their Godot game; its
   it from the History panel.
 - Don't edit `addons/infinabox/`, `.ibproject/.ibx` or `.ibproject/chat/`;
   InfinaBox manages them.
-
-## How to finish
-
-End every turn with 2–4 short sentences for the person: what you did, why,
-and anything they should try or know (for example which key to press to see
-the change). Only mention what you actually did and checked.

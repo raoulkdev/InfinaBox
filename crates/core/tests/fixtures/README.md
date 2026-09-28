@@ -73,6 +73,16 @@ Things the parser must handle, all visible in these files:
 | `c_resumed_turn` | `-p "..." --resume <a's session id>` | A resumed session |
 | `d_mcp_tool` | `-p "Call the echo tool..." --mcp-config mcp.json --allowedTools mcp__fixture__echo` | MCP tool named `mcp__fixture__echo`, preceded by a `ToolSearch` tool use |
 | `e_bad_resume` | `-p hi --resume 00000000-...` | Only a `result` with `is_error: true`, subtype `error_during_execution`; exit code 1; stderr `No conversation found with session ID: ...` |
+| `f_propose_plan` | the runtime's own flags (`--setting-sources user --mcp-config <cfg> --strict-mcp-config --tools Read,Edit,Write,Glob,Grep --allowedTools ...,mcp__infinabox__* --permission-mode acceptEdits --append-system-prompt <Director + plan-always + explain + the project's AGENTS.md>`) and `"Add a double jump to my game..."`, in a copy of `templates/blank-2d`, with `scripts/fixtures/echo-mcp-server.mjs --propose-plan` registered as `infinabox` | A plan turn: `Read`/`Glob` of the game and its Context card, then `mcp__infinabox__propose_plan` (title + 5 steps) whose result is the real server's "plan is now shown" text, then one closing sentence; no file changes |
+
+`f_propose_plan` was recorded 2026-09-28 (same CLI version) by the script
+itself running the CLI in a clean environment: only `PATH`, a fresh empty
+`HOME`, and the proxy/certificate variables. The CLI found its own sign-in;
+nothing was read or passed for it. The script also scrubs the repo path,
+the temp MCP config folder (`<CONFIG>`) and the model identifier
+(`<MODEL>`, from the `init` message) — the Phase A recordings above predate
+the model scrub. Record only some scenarios with
+`node scripts/record-claude-fixtures.mjs f_propose_plan`.
 
 Things the parser must handle, all visible in these files:
 
@@ -84,6 +94,10 @@ Things the parser must handle, all visible in these files:
   blocks (with `tool_use_id` and optional `is_error`).
 - `--allowedTools` does **not** remove other tools (the model tried `Bash`
   first in `b_edit_file`); limit built-in tools with `--tools`.
-- MCP tools may be deferred behind a `ToolSearch` call first.
+- MCP tools may be deferred behind a `ToolSearch` call first (with
+  `--tools` set, as in `f_propose_plan`, they are listed directly).
+- A plan is an ordinary MCP `tool_use` named `mcp__infinabox__propose_plan`
+  with `input: {title, steps}`; the parser turns a valid one into
+  `PlanProposed` and drops its `tool_result`.
 - The `result` message carries `usage` (`input_tokens`, `output_tokens`,
   cache fields), `duration_ms`, `is_error`, `subtype`, and `result` text.

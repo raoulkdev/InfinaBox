@@ -11,10 +11,20 @@
 //! - `system`/`init` → `SessionStarted` (`session_id`, `model`).
 //! - `assistant` messages hold content blocks: `text` → `AssistantText`,
 //!   `tool_use` → `ToolUse`, `thinking` is ignored (not user-facing text).
+//! - A `tool_use` of the InfinaBox `propose_plan` tool whose input is a
+//!   valid plan (`prompt::validate_plan`, the same check the MCP server
+//!   makes) → `PlanProposed` instead of `ToolUse`, and its `tool_result` is
+//!   dropped: the plan card is the whole step, and a result with no
+//!   matching tool step would only be noise. Because both sides validate
+//!   the same way, the server accepts every plan that becomes a card. A
+//!   malformed call stays an ordinary `ToolUse`/`ToolResult` (the server
+//!   rejects it and the agent tries again). See `f_propose_plan`.
 //! - Tool results come back as `user` messages holding `tool_result` blocks
 //!   (`tool_use_id`, optional `is_error`) → `ToolResult`.
 //! - `result` ends the turn → `FilesChanged` (if any), `Error` (if
 //!   `is_error`), then `TurnCompleted` with only the figures it reported.
+//! - A turn the person stopped ends with `Error { kind: Cancelled }` and
+//!   `STOPPED_MESSAGE`, shown as a neutral note.
 //! - Everything else (`rate_limit_event`, `system`/`permission_denied`,
 //!   `system`/`thinking_tokens`, types added in later CLI versions) is
 //!   ignored — except that `system`/`api_retry`'s error kind is remembered,
@@ -25,6 +35,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
+use super::prompt::{ValidPlan, validate_plan};
 use super::types::{AgentErrorKind, AgentEvent, Usage};
 
 /// Claude Code's own tool for loading deferred tool definitions (seen before
@@ -36,6 +47,10 @@ const HIDDEN_TOOLS: &[&str] = &["ToolSearch"];
 /// this folder). Kept in sync with `crates/mcp-server/src/server.rs`.
 const WRITE_CONTEXT_CARD: &str = "mcp__infinabox__write_context_card";
 const CONTEXT_DIR: &str = ".ibproject/context";
+
+/// `prompt::PROPOSE_PLAN_TOOL` as Claude Code names it (checked in the
+/// tests against `claude::MCP_SERVER_NAME`).
+const PROPOSE_PLAN: &str = "mcp__infinabox__propose_plan";
 
 /// Longest one-line summary kept from a failed tool's real error text.
 const MAX_RESULT_SUMMARY: usize = 200;
@@ -121,7 +136,7 @@ impl ClaudeStream {
         self.saw_result = true;
         let mut events = self.take_files_changed();
         let (kind, message) = match end {
-            StreamEnd::Cancelled => (AgentErrorKind::Other, STOPPED_MESSAGE.to_string()),
+            StreamEnd::Cancelled => (AgentErrorKind::Cancelled, STOPPED_MESSAGE.to_string()),
             StreamEnd::Exited { code, stderr } => {
                 let text = tail(stderr.trim(), MAX_STDERR_MESSAGE);
                 let kind = match classify_error(text, None) {
@@ -214,6 +229,22 @@ impl ClaudeStream {
             .to_string();
         let empty = Value::Null;
         let input = block.get("input").unwrap_or(&empty);
+        if name == PROPOSE_PLAN
+            && let Some(plan) = plan_from(input)
+        {
+            // Its result is hidden too: the plan card is the whole step.
+            self.tools.insert(
+                id,
+                PendingTool {
+                    hidden: true,
+                    writes: None,
+                },
+            );
+            return Some(AgentEvent::PlanProposed {
+                title: plan.title,
+                steps: plan.steps,
+            });
+        }
         let hidden = HIDDEN_TOOLS.contains(&name.as_str());
         let writes = written_path(&name, input).and_then(|p| self.project_relative(&p));
         self.tools
@@ -370,6 +401,9 @@ impl ClaudeStream {
                     None => "Updating a Context card".to_string(),
                 },
                 "list_snapshots" => "Looking at the project's history".to_string(),
+                // Only reached when the plan was malformed (a valid one
+                // becomes `PlanProposed`).
+                "propose_plan" => "Writing up a plan".to_string(),
                 other => format!("Using {}", other.replace('_', " ")),
             };
         }
@@ -394,6 +428,19 @@ impl ClaudeStream {
             other => format!("Using {other}"),
         }
     }
+}
+
+/// A `propose_plan` call's input as a plan, if it's one the InfinaBox MCP
+/// server accepts (same `prompt::validate_plan`); `None` otherwise.
+fn plan_from(input: &Value) -> Option<ValidPlan> {
+    let title = input.get("title")?.as_str()?;
+    let steps = input
+        .get("steps")?
+        .as_array()?
+        .iter()
+        .map(|s| s.as_str().map(str::to_string))
+        .collect::<Option<Vec<String>>>()?;
+    validate_plan(title, &steps).ok()
 }
 
 /// The path a file-writing tool use writes, as the tool received it.

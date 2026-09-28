@@ -242,6 +242,7 @@ fn every_fixture_ends_with_exactly_one_turn_completed() {
         "c_resumed_turn",
         "d_mcp_tool",
         "e_bad_resume",
+        "f_propose_plan",
     ] {
         let (events, _) = parse(&fixture(&format!("{name}.jsonl")));
         let completed = events
@@ -421,7 +422,7 @@ fn cancel_ends_the_turn_and_still_reports_the_edits_made() {
                 paths: vec!["notes.txt".into()]
             },
             Error {
-                kind: AgentErrorKind::Other,
+                kind: AgentErrorKind::Cancelled,
                 message: STOPPED_MESSAGE.into()
             },
             TurnCompleted {
@@ -491,6 +492,182 @@ fn exit_after_auth_retries_uses_the_recorded_error_kind() {
             kind: AgentErrorKind::NotAuthenticated,
             ..
         }
+    ));
+}
+
+#[test]
+fn a_cancel_before_anything_happened_is_just_the_stopped_note() {
+    assert_eq!(
+        ClaudeStream::new(vec![]).finish(StreamEnd::Cancelled),
+        vec![
+            Error {
+                kind: AgentErrorKind::Cancelled,
+                message: "Stopped.".into()
+            },
+            TurnCompleted {
+                is_error: true,
+                duration_ms: None,
+                usage: None
+            },
+        ]
+    );
+}
+
+// --- Plans ---
+
+#[test]
+fn the_propose_plan_name_matches_the_server_and_tool() {
+    use crate::agent::{claude::MCP_SERVER_NAME, prompt::PROPOSE_PLAN_TOOL};
+    assert_eq!(
+        PROPOSE_PLAN,
+        format!("mcp__{MCP_SERVER_NAME}__{PROPOSE_PLAN_TOOL}")
+    );
+}
+
+fn plan_line(id: &str, input: &str) -> String {
+    edit_line(id, "mcp__infinabox__propose_plan", input)
+}
+
+#[test]
+fn a_valid_propose_plan_call_becomes_a_plan_and_its_result_is_dropped() {
+    let mut stream = ClaudeStream::new(vec![PathBuf::from(PROJECT)]);
+    assert_eq!(
+        stream.parse_line(&plan_line(
+            "p1",
+            r#"{"title":" Add a double jump ","steps":["Let the player jump once more in the air.","Show a puff of dust on the second jump. "]}"#
+        )),
+        vec![PlanProposed {
+            title: "Add a double jump".into(),
+            steps: vec![
+                "Let the player jump once more in the air.".into(),
+                "Show a puff of dust on the second jump.".into(),
+            ],
+        }]
+    );
+    assert_eq!(stream.parse_line(&result_line("p1", false)), vec![]);
+    // Proposing a plan changes no files.
+    assert_eq!(
+        stream.parse_line(RESULT_LINE),
+        vec![TurnCompleted {
+            is_error: false,
+            duration_ms: Some(5),
+            usage: None
+        }]
+    );
+}
+
+#[test]
+fn a_malformed_propose_plan_call_stays_an_ordinary_tool_step() {
+    for (i, input) in [
+        r#"{"title":"No steps"}"#,
+        r#"{"steps":["A step."]}"#,
+        r#"{"title":"Empty","steps":[]}"#,
+        r#"{"title":"Blank step","steps":["Fine.","  "]}"#,
+        r#"{"title":"Not strings","steps":[1,2]}"#,
+        r#"{"title":"","steps":["A step."]}"#,
+        r#""just text""#,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut stream = ClaudeStream::new(vec![PathBuf::from(PROJECT)]);
+        let id = format!("bad{i}");
+        assert_eq!(
+            stream.parse_line(&plan_line(&id, input)),
+            vec![tool(
+                &id,
+                "mcp__infinabox__propose_plan",
+                "Writing up a plan"
+            )],
+            "{input}"
+        );
+        // The server rejected it; the step shows that.
+        assert!(
+            matches!(
+                &stream.parse_line(&result_line(&id, true))[..],
+                [ToolResult { ok: false, .. }]
+            ),
+            "{input}"
+        );
+    }
+    // Over the limits the server enforces.
+    let long_title = format!(r#"{{"title":"{}","steps":["A step."]}}"#, "x".repeat(81));
+    let nine_steps = format!(
+        r#"{{"title":"Big","steps":[{}]}}"#,
+        [r#""s""#; 9].join(",")
+    );
+    for input in [long_title, nine_steps] {
+        let mut stream = ClaudeStream::new(vec![]);
+        assert!(matches!(
+            &stream.parse_line(&plan_line("x", &input))[..],
+            [ToolUse { .. }]
+        ));
+    }
+}
+
+/// The real recording: the CLI calls `propose_plan` on an MCP server
+/// registered as `infinabox`, then ends its turn with one sentence.
+#[test]
+fn f_propose_plan() {
+    let (events, _) = parse(&fixture("f_propose_plan.jsonl"));
+    let plans: Vec<&AgentEvent> = events
+        .iter()
+        .filter(|e| matches!(e, PlanProposed { .. }))
+        .collect();
+    assert_eq!(
+        plans,
+        [&PlanProposed {
+            title: "Turn player into a jumper with a double jump".into(),
+            steps: vec![
+                "Add a ground/floor at the bottom of the screen for the player to stand on.".into(),
+                "Give the player gravity so it falls and rests on the floor instead of floating \
+freely."
+                    .into(),
+                "Keep left/right arrow key movement; use up arrow (or spacebar) to jump.".into(),
+                "Let the player jump once while on the ground, and once more while in the air \
+(the double jump), then no more until it lands again."
+                    .into(),
+                "Add a Context card describing the jump mechanic and its tuning values (jump \
+height, gravity, etc.)."
+                    .into(),
+            ],
+        }]
+    );
+    // It read the game first, then ended with one sentence.
+    assert!(matches!(&events[1], AssistantText { .. }));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, ToolUse { name, .. } if name == "Read"))
+    );
+    assert_eq!(
+        events[events.len() - 2],
+        text("Here's my plan — approve it and I'll start.")
+    );
+    // No tool step or result for the plan call, and no file changes.
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, ToolUse { name, .. } if name.ends_with("propose_plan"))),
+        "{events:#?}"
+    );
+    // The reads' results are there; the plan call's isn't, and nothing changed.
+    let results = events
+        .iter()
+        .filter(|e| matches!(e, ToolResult { .. }))
+        .count();
+    let uses = events
+        .iter()
+        .filter(|e| matches!(e, ToolUse { .. }))
+        .count();
+    assert_eq!(results, uses);
+    assert!(!events.iter().any(|e| matches!(e, FilesChanged { .. })));
+    assert!(matches!(
+        events.last(),
+        Some(TurnCompleted {
+            is_error: false,
+            ..
+        })
     ));
 }
 
