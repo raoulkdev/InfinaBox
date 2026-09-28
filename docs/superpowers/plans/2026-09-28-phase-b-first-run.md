@@ -8,7 +8,7 @@
 
 ## Status
 
-Not started.
+- 2026-09-28: Wave 0 done (contracts, stubs, template skeletons). Wave 1 running: 12 subagents in parallel.
 
 ## Scope
 
