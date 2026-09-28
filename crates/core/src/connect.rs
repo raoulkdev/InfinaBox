@@ -18,9 +18,10 @@
 //!
 //! Install commands are the vendors' own documented ones: Anthropic's
 //! native installer (`https://claude.ai/install.sh` / `install.ps1`, which
-//! redirect to `downloads.claude.ai`'s bootstrap scripts), and for Codex the
-//! npm package `@openai/codex` or the Homebrew cask `codex`, both listed in
-//! the `openai/codex` README.
+//! redirect to `downloads.claude.ai`'s bootstrap scripts), and OpenAI's
+//! standalone Codex installer (`https://chatgpt.com/codex/install.sh` /
+//! `install.ps1`, the first install option in the `openai/codex` README).
+//! Neither needs Node.js.
 
 use std::ffi::OsStr;
 use std::io::Read;
@@ -126,7 +127,7 @@ pub struct ProviderInfo {
     pub blurb: String,
     /// The exact command the installer runs, shown before it runs.
     pub install_command: Option<String>,
-    /// Why it can't be installed from here (e.g. needs Node.js), if so.
+    /// Why it can't be installed from here (e.g. `curl` is missing), if so.
     pub install_blocker: Option<String>,
     pub login_command: String,
     pub docs_url: String,
@@ -147,9 +148,10 @@ const MAX_PROBE_OUTPUT: usize = 64 * 1024;
 const CLAUDE_INSTALL_SH: &str = "curl -fsSL https://claude.ai/install.sh | bash";
 const CLAUDE_INSTALL_PS1: &str = "irm https://claude.ai/install.ps1 | iex";
 
-const CODEX_NPM_PACKAGE: &str = "@openai/codex";
-
-const NODE_DOWNLOAD_URL: &str = "https://nodejs.org/en/download";
+/// OpenAI's standalone Codex installer, as the `openai/codex` README gives
+/// it (it downloads a native binary; no Node.js needed).
+const CODEX_INSTALL_SH: &str = "curl -fsSL https://chatgpt.com/codex/install.sh | sh";
+const CODEX_INSTALL_PS1: &str = "irm https://chatgpt.com/codex/install.ps1 | iex";
 
 /// Detects every provider, all at once (each probe has its own timeout, so
 /// the slowest CLI sets the pace, not the sum of them).
@@ -177,7 +179,7 @@ pub fn detect(id: ProviderId) -> ProviderInfo {
 ///
 /// When something the installer needs is missing, the login shell is asked
 /// for its `PATH` again before giving up: the person may have just
-/// installed it (e.g. Node.js) and come back.
+/// installed it and come back.
 pub fn install_invocation(id: ProviderId) -> Result<(String, Vec<String>)> {
     let plan = install_plan(id, Os::current(), login_shell_path())
         .or_else(|_| install_plan(id, Os::current(), refresh_login_shell_path()));
@@ -491,90 +493,65 @@ struct InstallPlan {
 }
 
 /// The install plan for `id` on `os`, or why there isn't one (the
-/// `install_blocker`, in plain words).
+/// `install_blocker`, in plain words). Both providers use their vendor's
+/// own standalone installer script, which needs no Node.js.
 fn install_plan(
     id: ProviderId,
     os: Os,
     path_var: &OsStr,
 ) -> std::result::Result<InstallPlan, String> {
-    match (id, os) {
-        (ProviderId::ClaudeCode, Os::Windows) => {
-            let Some(powershell) = find_program("powershell", os, path_var) else {
-                return Err(
-                    "Installing Claude Code needs Windows PowerShell, which InfinaBox \
-                            couldn't find on this computer."
-                        .into(),
-                );
-            };
-            Ok(InstallPlan {
-                program: path_string(&powershell),
-                args: [
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                    CLAUDE_INSTALL_PS1,
-                ]
-                .map(String::from)
-                .into(),
-                display: CLAUDE_INSTALL_PS1.into(),
-            })
-        }
-        (ProviderId::ClaudeCode, _) => {
-            let bash = find_program("bash", os, path_var);
-            let missing: Vec<&str> = [
-                ("curl", find_program("curl", os, path_var)),
-                ("bash", bash.clone()),
+    let name = id.display_name();
+    let (unix_shell, unix_script, windows_script) = match id {
+        ProviderId::ClaudeCode => ("bash", CLAUDE_INSTALL_SH, CLAUDE_INSTALL_PS1),
+        ProviderId::Codex => ("sh", CODEX_INSTALL_SH, CODEX_INSTALL_PS1),
+    };
+    if os == Os::Windows {
+        let Some(powershell) = find_program("powershell", os, path_var) else {
+            return Err(format!(
+                "Installing {name} needs Windows PowerShell, which InfinaBox couldn't find on \
+                 this computer."
+            ));
+        };
+        return Ok(InstallPlan {
+            program: path_string(&powershell),
+            args: [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                windows_script,
             ]
-            .into_iter()
-            .filter(|(_, found)| found.is_none())
-            .map(|(name, _)| name)
-            .collect();
-            let Some(bash) = bash.filter(|_| missing.is_empty()) else {
-                return Err(format!(
-                    "Installing Claude Code needs {}, which InfinaBox couldn't find on this computer.",
-                    missing
-                        .iter()
-                        .map(|m| format!("the `{m}` command"))
-                        .collect::<Vec<_>>()
-                        .join(" and ")
-                ));
-            };
-            // A login shell, so the installer sees the same environment
-            // the person's own Terminal would.
-            Ok(InstallPlan {
-                program: path_string(&bash),
-                args: vec!["-lc".into(), CLAUDE_INSTALL_SH.into()],
-                display: CLAUDE_INSTALL_SH.into(),
-            })
-        }
-        (ProviderId::Codex, _) => {
-            if os == Os::Mac
-                && let Some(brew) = find_program("brew", os, path_var)
-            {
-                let args = ["install", "--cask", "codex"];
-                let (program, args) = with_path(&brew, &args, os, path_var);
-                return Ok(InstallPlan {
-                    program,
-                    args,
-                    display: "brew install --cask codex".into(),
-                });
-            }
-            if let Some(npm) = find_program("npm", os, path_var) {
-                let args = ["install", "-g", CODEX_NPM_PACKAGE];
-                let (program, args) = with_path(&npm, &args, os, path_var);
-                return Ok(InstallPlan {
-                    program,
-                    args,
-                    display: format!("npm install -g {CODEX_NPM_PACKAGE}"),
-                });
-            }
-            Err(format!(
-                "Codex installs with Node.js, which isn't on this computer yet. Install Node.js \
-                 (the LTS version) from {NODE_DOWNLOAD_URL}, then press Install again."
-            ))
-        }
+            .map(String::from)
+            .into(),
+            display: windows_script.into(),
+        });
     }
+    let shell = find_program(unix_shell, os, path_var);
+    let missing: Vec<&str> = [
+        ("curl", find_program("curl", os, path_var)),
+        (unix_shell, shell.clone()),
+    ]
+    .into_iter()
+    .filter(|(_, found)| found.is_none())
+    .map(|(name, _)| name)
+    .collect();
+    let Some(shell) = shell.filter(|_| missing.is_empty()) else {
+        return Err(format!(
+            "Installing {name} needs {}, which InfinaBox couldn't find on this computer.",
+            missing
+                .iter()
+                .map(|m| format!("the `{m}` command"))
+                .collect::<Vec<_>>()
+                .join(" and ")
+        ));
+    };
+    // A login shell, so the installer sees the same environment the
+    // person's own Terminal would.
+    Ok(InstallPlan {
+        program: path_string(&shell),
+        args: vec!["-lc".into(), unix_script.into()],
+        display: unix_script.into(),
+    })
 }
 
 /// `login_invocation`, with the OS and `PATH` given.
@@ -984,79 +961,88 @@ esac"#;
 
     #[cfg(unix)]
     #[test]
-    fn codex_installs_with_homebrew_on_macos_else_npm() {
+    fn codex_installs_with_the_standalone_installer_in_a_login_shell() {
         let bin = FakeBin::new();
-        let brew = bin.add("brew", "exit 0");
-        let npm = bin.add("npm", "exit 0");
-        let path = bin.path_only();
-        let path_arg = format!("PATH={}", path.to_string_lossy());
-
-        let mac = install_plan(ProviderId::Codex, Os::Mac, &path).unwrap();
-        assert_eq!(mac.program, "/usr/bin/env");
-        assert_eq!(
-            mac.args,
-            [
-                path_arg.as_str(),
-                &brew.to_string_lossy(),
-                "install",
-                "--cask",
-                "codex"
-            ]
-        );
-        assert_eq!(mac.display, "brew install --cask codex");
-
-        // Homebrew on Linux isn't used; npm is.
-        let linux = install_plan(ProviderId::Codex, Os::Linux, &path).unwrap();
-        assert_eq!(linux.program, "/usr/bin/env");
-        assert_eq!(
-            linux.args,
-            [
-                path_arg.as_str(),
-                &npm.to_string_lossy(),
-                "install",
-                "-g",
-                "@openai/codex"
-            ]
-        );
-        assert_eq!(linux.display, "npm install -g @openai/codex");
-
-        let npm_only = FakeBin::new();
-        npm_only.add("npm", "exit 0");
-        let mac = install_plan(ProviderId::Codex, Os::Mac, &npm_only.path_only()).unwrap();
-        assert_eq!(mac.display, "npm install -g @openai/codex");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn codex_install_without_node_says_to_get_node_first() {
-        let empty = FakeBin::new();
-        for os in [Os::Mac, Os::Linux, Os::Windows] {
-            let blocker = install_plan(ProviderId::Codex, os, &empty.path_only()).unwrap_err();
-            assert!(blocker.contains("Node.js"), "{blocker}");
-            assert!(blocker.contains("https://nodejs.org"), "{blocker}");
+        let sh = bin.add("sh", "exit 0");
+        bin.add("curl", "exit 0");
+        // Homebrew or npm on the PATH change nothing: one official way.
+        bin.add("npm", "exit 0");
+        bin.add("brew", "exit 0");
+        for os in [Os::Linux, Os::Mac] {
+            let plan = install_plan(ProviderId::Codex, os, &bin.path_only()).unwrap();
+            assert_eq!(plan.program, sh.to_string_lossy());
+            assert_eq!(
+                plan.args,
+                [
+                    "-lc",
+                    "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+                ]
+            );
+            assert_eq!(
+                plan.display,
+                "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+            );
         }
     }
 
     #[cfg(unix)]
     #[test]
-    fn codex_installs_through_the_npm_shim_on_windows() {
+    fn codex_install_is_blocked_without_curl_or_sh() {
         let bin = FakeBin::new();
-        // npm puts an extensionless shell script next to its `.cmd` shim;
-        // Windows can only run the shim.
-        bin.add("npm", "exit 0");
-        let shim = bin.add("npm.cmd", "exit 0");
+        bin.add("sh", "exit 0");
+        let blocker = install_plan(ProviderId::Codex, Os::Mac, &bin.path_only()).unwrap_err();
+        assert!(blocker.starts_with("Installing Codex needs"), "{blocker}");
+        assert!(blocker.contains("`curl`"), "{blocker}");
+        assert!(!blocker.contains("`sh`"), "{blocker}");
+
+        let empty = FakeBin::new();
+        let blocker = install_plan(ProviderId::Codex, Os::Linux, &empty.path_only()).unwrap_err();
+        assert!(
+            blocker.contains("`curl`") && blocker.contains("`sh`"),
+            "{blocker}"
+        );
+        assert!(!blocker.contains("Node"), "{blocker}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_installs_with_powershell_on_windows() {
+        let bin = FakeBin::new();
+        let ps = bin.add("powershell.exe", "exit 0");
         let plan = install_plan(ProviderId::Codex, Os::Windows, &bin.path_only()).unwrap();
-        assert_eq!(plan.program, "cmd");
+        assert_eq!(plan.program, ps.to_string_lossy());
         assert_eq!(
             plan.args,
             [
-                "/C",
-                &shim.to_string_lossy(),
-                "install",
-                "-g",
-                "@openai/codex"
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "irm https://chatgpt.com/codex/install.ps1 | iex"
             ]
         );
+        assert_eq!(
+            plan.display,
+            "irm https://chatgpt.com/codex/install.ps1 | iex"
+        );
+
+        let empty = FakeBin::new();
+        let blocker = install_plan(ProviderId::Codex, Os::Windows, &empty.path_only()).unwrap_err();
+        assert!(blocker.contains("PowerShell"), "{blocker}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sign_in_uses_an_npm_shim_on_windows() {
+        let bin = FakeBin::new();
+        // A Codex installed earlier with npm: npm puts an extensionless
+        // shell script next to its `.cmd` shim; Windows can only run the shim.
+        bin.add("codex", "exit 0");
+        let shim = bin.add("codex.cmd", "exit 0");
+        let (program, args) =
+            login_invocation_in(ProviderId::Codex, Os::Windows, &bin.path_only()).unwrap();
+        assert_eq!(program, "cmd");
+        assert_eq!(args, ["/C", &shim.to_string_lossy(), "login"]);
     }
 
     #[cfg(unix)]
