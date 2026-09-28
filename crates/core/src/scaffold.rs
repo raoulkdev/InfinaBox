@@ -1,12 +1,16 @@
-//! Creates new InfinaBox game projects from the bundled template
-//! (`templates/blank-2d/`) and installs/updates the InfinaBox Godot addon
+//! Creates new InfinaBox game projects from the bundled templates
+//! (`templates/<id>/`) and installs/updates the InfinaBox Godot addon
 //! (`godot-addon/infinabox/`) — spec §9 (project format) and §10.3 (the
 //! addon).
 //!
-//! Both directories are embedded into the binary with `include_dir`, so a
+//! Every directory is embedded into the binary with `include_dir`, so a
 //! shipped app never depends on files next to its executable. (Edits to an
 //! embedded file trigger a rebuild; a newly *added* file only gets picked up
 //! once this crate is rebuilt for another reason — `touch` this file.)
+//!
+//! A template is a Godot project plus a `template.json` describing it
+//! (`TemplateInfo`). `template.json` is InfinaBox's, not the game's, so it
+//! is never copied into a project.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,8 +21,34 @@ use serde::{Deserialize, Serialize};
 
 use crate::snapshot;
 
+static TEMPLATE_PLATFORMER_2D: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/../../templates/platformer-2d");
+static TEMPLATE_TOPDOWN_2D: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/../../templates/topdown-2d");
+static TEMPLATE_SHOOTER_2D: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/../../templates/shooter-2d");
 static TEMPLATE_BLANK_2D: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../templates/blank-2d");
 static ADDON: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../godot-addon/infinabox");
+
+/// The template `create_project` uses ("Start from scratch").
+pub const BLANK_TEMPLATE_ID: &str = "blank-2d";
+
+/// Every bundled template by id, in the order they're offered: the three
+/// genre templates, then "Start from scratch". Each id is also the
+/// template's folder name and the `id` in its `template.json` (checked by
+/// `template_info`).
+static TEMPLATES: [(&str, &Dir<'_>); 4] = [
+    ("platformer-2d", &TEMPLATE_PLATFORMER_2D),
+    ("topdown-2d", &TEMPLATE_TOPDOWN_2D),
+    ("shooter-2d", &TEMPLATE_SHOOTER_2D),
+    (BLANK_TEMPLATE_ID, &TEMPLATE_BLANK_2D),
+];
+
+/// Each template's description of itself; never copied into a project.
+const TEMPLATE_INFO_FILE: &str = "template.json";
+
+/// The first snapshot of a project made by `create_project_from_template`.
+const FIRST_SNAPSHOT_TITLE: &str = "New project";
 
 /// The addon's version, printed by the running game as
 /// `[infinabox] ready <version>`. Must match `VERSION` in
@@ -48,7 +78,7 @@ pub struct ProjectMarker {
     /// ISO 8601, UTC, matching the old frontend's `toISOString()`.
     pub created_at: String,
     pub format_version: u32,
-    /// "2d" or "3d". Phase A only creates "2d".
+    /// "2d" or "3d", from the project's template.
     pub dimension: String,
 }
 
@@ -69,32 +99,117 @@ pub struct TemplateInfo {
 
 /// Every bundled template, in the order they're offered.
 ///
-/// Wave 0 stub (Phase B plan, Task OB fills it in).
+/// The templates are embedded at build time, so a `template.json` that
+/// doesn't parse is a bug in this build, and
+/// `scaffold_every_template_describes_itself` fails on it. Should one ship
+/// anyway, it's left out of this list with a message on stderr rather than
+/// taking the other templates (or the app) down with it; creating a project
+/// from it still fails with the parse error.
 pub fn list_templates() -> Vec<TemplateInfo> {
-    Vec::new()
+    TEMPLATES
+        .iter()
+        .filter_map(|(id, dir)| match template_info(id, dir) {
+            Ok(info) => Some(info),
+            Err(err) => {
+                eprintln!("[infinabox] leaving out template {id}: {err:#}");
+                None
+            }
+        })
+        .collect()
 }
 
-/// Like `create_project`, from the template `template_id`.
+/// The embedded template `template_id` and its parsed `template.json`.
+pub(crate) fn find_template(template_id: &str) -> Result<(&'static Dir<'static>, TemplateInfo)> {
+    let Some((id, dir)) = TEMPLATES.iter().find(|(id, _)| *id == template_id) else {
+        bail!("there's no template called \"{template_id}\"");
+    };
+    Ok((dir, template_info(id, dir)?))
+}
+
+fn template_info(id: &str, dir: &Dir<'_>) -> Result<TemplateInfo> {
+    let json = dir
+        .get_file(TEMPLATE_INFO_FILE)
+        .and_then(|f| f.contents_utf8())
+        .with_context(|| format!("template {id} has no readable {TEMPLATE_INFO_FILE}"))?;
+    let info: TemplateInfo = serde_json::from_str(json)
+        .with_context(|| format!("reading {TEMPLATE_INFO_FILE} of template {id}"))?;
+    if info.id != id {
+        bail!(
+            "template {id}'s {TEMPLATE_INFO_FILE} says its id is \"{}\"",
+            info.id
+        );
+    }
+    Ok(info)
+}
+
+/// The Context cards a template ships, relative to `.ibproject/context/`
+/// (forward slashes, sorted).
+pub(crate) fn template_cards(template: &Dir<'_>) -> Vec<String> {
+    let Some(context) = template.get_dir(".ibproject/context") else {
+        return Vec::new();
+    };
+    let mut cards = Vec::new();
+    collect_cards(context, context.path(), &mut cards);
+    cards.sort();
+    cards
+}
+
+fn collect_cards(dir: &Dir<'_>, root: &Path, out: &mut Vec<String>) {
+    for file in dir.files() {
+        if file.path().extension().is_some_and(|ext| ext == "md") {
+            let rel = file.path().strip_prefix(root).unwrap_or(file.path());
+            let parts: Vec<String> = rel
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            out.push(parts.join("/"));
+        }
+    }
+    for sub in dir.dirs() {
+        collect_cards(sub, root, out);
+    }
+}
+
+/// Creates `<parent_dir>/<name>` as a new project from the template
+/// `template_id` and returns its path. Refuses an existing non-empty
+/// directory, and an unknown template, before writing anything.
 ///
-/// Wave 0 stub (Phase B plan, Task OB fills it in).
+/// Copies the template (without its `template.json`), installs the addon,
+/// writes `.ibproject/` (marker, an empty `chat/`; the template brings its
+/// own Context cards), runs `git init`, and makes the first snapshot, "New
+/// project". If any step fails, what this call wrote is removed again so
+/// the user can simply retry.
 pub fn create_project_from_template(
     parent_dir: &Path,
     name: &str,
     template_id: &str,
 ) -> Result<PathBuf> {
-    let _ = (parent_dir, name, template_id);
-    bail!("not implemented yet")
+    let (project, ()) =
+        create_project_with(parent_dir, name, template_id, FIRST_SNAPSHOT_TITLE, |_| {
+            Ok(())
+        })?;
+    Ok(project)
 }
 
-/// Creates `<parent_dir>/<name>` as a new project (Phase A: blank 2D only)
-/// and returns its path. Refuses an existing non-empty directory.
-///
-/// Copies the template, installs the addon, writes `.ibproject/` (marker,
-/// the starting Concept card, an empty `chat/`), runs `git init`, and makes
-/// the first snapshot, "New project". If any step fails, what this call
-/// wrote is removed again so the user can simply retry.
+/// Creates `<parent_dir>/<name>` as a new blank 2D project; see
+/// `create_project_from_template`.
 pub fn create_project(parent_dir: &Path, name: &str) -> Result<PathBuf> {
+    create_project_from_template(parent_dir, name, BLANK_TEMPLATE_ID)
+}
+
+/// All of project creation, with `extra` run after the project's files are
+/// written and before `git init`, so whatever `extra` writes lands in the
+/// one first snapshot (titled `snapshot_title`). An error anywhere,
+/// including from `extra`, removes everything this call wrote.
+pub(crate) fn create_project_with<T>(
+    parent_dir: &Path,
+    name: &str,
+    template_id: &str,
+    snapshot_title: &str,
+    extra: impl FnOnce(&Path) -> Result<T>,
+) -> Result<(PathBuf, T)> {
     validate_name(name)?;
+    let (template, info) = find_template(template_id)?;
     let project = parent_dir.join(name);
 
     let existed = project.exists();
@@ -116,8 +231,14 @@ pub fn create_project(parent_dir: &Path, name: &str) -> Result<PathBuf> {
         fs::create_dir_all(&project).with_context(|| format!("creating {}", project.display()))?;
     }
 
-    match populate_project(&project, name) {
-        Ok(()) => Ok(project),
+    let populated = (|| {
+        write_project_files(&project, name, template, &info)?;
+        let value = extra(&project)?;
+        init_and_snapshot(&project, snapshot_title)?;
+        Ok(value)
+    })();
+    match populated {
+        Ok(value) => Ok((project, value)),
         Err(err) => {
             // Everything inside is ours: the folder was missing or empty a
             // moment ago. Put it back the way it was. A folder that already
@@ -176,7 +297,7 @@ pub fn ensure_addon(project: &Path) -> Result<bool> {
     let enabled = with_plugin_enabled(plugins.as_deref(), PLUGIN_CFG_RES_PATH)?;
     updated = set_setting(&updated, "editor_plugins", "enabled", &enabled)?;
 
-    let mut changed = write_dir(&ADDON, &project.join(ADDON_DIR), None)?;
+    let mut changed = write_dir(&ADDON, &project.join(ADDON_DIR), None, &[])?;
     if updated != original {
         write_atomically(&project_file, &updated)?;
         changed = true;
@@ -199,39 +320,49 @@ fn write_atomically(path: &Path, contents: &str) -> Result<()> {
     })
 }
 
-/// Everything `create_project` does after the target folder is ready.
-fn populate_project(project: &Path, name: &str) -> Result<()> {
-    write_project_files(project, name)?;
-
+/// `git init` (on `main`) and the project's first snapshot.
+fn init_and_snapshot(project: &Path, title: &str) -> Result<()> {
     let mut init = git2::RepositoryInitOptions::new();
     init.initial_head("main");
     git2::Repository::init_opts(project, &init)
         .with_context(|| format!("running git init in {}", project.display()))?;
 
-    snapshot::create_snapshot(project, "New project", None)
+    snapshot::create_snapshot(project, title, None)
         .context("saving the first snapshot")?
         .context("saving the first snapshot: nothing to commit")?;
     Ok(())
 }
 
 /// Writes every file of a new project (no git): the template with the
-/// name filled in, the addon, and `.ibproject/`.
-fn write_project_files(project: &Path, name: &str) -> Result<()> {
-    write_dir(&TEMPLATE_BLANK_2D, project, Some(name))?;
+/// name filled in (minus its `template.json`), the addon, and `.ibproject/`.
+fn write_project_files(
+    project: &Path,
+    name: &str,
+    template: &Dir<'_>,
+    info: &TemplateInfo,
+) -> Result<()> {
+    write_dir(
+        template,
+        project,
+        Some(name),
+        &[Path::new(TEMPLATE_INFO_FILE)],
+    )?;
 
     let project_file = project.join("project.godot");
-    let settings = fs::read_to_string(&project_file)?;
+    let settings = fs::read_to_string(&project_file)
+        .with_context(|| format!("reading {}", project_file.display()))?;
     let settings = set_setting(&settings, "application", "config/name", &godot_string(name))?;
     write_atomically(&project_file, &settings)?;
 
     ensure_addon(project)?;
 
     let ib = project.join(".ibproject");
+    fs::create_dir_all(&ib).with_context(|| format!("creating {}", ib.display()))?;
     let marker = ProjectMarker {
         name: name.to_string(),
         created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         format_version: 2,
-        dimension: "2d".to_string(),
+        dimension: info.dimension.clone(),
     };
     fs::write(
         ib.join(".ibx"),
@@ -246,7 +377,7 @@ fn write_project_files(project: &Path, name: &str) -> Result<()> {
 /// A project name becomes a folder name, so it must be one path component
 /// that is valid on every OS (projects move between machines), which in
 /// practice means Windows' rules.
-fn validate_name(name: &str) -> Result<()> {
+pub(crate) fn validate_name(name: &str) -> Result<()> {
     if name.trim().is_empty() {
         bail!("the project needs a name");
     }
@@ -278,16 +409,17 @@ fn validate_name(name: &str) -> Result<()> {
 }
 
 /// Writes an embedded directory tree under `dest`, skipping files whose
-/// content is already identical. With `name`, `{{PROJECT_NAME}}` in `.md`
-/// files is replaced by it. Returns true if anything was written.
+/// content is already identical and the files at the paths in `skip`
+/// (relative to the embedded root). With `name`, `{{PROJECT_NAME}}` in
+/// `.md` files is replaced by it. Returns true if anything was written.
 ///
 /// Skips any `.godot/` folder: `include_dir!` embeds whatever is on disk,
 /// including Godot's cache if someone opened the template in the editor
 /// while developing InfinaBox, and that must never reach a user's project.
-fn write_dir(dir: &Dir<'_>, dest: &Path, name: Option<&str>) -> Result<bool> {
+fn write_dir(dir: &Dir<'_>, dest: &Path, name: Option<&str>, skip: &[&Path]) -> Result<bool> {
     let mut changed = false;
     for file in dir.files() {
-        if is_godot_cache(file.path()) {
+        if is_godot_cache(file.path()) || skip.contains(&file.path()) {
             continue;
         }
         let target = dest.join(file.path());
@@ -307,7 +439,7 @@ fn write_dir(dir: &Dir<'_>, dest: &Path, name: Option<&str>) -> Result<bool> {
     }
     for sub in dir.dirs() {
         if !is_godot_cache(sub.path()) {
-            changed |= write_dir(sub, dest, name)?;
+            changed |= write_dir(sub, dest, name, skip)?;
         }
     }
     Ok(changed)
@@ -509,12 +641,22 @@ mod tests {
         paths
     }
 
+    /// `write_project_files` for the blank template.
+    fn write_blank_files(project: &Path, name: &str) {
+        let (template, info) = find_template(BLANK_TEMPLATE_ID).unwrap();
+        write_project_files(project, name, template, &info).unwrap();
+    }
+
     /// `include_dir!` embeds whatever is on disk, so a `.godot/` cache from
     /// opening the template in the editor would ship to every new project.
     /// `write_dir` skips it anyway; this catches it at the source.
     #[test]
     fn scaffold_embeds_no_godot_cache() {
-        for (label, dir) in [("template", &TEMPLATE_BLANK_2D), ("addon", &ADDON)] {
+        let dirs = TEMPLATES
+            .iter()
+            .map(|(id, dir)| (*id, *dir))
+            .chain([("addon", &ADDON)]);
+        for (label, dir) in dirs {
             for path in embedded_paths(dir) {
                 assert!(
                     !is_godot_cache(&path),
@@ -622,7 +764,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path().join("Star Hopper");
         fs::create_dir(&project).unwrap();
-        write_project_files(&project, "Star Hopper").unwrap();
+        write_blank_files(&project, "Star Hopper");
 
         for file in [
             "project.godot",
@@ -691,11 +833,6 @@ mod tests {
     }
 
     /// The full flow, including `git init` and the first snapshot.
-    ///
-    /// DEPENDS ON TASK D: `snapshot::create_snapshot`/`list_snapshots` are
-    /// Wave 0 stubs that error until Task D merges, so this test fails
-    /// until then. The layout itself is covered by
-    /// `scaffold_writes_the_expected_files` above.
     #[test]
     fn scaffold_create_project_makes_exactly_one_snapshot() {
         let tmp = tempfile::tempdir().unwrap();
@@ -715,6 +852,173 @@ mod tests {
             statuses.is_empty(),
             "uncommitted files after create_project"
         );
+    }
+
+    /// Every embedded template's `template.json` parses, matches its folder,
+    /// and is offered, in the documented order.
+    #[test]
+    fn scaffold_every_template_describes_itself() {
+        for (id, dir) in &TEMPLATES {
+            let info = template_info(id, dir).unwrap_or_else(|e| panic!("{id}: {e:#}"));
+            assert!(!info.name.trim().is_empty(), "{id} has no name");
+            assert!(
+                !info.description.trim().is_empty(),
+                "{id} has no description"
+            );
+            assert!(!info.controls.trim().is_empty(), "{id} has no controls");
+            assert!(!info.features.is_empty(), "{id} lists no features");
+            assert!(matches!(info.dimension.as_str(), "2d" | "3d"), "{id}");
+            assert!(
+                dir.get_file("project.godot").is_some(),
+                "{id} has no project.godot"
+            );
+        }
+        let ids: Vec<String> = list_templates().into_iter().map(|t| t.id).collect();
+        assert_eq!(
+            ids,
+            ["platformer-2d", "topdown-2d", "shooter-2d", "blank-2d"]
+        );
+
+        assert!(find_template("nope").is_err());
+        let bad = include_dir::Dir::new("", &[]);
+        assert!(template_info("empty", &bad).is_err());
+    }
+
+    /// A project from each template: the template's files (not its
+    /// `template.json`), its dimension in the marker, the name everywhere
+    /// it belongs, and one clean first snapshot.
+    #[test]
+    fn scaffold_creates_a_project_from_every_template() {
+        let tmp = tempfile::tempdir().unwrap();
+        for info in list_templates() {
+            let name = format!("Game {}", info.id);
+            let project = create_project_from_template(tmp.path(), &name, &info.id)
+                .unwrap_or_else(|e| panic!("{}: {e:#}", info.id));
+            assert_eq!(project, tmp.path().join(&name));
+
+            assert!(
+                !project.join(TEMPLATE_INFO_FILE).exists(),
+                "{} copied its template.json",
+                info.id
+            );
+            for file in ["project.godot", "AGENTS.md", "CLAUDE.md", ".gitignore"] {
+                assert!(project.join(file).is_file(), "{}: missing {file}", info.id);
+            }
+            assert!(project.join("addons/infinabox/plugin.cfg").is_file());
+            assert!(project.join(".ibproject/chat").is_dir());
+
+            let marker: ProjectMarker =
+                serde_json::from_str(&read(&project.join(".ibproject/.ibx"))).unwrap();
+            assert_eq!(marker.name, name);
+            assert_eq!(marker.dimension, info.dimension);
+
+            let settings = read(&project.join("project.godot"));
+            assert_eq!(
+                setting(&settings, "application", "config/name"),
+                Some(godot_string(&name))
+            );
+            assert_eq!(
+                setting(&settings, "autoload", "InfinaBox").as_deref(),
+                Some(AUTOLOAD_VALUE)
+            );
+
+            let (template, _) = find_template(&info.id).unwrap();
+            let cards = template_cards(template);
+            assert!(
+                cards.iter().any(|c| c == "concept.md"),
+                "{}: {cards:?}",
+                info.id
+            );
+            for card in &cards {
+                let path = project.join(".ibproject/context").join(card);
+                assert!(
+                    !read(&path).contains(NAME_PLACEHOLDER),
+                    "{}: {card}",
+                    info.id
+                );
+            }
+            for md in ["AGENTS.md", "CLAUDE.md"] {
+                let text = read(&project.join(md));
+                assert!(!text.contains(NAME_PLACEHOLDER), "{}: {md}", info.id);
+                assert!(
+                    text.contains(&name),
+                    "{}: {md} doesn't name the game",
+                    info.id
+                );
+            }
+
+            let snapshots = snapshot::list_snapshots(&project, 10).unwrap();
+            assert_eq!(snapshots.len(), 1, "{}: {snapshots:?}", info.id);
+            assert_eq!(snapshots[0].title, FIRST_SNAPSHOT_TITLE);
+            let repo = git2::Repository::open(&project).unwrap();
+            assert!(repo.statuses(None).unwrap().is_empty(), "{}", info.id);
+        }
+    }
+
+    #[test]
+    fn scaffold_refuses_an_unknown_template_before_writing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = create_project_from_template(tmp.path(), "Mine", "no-such").unwrap_err();
+        assert!(err.to_string().contains("no-such"), "{err}");
+        assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 0);
+    }
+
+    /// A failure after files were written (here, from `extra`) removes the
+    /// new folder, or empties a folder that was already there.
+    #[test]
+    fn scaffold_rolls_back_when_a_later_step_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = create_project_with(
+            tmp.path(),
+            "Fresh",
+            "platformer-2d",
+            "t",
+            |project| -> Result<()> {
+                assert!(project.join("project.godot").is_file());
+                bail!("boom")
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "boom");
+        assert!(!tmp.path().join("Fresh").exists());
+
+        let kept = tmp.path().join("Kept");
+        fs::create_dir(&kept).unwrap();
+        create_project_with(
+            tmp.path(),
+            "Kept",
+            BLANK_TEMPLATE_ID,
+            "t",
+            |_| -> Result<()> { bail!("boom") },
+        )
+        .unwrap_err();
+        assert!(kept.is_dir());
+        assert_eq!(fs::read_dir(&kept).unwrap().count(), 0);
+    }
+
+    /// Whatever `extra` writes is part of the one first snapshot.
+    #[test]
+    fn scaffold_extra_files_land_in_the_first_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (project, value) = create_project_with(
+            tmp.path(),
+            "Extra",
+            BLANK_TEMPLATE_ID,
+            "Custom",
+            |project| {
+                fs::write(project.join("extra.txt"), "hi")?;
+                Ok(7)
+            },
+        )
+        .unwrap();
+        assert_eq!(value, 7);
+        let snapshots = snapshot::list_snapshots(&project, 10).unwrap();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].title, "Custom");
+        let repo = git2::Repository::open(&project).unwrap();
+        assert!(repo.statuses(None).unwrap().is_empty());
+        let head = repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(head.get_name("extra.txt").is_some());
     }
 
     #[test]
@@ -902,7 +1206,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let project = tmp.path().join("Boot Test");
         fs::create_dir(&project).unwrap();
-        write_project_files(&project, "Boot Test").unwrap();
+        write_blank_files(&project, "Boot Test");
 
         let output = std::process::Command::new(godot)
             .args(["--headless", "--path"])
@@ -925,5 +1229,22 @@ mod tests {
                 .any(|l| l == format!("[infinabox] ready {ADDON_VERSION}")),
             "no ready line in stdout:\n{stdout}"
         );
+    }
+
+    /// Every template, scaffolded the way a person gets it, imports and
+    /// boots in the real Godot with no errors (`godot::validate`, the same
+    /// check the app runs).
+    #[test]
+    #[ignore = "needs Godot; run with --ignored"]
+    fn scaffold_every_template_boots_cleanly_in_real_godot() {
+        let godot = crate::godot::test_support::real_godot();
+        let tmp = tempfile::tempdir().unwrap();
+        for info in list_templates() {
+            let project = create_project_from_template(tmp.path(), &info.name, &info.id)
+                .unwrap_or_else(|e| panic!("{}: {e:#}", info.id));
+            let errors = crate::godot::validate::boot_check(&godot, &project)
+                .unwrap_or_else(|e| panic!("{}: {e:#}", info.id));
+            assert!(errors.is_empty(), "{} has errors: {errors:#?}", info.id);
+        }
     }
 }
