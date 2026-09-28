@@ -1,0 +1,51 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/checkpoint.gd" id="1_checkpoint"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_checkpoint"]
+size = Vector2(40, 96)
+
+[sub_resource type="Gradient" id="Gradient_fade"]
+offsets = PackedFloat32Array(0, 1)
+colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 0)
+
+[node name="Checkpoint" type="Area2D"]
+collision_layer = 0
+collision_mask = 2
+script = ExtResource("1_checkpoint")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, -48)
+shape = SubResource("RectangleShape2D_checkpoint")
+
+[node name="Base" type="Polygon2D" parent="."]
+color = Color(0.58, 0.64, 0.72, 1)
+polygon = PackedVector2Array(8, -8, 10.12, -7.12, 11, -5, 11, -3, 10.12, -0.88, 8, 0, -8, 0, -10.12, -0.88, -11, -3, -11, -5, -10.12, -7.12, -8, -8)
+
+[node name="Pole" type="Polygon2D" parent="."]
+color = Color(0.28, 0.33, 0.41, 1)
+polygon = PackedVector2Array(-2, -96, 2, -96, 2, -6, -2, -6)
+
+[node name="Flag" type="Polygon2D" parent="."]
+position = Vector2(2, -94)
+color = Color(0.8, 0.84, 0.88, 1)
+polygon = PackedVector2Array(0, 0, 34, 12, 0, 24)
+
+[node name="Sparkle" type="CPUParticles2D" parent="."]
+position = Vector2(16, -82)
+emitting = false
+amount = 14
+lifetime = 0.6
+one_shot = true
+explosiveness = 1.0
+local_coords = false
+spread = 180.0
+gravity = Vector2(0, 60)
+initial_velocity_min = 60.0
+initial_velocity_max = 140.0
+damping_min = 100.0
+damping_max = 140.0
+scale_amount_min = 2.0
+scale_amount_max = 4.0
+color = Color(0.43, 0.91, 0.72, 1)
+color_ramp = SubResource("Gradient_fade")

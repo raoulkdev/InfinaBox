@@ -1,0 +1,61 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/goal_flag.gd" id="1_goal"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_goal"]
+size = Vector2(48, 160)
+
+[sub_resource type="Gradient" id="Gradient_fade"]
+offsets = PackedFloat32Array(0, 1)
+colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 0)
+
+[node name="GoalFlag" type="Area2D" groups=["goal"]]
+collision_layer = 0
+collision_mask = 2
+script = ExtResource("1_goal")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, -80)
+shape = SubResource("RectangleShape2D_goal")
+
+[node name="Base" type="Polygon2D" parent="."]
+color = Color(0.39, 0.45, 0.55, 1)
+polygon = PackedVector2Array(16, -14, 18.83, -12.83, 20, -10, 20, -4, 18.83, -1.17, 16, 0, -16, 0, -18.83, -1.17, -20, -4, -20, -10, -18.83, -12.83, -16, -14)
+
+[node name="Pole" type="Polygon2D" parent="."]
+color = Color(0.2, 0.25, 0.33, 1)
+polygon = PackedVector2Array(-3, -160, 3, -160, 3, -12, -3, -12)
+
+[node name="Ball" type="Polygon2D" parent="."]
+color = Color(1, 0.79, 0.24, 1)
+polygon = PackedVector2Array(7, -164, 6.47, -161.32, 4.95, -159.05, 2.68, -157.53, 0, -157, -2.68, -157.53, -4.95, -159.05, -6.47, -161.32, -7, -164, -6.47, -166.68, -4.95, -168.95, -2.68, -170.47, 0, -171, 2.68, -170.47, 4.95, -168.95, 6.47, -166.68)
+
+[node name="Flag" type="Polygon2D" parent="."]
+position = Vector2(3, -156)
+color = Color(0.96, 0.25, 0.37, 1)
+polygon = PackedVector2Array(0, 0, 68, 0, 56, 22, 68, 44, 0, 44)
+
+[node name="Star" type="Polygon2D" parent="Flag"]
+color = Color(1, 1, 1, 1)
+polygon = PackedVector2Array(26, 11, 28.65, 18.36, 36.46, 18.6, 30.28, 23.39, 32.47, 30.9, 26, 26.5, 19.53, 30.9, 21.72, 23.39, 15.54, 18.6, 23.35, 18.36)
+
+[node name="Confetti" type="CPUParticles2D" parent="."]
+position = Vector2(0, -150)
+emitting = false
+amount = 48
+lifetime = 1.4
+one_shot = true
+explosiveness = 1.0
+local_coords = false
+direction = Vector2(0, -1)
+spread = 70.0
+gravity = Vector2(0, 520)
+initial_velocity_min = 220.0
+initial_velocity_max = 420.0
+angular_velocity_min = -360.0
+angular_velocity_max = 360.0
+scale_amount_min = 4.0
+scale_amount_max = 7.0
+color = Color(0.96, 0.25, 0.37, 1)
+hue_variation_min = -1.0
+hue_variation_max = 1.0

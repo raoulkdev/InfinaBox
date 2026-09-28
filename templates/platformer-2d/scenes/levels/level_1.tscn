@@ -1,0 +1,140 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scripts/level.gd" id="1_level"]
+[ext_resource type="PackedScene" path="res://scenes/objects/platform.tscn" id="2_platform"]
+[ext_resource type="PackedScene" path="res://scenes/objects/coin.tscn" id="3_coin"]
+[ext_resource type="PackedScene" path="res://scenes/objects/spikes.tscn" id="4_spikes"]
+[ext_resource type="PackedScene" path="res://scenes/objects/checkpoint.tscn" id="5_checkpoint"]
+[ext_resource type="PackedScene" path="res://scenes/objects/goal_flag.tscn" id="6_goal"]
+
+[sub_resource type="WorldBoundaryShape2D" id="WorldBoundaryShape2D_left"]
+normal = Vector2(1, 0)
+
+[sub_resource type="WorldBoundaryShape2D" id="WorldBoundaryShape2D_right"]
+normal = Vector2(-1, 0)
+
+[node name="Level1" type="Node2D"]
+script = ExtResource("1_level")
+size = Vector2(4200, 720)
+
+[node name="PlayerStart" type="Marker2D" parent="."]
+position = Vector2(120, 600)
+
+[node name="LeftEdge" type="StaticBody2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="LeftEdge"]
+shape = SubResource("WorldBoundaryShape2D_left")
+
+[node name="RightEdge" type="StaticBody2D" parent="."]
+position = Vector2(4200, 0)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="RightEdge"]
+shape = SubResource("WorldBoundaryShape2D_right")
+
+[node name="Platforms" type="Node2D" parent="."]
+
+[node name="GroundStart" parent="Platforms" instance=ExtResource("2_platform")]
+position = Vector2(0, 600)
+size = Vector2(1100, 120)
+
+[node name="FirstPlank" parent="Platforms" instance=ExtResource("2_platform")]
+position = Vector2(400, 470)
+size = Vector2(160, 20)
+one_way = true
+
+[node name="GroundMiddle" parent="Platforms" instance=ExtResource("2_platform")]
+position = Vector2(1300, 600)
+size = Vector2(1900, 120)
+
+[node name="StepLow" parent="Platforms" instance=ExtResource("2_platform")]
+position = Vector2(1500, 520)
+size = Vector2(128, 80)
+
+[node name="StepHigh" parent="Platforms" instance=ExtResource("2_platform")]
+position = Vector2(1700, 440)
+size = Vector2(128, 160)
+
+[node name="HighPlank" parent="Platforms" instance=ExtResource("2_platform")]
+position = Vector2(1950, 330)
+size = Vector2(140, 20)
+one_way = true
+
+[node name="SpikePlank1" parent="Platforms" instance=ExtResource("2_platform")]
+position = Vector2(2360, 480)
+size = Vector2(150, 20)
+one_way = true
+
+[node name="SpikePlank2" parent="Platforms" instance=ExtResource("2_platform")]
+position = Vector2(2580, 420)
+size = Vector2(150, 20)
+one_way = true
+
+[node name="GroundEnd" parent="Platforms" instance=ExtResource("2_platform")]
+position = Vector2(3380, 600)
+size = Vector2(820, 120)
+
+[node name="Hazards" type="Node2D" parent="."]
+
+[node name="SpikesStart" parent="Hazards" instance=ExtResource("4_spikes")]
+position = Vector2(700, 600)
+count = 3
+
+[node name="SpikePit" parent="Hazards" instance=ExtResource("4_spikes")]
+position = Vector2(2400, 600)
+count = 12
+
+[node name="SpikesEnd" parent="Hazards" instance=ExtResource("4_spikes")]
+position = Vector2(3588, 600)
+count = 2
+
+[node name="Coins" type="Node2D" parent="."]
+
+[node name="Coin1" parent="Coins" instance=ExtResource("3_coin")]
+position = Vector2(250, 560)
+
+[node name="Coin2" parent="Coins" instance=ExtResource("3_coin")]
+position = Vector2(440, 430)
+
+[node name="Coin3" parent="Coins" instance=ExtResource("3_coin")]
+position = Vector2(520, 430)
+
+[node name="Coin4" parent="Coins" instance=ExtResource("3_coin")]
+position = Vector2(748, 480)
+
+[node name="Coin5" parent="Coins" instance=ExtResource("3_coin")]
+position = Vector2(1200, 500)
+
+[node name="Coin6" parent="Coins" instance=ExtResource("3_coin")]
+position = Vector2(1564, 480)
+
+[node name="Coin7" parent="Coins" instance=ExtResource("3_coin")]
+position = Vector2(1764, 400)
+
+[node name="Coin8" parent="Coins" instance=ExtResource("3_coin")]
+position = Vector2(2020, 290)
+
+[node name="Coin9" parent="Coins" instance=ExtResource("3_coin")]
+position = Vector2(2435, 440)
+
+[node name="Coin10" parent="Coins" instance=ExtResource("3_coin")]
+position = Vector2(2655, 380)
+
+[node name="Coin11" parent="Coins" instance=ExtResource("3_coin")]
+position = Vector2(3290, 500)
+
+[node name="Coin12" parent="Coins" instance=ExtResource("3_coin")]
+position = Vector2(3620, 490)
+
+[node name="Coin13" parent="Coins" instance=ExtResource("3_coin")]
+position = Vector2(3800, 560)
+
+[node name="Checkpoints" type="Node2D" parent="."]
+
+[node name="Checkpoint1" parent="Checkpoints" instance=ExtResource("5_checkpoint")]
+position = Vector2(1400, 600)
+
+[node name="Checkpoint2" parent="Checkpoints" instance=ExtResource("5_checkpoint")]
+position = Vector2(2950, 600)
+
+[node name="GoalFlag" parent="." instance=ExtResource("6_goal")]
+position = Vector2(4000, 600)
