@@ -1,0 +1,9 @@
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "/tmp" (codex_home: AbsolutePathBuf("<CODEX_HOME>"))
+Reading additional input from stdin...
+2026-09-28T11:19:22.243673Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: URL error: Proxy connection failed: HTTP CONNECT failed with status 403, url: wss://api.openai.com/v1/responses
+2026-09-28T11:19:22.507958Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: URL error: Proxy connection failed: HTTP CONNECT failed with status 403, url: wss://api.openai.com/v1/responses
+2026-09-28T11:19:22.933405Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: URL error: Proxy connection failed: HTTP CONNECT failed with status 403, url: wss://api.openai.com/v1/responses
+2026-09-28T11:19:23.598683Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: URL error: Proxy connection failed: HTTP CONNECT failed with status 403, url: wss://api.openai.com/v1/responses
+2026-09-28T11:19:24.494074Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: URL error: Proxy connection failed: HTTP CONNECT failed with status 403, url: wss://api.openai.com/v1/responses
+2026-09-28T11:19:26.205251Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: URL error: Proxy connection failed: HTTP CONNECT failed with status 403, url: wss://api.openai.com/v1/responses
+2026-09-28T11:19:29.736400Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: URL error: Proxy connection failed: HTTP CONNECT failed with status 403, url: wss://api.openai.com/v1/responses
