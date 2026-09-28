@@ -45,6 +45,8 @@ pub const NOT_A_GODOT_GAME: &str = "This project isn't a Godot game yet.";
 pub const GODOT_NOT_INSTALLED: &str =
     "Godot isn't installed yet. Install it from the Play panel, then try again.";
 pub const STOPPED_WHILE_STARTING: &str = "The game was stopped before it finished starting.";
+pub const CUSTOM_GODOT_BROKEN: &str = "The Godot you chose in Advanced settings doesn't run. \
+Check its path there, or switch back to the managed Godot.";
 
 /// How long stderr must be quiet before a half-finished error block is
 /// flushed (Godot only ends a block by starting the next line).
@@ -595,11 +597,7 @@ impl AppHost {
 
 impl GameHost for AppHost {
     fn godot(&self) -> Result<PathBuf, String> {
-        let status = locate::status(&app_data_dir(&self.0)?);
-        status
-            .path
-            .filter(|_| status.installed)
-            .ok_or_else(|| GODOT_NOT_INSTALLED.into())
+        godot_program(&self.0)
     }
 
     fn launch(&self) -> Launch {
@@ -625,6 +623,102 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map_err(|e| format!("Couldn't find the app data folder: {e}"))
+}
+
+/// Which Godot InfinaBox uses. A custom path from Advanced settings
+/// (`AppSettings.godot_path`) comes first, and only counts when it's a file
+/// whose own `--version` works (`managed: false`); a broken one is reported
+/// as not installed rather than quietly replaced by another Godot. Without
+/// one: the managed install, then `INFINABOX_GODOT` (`locate::status`).
+///
+/// A macOS `Godot.app` bundle is accepted too, meaning the program inside it.
+pub fn status_with_custom(app_data: &Path, custom: Option<&str>) -> GodotStatus {
+    let Some(custom) = custom.map(str::trim).filter(|p| !p.is_empty()) else {
+        return locate::status(app_data);
+    };
+    let mut path = PathBuf::from(custom);
+    if path.is_dir()
+        && path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("app"))
+    {
+        path = path.join("Contents/MacOS/Godot");
+    }
+    match path
+        .is_file()
+        .then(|| locate::read_version(&path))
+        .flatten()
+    {
+        Some(version) => GodotStatus {
+            installed: true,
+            version: Some(version),
+            path: Some(path),
+            managed: false,
+        },
+        None => GodotStatus {
+            installed: false,
+            version: None,
+            path: None,
+            managed: false,
+        },
+    }
+}
+
+/// `status_with_custom` with the app's saved settings.
+fn effective_status(app: &AppHandle) -> Result<GodotStatus, String> {
+    let app_data = app_data_dir(app)?;
+    let settings = crate::commands::settings::load_from(&app_data)?;
+    Ok(status_with_custom(
+        &app_data,
+        settings.godot_path.as_deref(),
+    ))
+}
+
+/// The Godot binary to run, or a plain reason there isn't one.
+fn godot_program(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_data = app_data_dir(app)?;
+    let custom = crate::commands::settings::load_from(&app_data)?.godot_path;
+    let status = status_with_custom(&app_data, custom.as_deref());
+    match status.path.filter(|_| status.installed) {
+        Some(path) => Ok(path),
+        None if custom.is_some_and(|c| !c.trim().is_empty()) => Err(CUSTOM_GODOT_BROKEN.into()),
+        None => Err(GODOT_NOT_INSTALLED.into()),
+    }
+}
+
+/// Starts `<godot> -e --path <project>` on its own: its own process group
+/// (or, on Windows, detached), no output kept, and never stopped by
+/// InfinaBox — closing InfinaBox leaves the editor open. A background
+/// thread reaps it when it exits so it never lingers as a zombie.
+pub fn open_editor(godot: &Path, project: &Path) -> Result<(), String> {
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new(godot);
+    cmd.arg("-e")
+        .arg("--path")
+        .arg(project)
+        .current_dir(project)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Couldn't open the Godot editor: {e}"))?;
+    thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 /// The app's game manager (shared with the bridge).
@@ -662,9 +756,10 @@ pub fn stop_game(app: &AppHandle) -> Result<(), String> {
 // `--import`, the game), and even the state reads take a lock a stop can
 // briefly hold.
 
+/// The Godot InfinaBox will use (see `status_with_custom`).
 #[tauri::command(async)]
 pub fn godot_status(app: AppHandle) -> Result<GodotStatus, String> {
-    Ok(locate::status(&app_data_dir(&app)?))
+    effective_status(&app)
 }
 
 #[tauri::command]
@@ -676,9 +771,11 @@ pub async fn godot_install(app: AppHandle) -> Result<GodotStatus, String> {
             let _ = emitter.emit(EVENT_INSTALL_PROGRESS, progress);
         })
         .map_err(|e| format!("Couldn't install Godot: {e:#}"))?;
-        let status = locate::status(&app_data);
-        if status.installed && status.path.as_deref() == Some(installed.as_path()) {
-            Ok(status)
+        // Checked without the custom path: it's the managed copy that was
+        // just installed. What's returned is what InfinaBox will now use.
+        let managed = locate::status(&app_data);
+        if managed.installed && managed.path.as_deref() == Some(installed.as_path()) {
+            effective_status(&emitter)
         } else {
             Err(format!(
                 "Godot was installed at {}, but it doesn't run on this computer.",
@@ -692,12 +789,11 @@ pub async fn godot_install(app: AppHandle) -> Result<GodotStatus, String> {
 
 /// Opens the project in the Godot editor, as a separate app the person
 /// can keep using after InfinaBox closes.
-///
-/// Wave 0 stub (Phase B plan, Task C2 fills it in).
 #[tauri::command(async)]
-pub fn godot_open_editor(project_path: String) -> Result<(), String> {
-    let _ = project_path;
-    Err("Not implemented yet (Phase B, Task C2)".into())
+pub fn godot_open_editor(app: AppHandle, project_path: String) -> Result<(), String> {
+    check_project(&project_path)?;
+    let godot = godot_program(&app)?;
+    open_editor(&godot, Path::new(&project_path))
 }
 
 #[tauri::command(async)]
@@ -962,9 +1058,15 @@ mod tests {
 
     #[test]
     fn window_size_falls_back_to_the_inner_size_when_the_outer_one_is_zero() {
-        assert_eq!(window_size(Some((1280, 830)), Some((1280, 800))), Some((1280, 830)));
+        assert_eq!(
+            window_size(Some((1280, 830)), Some((1280, 800))),
+            Some((1280, 830))
+        );
         // No window manager: outer size reads 0x0.
-        assert_eq!(window_size(Some((0, 0)), Some((1280, 800))), Some((1280, 800)));
+        assert_eq!(
+            window_size(Some((0, 0)), Some((1280, 800))),
+            Some((1280, 800))
+        );
         assert_eq!(window_size(None, Some((1280, 800))), Some((1280, 800)));
         assert_eq!(window_size(Some((0, 0)), Some((0, 0))), None);
         assert_eq!(window_size(None, None), None);
@@ -1207,6 +1309,76 @@ mod tests {
         assert!(err.starts_with("Godot couldn't import"), "{err}");
         assert!(err.contains("import went wrong"), "{err}");
         assert_eq!(host.states(), vec![GameState::Starting, GameState::Stopped]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_custom_godot_path_comes_first_and_must_really_run() {
+        let tools = TempDir::new("custom-godot");
+        let app_data = TempDir::new("custom-godot-data");
+        let godot = fake_godot(tools.path(), "exit 0", "echo 4.7.2.custom");
+        let custom = godot.to_str().unwrap();
+
+        let status = status_with_custom(app_data.path(), Some(&format!("  {custom} ")));
+        assert_eq!(
+            status,
+            GodotStatus {
+                installed: true,
+                version: Some("4.7.2.custom".into()),
+                path: Some(godot.clone()),
+                managed: false,
+            }
+        );
+
+        // A path that isn't there, or a file that isn't a working Godot, is
+        // not installed — never silently another Godot.
+        let missing = status_with_custom(app_data.path(), Some("/no/such/godot"));
+        assert!(!missing.installed && missing.path.is_none());
+        let broken = fake_godot(app_data.path(), "exit 0", "exit 1");
+        assert!(!status_with_custom(app_data.path(), broken.to_str()).installed);
+
+        // No custom path (or a blank one): the managed install / env var.
+        assert_eq!(
+            status_with_custom(app_data.path(), Some("  ")),
+            locate::status(app_data.path())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_editor_is_opened_detached_with_the_project() {
+        let tools = TempDir::new("editor");
+        let args = tools.path().join("args");
+        let pgid = tools.path().join("pgid");
+        let godot = fake_godot(
+            tools.path(),
+            "exit 0",
+            &format!(
+                "echo \"$*\" > '{}'\nps -o pgid= -p $$ > '{}'\necho noise",
+                args.display(),
+                pgid.display()
+            ),
+        );
+        let project = fixture_project("clean");
+        open_editor(&godot, project.path()).unwrap();
+        let deadline = Instant::now() + WAIT;
+        while count(&pgid) < 1 {
+            assert!(Instant::now() < deadline, "the editor never started");
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            std::fs::read_to_string(&args).unwrap().trim(),
+            format!("-e --path {}", project.path().display())
+        );
+        // Its own process group, not ours.
+        let own_group = std::process::Command::new("ps")
+            .args(["-o", "pgid=", "-p", &std::process::id().to_string()])
+            .output()
+            .unwrap();
+        assert_ne!(
+            std::fs::read_to_string(&pgid).unwrap().trim(),
+            String::from_utf8_lossy(&own_group.stdout).trim()
+        );
     }
 
     fn real_godot() -> PathBuf {

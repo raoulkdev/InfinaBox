@@ -38,6 +38,7 @@ pub fn run() {
         .manage(AgentState::default())
         .manage(GodotState::default())
         .manage(BridgeState::default())
+        .manage(commands::connect::ConnectState::default())
         // The bridge must be listening before any agent turn launches the
         // MCP server that connects to it.
         .setup(|app| {
