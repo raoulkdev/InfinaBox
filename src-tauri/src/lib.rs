@@ -4,6 +4,7 @@ use commands::agent::{
     agent_cancel, agent_send, agent_status, chat_create_thread, chat_list_threads,
     chat_load_thread, AgentState,
 };
+use commands::autofix::AutoFixState;
 use commands::bridge::BridgeState;
 use commands::connect::{
     ai_providers, ai_recommended, ai_test_connection, connect_cancel, connect_resize, connect_run,
@@ -36,6 +37,7 @@ pub fn run() {
         .manage(TerminalState::default())
         .manage(WatcherState::default())
         .manage(AgentState::default())
+        .manage(AutoFixState::default())
         .manage(GodotState::default())
         .manage(BridgeState::default())
         // The bridge must be listening before any agent turn launches the
