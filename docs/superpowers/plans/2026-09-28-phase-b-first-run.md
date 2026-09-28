@@ -9,6 +9,8 @@
 ## Status
 
 - 2026-09-28: Wave 0 done (contracts, stubs, template skeletons). Wave 1 running: 12 subagents in parallel.
+- 2026-09-28: Wave 1 merged (all 12 tasks, each reviewed; two rate-limit interruptions resumed). Real-Godot boot test passes for all four templates scaffolded; core 262 tests pass (only the 2 Mac-fixture failures). Wave 2 running: G2, C2, O2.
+- Found and fixed along the way: libgit2 staging could crash the whole app (SIGBUS) when a file was truncated mid-snapshot; staging now reads files itself with retries. Snapshots are no longer made for chat-only changes.
 
 ## Scope
 
