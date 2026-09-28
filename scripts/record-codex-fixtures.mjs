@@ -59,7 +59,12 @@ const replacements = [
   [homedir(), "<HOME>"],
   [userInfo().username, "<USER>"],
 ];
-const scrub = (text) => replacements.reduce((acc, [from, to]) => (from ? acc.split(from).join(to) : acc), text);
+const scrub = (text) =>
+  replacements
+    .reduce((acc, [from, to]) => (from ? acc.split(from).join(to) : acc), text)
+    // The help text's `-c model="..."` example names a real model; the
+    // repo keeps no model identifiers.
+    .replace(/model="[^"<]+"/g, 'model="<MODEL>"');
 
 // The bridge token the app would pass; it must reach the MCP server through
 // the environment and never appear on the command line or in the output.

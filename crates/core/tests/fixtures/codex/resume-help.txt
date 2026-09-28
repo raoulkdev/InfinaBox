@@ -16,7 +16,7 @@ Options:
           Use a dotted path (`foo.bar.baz`) to override nested values. The `value` portion is parsed
           as TOML. If it fails to parse as TOML, the raw string is used as a literal.
           
-          Examples: - `-c model="o3"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
+          Examples: - `-c model="<MODEL>"` - `-c 'sandbox_permissions=["disk-full-read-access"]'` - `-c
           shell_environment_policy.inherit=all`
 
       --last
