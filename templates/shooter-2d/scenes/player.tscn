@@ -1,0 +1,55 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/player.gd" id="1_player"]
+[ext_resource type="PackedScene" path="res://scenes/bullet.tscn" id="2_bullet"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_body"]
+radius = 18.0
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_hurtbox"]
+radius = 15.0
+
+[node name="Player" type="CharacterBody2D"]
+collision_layer = 2
+motion_mode = 1
+script = ExtResource("1_player")
+bullet_scene = ExtResource("2_bullet")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_body")
+
+[node name="Body" type="Node2D" parent="."]
+
+[node name="Glow" type="Polygon2D" parent="Body"]
+color = Color(0.2, 0.9, 1, 0.16)
+polygon = PackedVector2Array(38, 0, -23, -31, -13, 0, -23, 31)
+
+[node name="Hull" type="Polygon2D" parent="Body"]
+color = Color(0.05, 0.22, 0.3, 1)
+polygon = PackedVector2Array(28, 0, -18, -21, -9, 0, -18, 21)
+
+[node name="Outline" type="Line2D" parent="Body/Hull"]
+points = PackedVector2Array(28, 0, -18, -21, -9, 0, -18, 21)
+closed = true
+width = 3.0
+default_color = Color(0.25, 0.95, 1, 1)
+joint_mode = 2
+
+[node name="Cockpit" type="Polygon2D" parent="Body"]
+color = Color(0.8, 1, 1, 1)
+polygon = PackedVector2Array(10, 0, 0, -5, 0, 5)
+
+[node name="Muzzle" type="Marker2D" parent="."]
+position = Vector2(34, 0)
+
+[node name="Flash" type="Polygon2D" parent="Muzzle"]
+color = Color(1, 0.95, 0.6, 1)
+polygon = PackedVector2Array(20, 0, 4, -5, 0, -13, -4, -5, -8, 0, -4, 5, 0, 13, 4, 5)
+
+[node name="Hurtbox" type="Area2D" parent="."]
+collision_layer = 0
+collision_mask = 4
+monitorable = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Hurtbox"]
+shape = SubResource("CircleShape2D_hurtbox")
