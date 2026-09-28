@@ -1,0 +1,209 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/hud.gd" id="1_hud"]
+[ext_resource type="Script" path="res://scripts/status_bar.gd" id="2_status_bar"]
+[ext_resource type="Script" path="res://scripts/dialogue_box.gd" id="3_dialogue_box"]
+[ext_resource type="Script" path="res://scripts/end_screen.gd" id="4_end_screen"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_1"]
+content_margin_left = 24.0
+content_margin_top = 18.0
+content_margin_right = 24.0
+content_margin_bottom = 18.0
+bg_color = Color(0.165, 0.145, 0.251, 0.94)
+border_width_left = 4
+border_width_top = 4
+border_width_right = 4
+border_width_bottom = 4
+border_color = Color(1, 0.973, 0.925, 1)
+corner_radius_top_left = 18
+corner_radius_top_right = 18
+corner_radius_bottom_right = 18
+corner_radius_bottom_left = 18
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_2"]
+content_margin_left = 24.0
+content_margin_top = 18.0
+content_margin_right = 24.0
+content_margin_bottom = 18.0
+bg_color = Color(0.165, 0.145, 0.251, 0.94)
+border_width_left = 4
+border_width_top = 4
+border_width_right = 4
+border_width_bottom = 4
+border_color = Color(1, 0.973, 0.925, 1)
+corner_radius_top_left = 18
+corner_radius_top_right = 18
+corner_radius_bottom_right = 18
+corner_radius_bottom_left = 18
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_3"]
+content_margin_left = 28.0
+content_margin_top = 10.0
+content_margin_right = 28.0
+content_margin_bottom = 10.0
+bg_color = Color(1, 0.835, 0.31, 1)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(0.118, 0.106, 0.18, 1)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_4"]
+content_margin_left = 28.0
+content_margin_top = 10.0
+content_margin_right = 28.0
+content_margin_bottom = 10.0
+bg_color = Color(1, 0.878, 0.51, 1)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(0.118, 0.106, 0.18, 1)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_5"]
+content_margin_left = 28.0
+content_margin_top = 10.0
+content_margin_right = 28.0
+content_margin_bottom = 10.0
+bg_color = Color(1, 0.792, 0.157, 1)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(0.118, 0.106, 0.18, 1)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+
+[node name="HUD" type="CanvasLayer"]
+script = ExtResource("1_hud")
+
+[node name="StatusBar" type="Control" parent="."]
+offset_left = 28.0
+offset_top = 24.0
+offset_right = 428.0
+offset_bottom = 64.0
+mouse_filter = 2
+script = ExtResource("2_status_bar")
+
+[node name="DialogueBox" type="PanelContainer" parent="."]
+process_mode = 3
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 180.0
+offset_top = -220.0
+offset_right = -180.0
+offset_bottom = -36.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_1")
+script = ExtResource("3_dialogue_box")
+
+[node name="Margin" type="MarginContainer" parent="DialogueBox"]
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_right = 6
+
+[node name="Rows" type="VBoxContainer" parent="DialogueBox/Margin"]
+theme_override_constants/separation = 6
+
+[node name="Name" type="Label" parent="DialogueBox/Margin/Rows"]
+theme_override_colors/font_color = Color(1, 0.835, 0.31, 1)
+theme_override_font_sizes/font_size = 24
+text = "Moss"
+
+[node name="Text" type="Label" parent="DialogueBox/Margin/Rows"]
+size_flags_vertical = 3
+theme_override_colors/font_color = Color(1, 0.973, 0.925, 1)
+theme_override_font_sizes/font_size = 28
+text = "Hello!"
+autowrap_mode = 3
+
+[node name="Hint" type="Label" parent="DialogueBox/Margin/Rows"]
+theme_override_colors/font_color = Color(1, 0.973, 0.925, 0.6)
+theme_override_font_sizes/font_size = 18
+text = "E  Next"
+horizontal_alignment = 2
+
+[node name="EndScreen" type="Control" parent="."]
+process_mode = 3
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("4_end_screen")
+
+[node name="Dim" type="ColorRect" parent="EndScreen"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.118, 0.106, 0.18, 0.7)
+
+[node name="Center" type="CenterContainer" parent="EndScreen"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="EndScreen/Center"]
+custom_minimum_size = Vector2(560, 0)
+theme_override_styles/panel = SubResource("StyleBoxFlat_2")
+
+[node name="Margin" type="MarginContainer" parent="EndScreen/Center/Panel"]
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+
+[node name="Rows" type="VBoxContainer" parent="EndScreen/Center/Panel/Margin"]
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="EndScreen/Center/Panel/Margin/Rows"]
+theme_override_colors/font_color = Color(1, 0.835, 0.31, 1)
+theme_override_font_sizes/font_size = 60
+text = "You escaped!"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="EndScreen/Center/Panel/Margin/Rows"]
+theme_override_colors/font_color = Color(1, 0.973, 0.925, 1)
+theme_override_font_sizes/font_size = 26
+text = "You found the key and made it out."
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Restart" type="Button" parent="EndScreen/Center/Panel/Margin/Rows"]
+size_flags_horizontal = 4
+theme_override_colors/font_color = Color(0.118, 0.106, 0.18, 1)
+theme_override_colors/font_hover_color = Color(0.118, 0.106, 0.18, 1)
+theme_override_colors/font_pressed_color = Color(0.118, 0.106, 0.18, 1)
+theme_override_colors/font_focus_color = Color(0.118, 0.106, 0.18, 1)
+theme_override_font_sizes/font_size = 28
+theme_override_styles/normal = SubResource("StyleBoxFlat_3")
+theme_override_styles/hover = SubResource("StyleBoxFlat_4")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_5")
+theme_override_styles/focus = SubResource("StyleBoxFlat_4")
+text = "Play again"
+
+[node name="KeyHint" type="Label" parent="EndScreen/Center/Panel/Margin/Rows"]
+theme_override_colors/font_color = Color(1, 0.973, 0.925, 0.6)
+theme_override_font_sizes/font_size = 18
+text = "or press R"
+horizontal_alignment = 1

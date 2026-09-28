@@ -1,0 +1,87 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/exit.gd" id="1_exit"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_1"]
+radius = 34.0
+
+[sub_resource type="Gradient" id="Gradient_2"]
+colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 0)
+
+[node name="Exit" type="Area2D"]
+collision_layer = 0
+collision_mask = 2
+monitorable = false
+script = ExtResource("1_exit")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_1")
+
+[node name="Visual" type="Node2D" parent="."]
+
+[node name="Glow" type="Polygon2D" parent="Visual"]
+color = Color(0.702, 0.533, 1, 0.18)
+polygon = PackedVector2Array(70, 0, 69.1, 11, 66.6, 21.6, 62.4, 31.8, 56.6, 41.1, 49.5, 49.5, 41.1, 56.6, 31.8, 62.4, 21.6, 66.6, 11, 69.1, 0, 70, -11, 69.1, -21.6, 66.6, -31.8, 62.4, -41.1, 56.6, -49.5, 49.5, -56.6, 41.1, -62.4, 31.8, -66.6, 21.6, -69.1, 11, -70, 0, -69.1, -11, -66.6, -21.6, -62.4, -31.8, -56.6, -41.1, -49.5, -49.5, -41.1, -56.6, -31.8, -62.4, -21.6, -66.6, -11, -69.1, 0, -70, 11, -69.1, 21.6, -66.6, 31.8, -62.4, 41.1, -56.6, 49.5, -49.5, 56.6, -41.1, 62.4, -31.8, 66.6, -21.6, 69.1, -11)
+
+[node name="Outline" type="Polygon2D" parent="Visual"]
+color = Color(0.118, 0.106, 0.18, 1)
+polygon = PackedVector2Array(50, 0, 49.4, 7.8, 47.6, 15.5, 44.6, 22.7, 40.5, 29.4, 35.4, 35.4, 29.4, 40.5, 22.7, 44.6, 15.5, 47.6, 7.8, 49.4, 0, 50, -7.8, 49.4, -15.5, 47.6, -22.7, 44.6, -29.4, 40.5, -35.4, 35.4, -40.5, 29.4, -44.6, 22.7, -47.6, 15.5, -49.4, 7.8, -50, 0, -49.4, -7.8, -47.6, -15.5, -44.6, -22.7, -40.5, -29.4, -35.4, -35.4, -29.4, -40.5, -22.7, -44.6, -15.5, -47.6, -7.8, -49.4, 0, -50, 7.8, -49.4, 15.5, -47.6, 22.7, -44.6, 29.4, -40.5, 35.4, -35.4, 40.5, -29.4, 44.6, -22.7, 47.6, -15.5, 49.4, -7.8)
+
+[node name="Ring" type="Polygon2D" parent="Visual"]
+color = Color(0.486, 0.302, 1, 1)
+polygon = PackedVector2Array(46, 0, 45.4, 7.2, 43.7, 14.2, 41, 20.9, 37.2, 27, 32.5, 32.5, 27, 37.2, 20.9, 41, 14.2, 43.7, 7.2, 45.4, 0, 46, -7.2, 45.4, -14.2, 43.7, -20.9, 41, -27, 37.2, -32.5, 32.5, -37.2, 27, -41, 20.9, -43.7, 14.2, -45.4, 7.2, -46, 0, -45.4, -7.2, -43.7, -14.2, -41, -20.9, -37.2, -27, -32.5, -32.5, -27, -37.2, -20.9, -41, -14.2, -43.7, -7.2, -45.4, 0, -46, 7.2, -45.4, 14.2, -43.7, 20.9, -41, 27, -37.2, 32.5, -32.5, 37.2, -27, 41, -20.9, 43.7, -14.2, 45.4, -7.2)
+
+[node name="Inner" type="Polygon2D" parent="Visual"]
+color = Color(0.702, 0.533, 1, 1)
+polygon = PackedVector2Array(36, 0, 35.6, 5.6, 34.2, 11.1, 32.1, 16.3, 29.1, 21.2, 25.5, 25.5, 21.2, 29.1, 16.3, 32.1, 11.1, 34.2, 5.6, 35.6, 0, 36, -5.6, 35.6, -11.1, 34.2, -16.3, 32.1, -21.2, 29.1, -25.5, 25.5, -29.1, 21.2, -32.1, 16.3, -34.2, 11.1, -35.6, 5.6, -36, 0, -35.6, -5.6, -34.2, -11.1, -32.1, -16.3, -29.1, -21.2, -25.5, -25.5, -21.2, -29.1, -16.3, -32.1, -11.1, -34.2, -5.6, -35.6, 0, -36, 5.6, -35.6, 11.1, -34.2, 16.3, -32.1, 21.2, -29.1, 25.5, -25.5, 29.1, -21.2, 32.1, -16.3, 34.2, -11.1, 35.6, -5.6)
+
+[node name="Core" type="Polygon2D" parent="Visual"]
+color = Color(0.953, 0.898, 1, 1)
+polygon = PackedVector2Array(20, 0, 19.6, 3.9, 18.5, 7.7, 16.6, 11.1, 14.1, 14.1, 11.1, 16.6, 7.7, 18.5, 3.9, 19.6, 0, 20, -3.9, 19.6, -7.7, 18.5, -11.1, 16.6, -14.1, 14.1, -16.6, 11.1, -18.5, 7.7, -19.6, 3.9, -20, 0, -19.6, -3.9, -18.5, -7.7, -16.6, -11.1, -14.1, -14.1, -11.1, -16.6, -7.7, -18.5, -3.9, -19.6, 0, -20, 3.9, -19.6, 7.7, -18.5, 11.1, -16.6, 14.1, -14.1, 16.6, -11.1, 18.5, -7.7, 19.6, -3.9)
+
+[node name="Swirl" type="Node2D" parent="Visual"]
+
+[node name="Dot1" type="Polygon2D" parent="Visual/Swirl"]
+color = Color(1, 1, 1, 0.85)
+polygon = PackedVector2Array(33, 0, 32.3, 2.5, 30.5, 4.3, 28, 5, 25.5, 4.3, 23.7, 2.5, 23, 0, 23.7, -2.5, 25.5, -4.3, 28, -5, 30.5, -4.3, 32.3, -2.5)
+
+[node name="Dot2" type="Polygon2D" parent="Visual/Swirl"]
+color = Color(1, 1, 1, 0.85)
+polygon = PackedVector2Array(-9, 24.2, -9.7, 26.7, -11.5, 28.6, -14, 29.2, -16.5, 28.6, -18.3, 26.7, -19, 24.2, -18.3, 21.7, -16.5, 19.9, -14, 19.2, -11.5, 19.9, -9.7, 21.7)
+
+[node name="Dot3" type="Polygon2D" parent="Visual/Swirl"]
+color = Color(1, 1, 1, 0.85)
+polygon = PackedVector2Array(-9, -24.2, -9.7, -21.7, -11.5, -19.9, -14, -19.2, -16.5, -19.9, -18.3, -21.7, -19, -24.2, -18.3, -26.7, -16.5, -28.6, -14, -29.2, -11.5, -28.6, -9.7, -26.7)
+
+[node name="Sparkles" type="CPUParticles2D" parent="."]
+emitting = true
+amount = 12
+lifetime = 1.4
+one_shot = false
+explosiveness = 0.0
+direction = Vector2(0, -1)
+spread = 30.0
+gravity = Vector2(0, 0)
+initial_velocity_min = 20.0
+initial_velocity_max = 50.0
+damping_min = 60.0
+damping_max = 120.0
+scale_amount_min = 2.0
+scale_amount_max = 4.0
+color = Color(0.882, 0.816, 1, 1)
+color_ramp = SubResource("Gradient_2")
+emission_shape = 1
+emission_sphere_radius = 40.0
+
+[node name="Label" type="Label" parent="."]
+offset_left = -80.0
+offset_top = -110.0
+offset_right = 80.0
+offset_bottom = -76.0
+theme_override_colors/font_color = Color(1, 0.973, 0.925, 1)
+theme_override_colors/font_outline_color = Color(0.118, 0.106, 0.18, 1)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 26
+text = "EXIT"
+horizontal_alignment = 1
+vertical_alignment = 1
