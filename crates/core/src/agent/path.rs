@@ -6,13 +6,15 @@
 //! that works fine in Terminal. `login_shell_path` asks the user's
 //! interactive login shell once — the same concern
 //! `src-tauri/src/commands/terminal.rs` solves by spawning its shell with
-//! `-l` — and both detection and spawning use the result.
+//! `-l` — and both detection and spawning use the result. After installing
+//! a CLI (which may add a directory to the shell profile),
+//! `refresh_login_shell_path` asks the shell again.
 
 use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::{OnceLock, mpsc};
+use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 /// How long the login shell gets to print its `PATH`. A slow shell profile
@@ -52,18 +54,59 @@ pub fn find_on_path(name: &str, path_var: &OsStr) -> Option<PathBuf> {
 }
 
 /// The `PATH` the user's login shell sets up, followed by any entries of
-/// our own `PATH` it doesn't already include. Resolved once per process and
-/// cached. Falls back to our own `PATH` when there's no `$SHELL` (Windows),
-/// the shell fails, or it takes longer than `LOGIN_SHELL_TIMEOUT`.
+/// our own `PATH` it doesn't already include. Resolved on first use and
+/// cached until `refresh_login_shell_path`. Falls back to our own `PATH`
+/// when there's no `$SHELL` (Windows), the shell fails, or it takes longer
+/// than `LOGIN_SHELL_TIMEOUT`.
+///
+/// Concurrent first callers wait for the one resolution in progress rather
+/// than each starting a shell.
 pub fn login_shell_path() -> &'static OsString {
-    static CACHED: OnceLock<OsString> = OnceLock::new();
-    CACHED.get_or_init(|| {
-        let own = std::env::var_os("PATH").unwrap_or_default();
-        match query_login_shell_path() {
-            Some(login) => merge_paths(&login, &own),
-            None => own,
-        }
-    })
+    let mut cached = lock_cache();
+    if let Some(path) = *cached {
+        return path;
+    }
+    let path = leak(resolve_login_shell_path());
+    *cached = Some(path);
+    path
+}
+
+/// Asks the login shell for its `PATH` again and replaces the cached one —
+/// for after an installer has run, since it may have added a directory
+/// (e.g. `~/.local/bin`) to the shell profile. Returns the new `PATH`.
+///
+/// The shell runs without holding the cache lock, so other threads keep
+/// getting the previous `PATH` in the meantime instead of waiting up to
+/// `LOGIN_SHELL_TIMEOUT`. A reference handed out earlier stays valid: each
+/// resolved `PATH` is leaked (one short string per install or sign-in, so
+/// the cost is bounded), which keeps `login_shell_path`'s `&'static`
+/// signature for its callers.
+pub fn refresh_login_shell_path() -> &'static OsString {
+    let path = leak(resolve_login_shell_path());
+    *lock_cache() = Some(path);
+    path
+}
+
+static CACHED: Mutex<Option<&'static OsString>> = Mutex::new(None);
+
+/// The cache lock. Nothing that holds it can leave the cache half-written,
+/// so a poisoned lock (a panic elsewhere) is still safe to use.
+fn lock_cache() -> std::sync::MutexGuard<'static, Option<&'static OsString>> {
+    CACHED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn leak(path: OsString) -> &'static OsString {
+    Box::leak(Box::new(path))
+}
+
+fn resolve_login_shell_path() -> OsString {
+    let own = std::env::var_os("PATH").unwrap_or_default();
+    match query_login_shell_path() {
+        Some(login) => merge_paths(&login, &own),
+        None => own,
+    }
 }
 
 fn query_login_shell_path() -> Option<OsString> {
@@ -181,6 +224,32 @@ mod tests {
         for dir in std::env::split_paths(&own) {
             assert!(resolved.contains(&dir), "{dir:?} missing");
         }
+    }
+
+    #[test]
+    fn refresh_replaces_the_cached_path_and_is_safe_concurrently() {
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                std::thread::spawn(move || {
+                    if i % 2 == 0 {
+                        refresh_login_shell_path().clone()
+                    } else {
+                        login_shell_path().clone()
+                    }
+                })
+            })
+            .collect();
+        let own = std::env::var_os("PATH").unwrap();
+        for handle in threads {
+            let path = handle.join().unwrap();
+            let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+            for dir in std::env::split_paths(&own) {
+                assert!(dirs.contains(&dir), "{dir:?} missing");
+            }
+        }
+        // After a refresh, callers get the refreshed value.
+        let refreshed = refresh_login_shell_path();
+        assert_eq!(refreshed, login_shell_path());
     }
 
     /// A stand-in shell script (it ignores `-i -l -c ...`).
