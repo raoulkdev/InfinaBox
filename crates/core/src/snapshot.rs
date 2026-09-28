@@ -33,8 +33,9 @@ use std::sync::{Mutex, MutexGuard};
 
 use anyhow::{Context, Result};
 use git2::{
-    Commit, Config, ErrorCode, Index, IndexAddOption, ObjectType, Oid, Repository, RepositoryState,
-    Signature, Sort, Tree, TreeWalkMode, TreeWalkResult, build::CheckoutBuilder,
+    Commit, Config, Delta, DiffOptions, ErrorCode, Index, IndexEntry, IndexTime, ObjectType, Oid,
+    Repository, RepositoryState, Signature, Sort, Tree, TreeWalkMode, TreeWalkResult,
+    build::CheckoutBuilder,
 };
 use serde::Serialize;
 
@@ -102,6 +103,12 @@ fn snapshot_lock() -> MutexGuard<'static, ()> {
 /// Commits everything (respecting `.gitignore`). `None` when nothing
 /// changed. `origin` is the (thread id, turn number) that produced it.
 /// Initializes the repository if the project isn't one yet.
+///
+/// Changes to the chat alone (`.ibproject/chat/`) are not a snapshot either:
+/// every turn writes the chat, so a turn whose edits cancel out (say, one
+/// that exactly reverts a hand edit that was never saved) would otherwise
+/// leave a "No files changed" entry in the history. The chat stays on disk
+/// and goes into the next snapshot (a restore carries it too).
 pub fn create_snapshot(
     project: &Path,
     title: &str,
@@ -131,7 +138,7 @@ fn create_snapshot_locked(
 
     let tree_id = stage_everything(&repo)?;
     let unchanged = match &head {
-        Some(commit) => commit.tree_id() == tree_id,
+        Some(commit) => same_outside_chat(&repo, &repo.find_tree(tree_id)?, commit)?,
         // Unborn HEAD: only an empty project counts as "nothing changed".
         None => repo.find_tree(tree_id)?.is_empty(),
     };
@@ -217,10 +224,8 @@ fn restore_to_locked(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
     let staged_id = stage_everything(&repo)?;
     let only_chat_dirty = match head_commit(&repo)? {
         Some(head) => {
-            let head_chat = entry_at(&head.tree()?, &CHAT_DIR);
             staged_id != head.tree_id()
-                && set_path(&repo, &repo.find_tree(staged_id)?, &CHAT_DIR, head_chat)?
-                    == head.tree_id()
+                && same_outside_chat(&repo, &repo.find_tree(staged_id)?, &head)?
         }
         None => false,
     };
@@ -298,9 +303,10 @@ fn restore_to_locked(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
 /// auto-saves, so an auto-save made by this very call is never what gets
 /// undone.
 ///
-/// Snapshots that changed nothing but chat (a turn that only talked) are
-/// skipped, since restoring never rewinds chat and undoing one would do
-/// nothing.
+/// Snapshots that changed nothing but chat are skipped, since restoring
+/// never rewinds chat and undoing one would do nothing. (`create_snapshot`
+/// no longer makes them, but earlier versions of InfinaBox did, so a
+/// project's history can still hold some.)
 ///
 /// If ordinary commits were made after the latest snapshot (e.g. in
 /// Advanced mode), undo still restores the latest *snapshot's* parent, so
@@ -423,6 +429,15 @@ fn head_commit(repo: &Repository) -> Result<Option<Commit<'_>>> {
 /// `DEFAULT_IGNORES`) and deletions. Nested git repositories (e.g. an addon
 /// cloned into `addons/foo/`) are skipped rather than failing the whole
 /// snapshot. Writes the index and returns its tree.
+///
+/// Files can change while this runs (the game, the Godot editor or a
+/// terminal writing them), so it doesn't use libgit2's `add_all`/
+/// `update_all`: those read changed files through a memory map, and a file
+/// truncated under that map kills the whole process (SIGBUS) rather than
+/// returning an error. Instead the changed paths come from a plain
+/// index-to-workdir diff (which never maps files, and is retried if a file
+/// changes while it's being compared), and each file is staged on its own
+/// by `stage_file`, which copes with a file that keeps changing.
 fn stage_everything(repo: &Repository) -> Result<Oid> {
     repo.add_ignore_rule(DEFAULT_IGNORES)
         .context("failed to apply default ignore rules")?;
@@ -431,27 +446,271 @@ fn stage_everything(repo: &Repository) -> Result<Oid> {
         .context("the project's repository has no working folder")?
         .to_path_buf();
     let mut index = repo.index().context("failed to open the Git index")?;
-    // Called with file paths (and untracked directory paths): skip the path
-    // if it, or any folder above it inside the project, is its own repo —
-    // which also covers folders the outer repo already tracked before
-    // someone ran `git init`/`git clone` there.
-    let mut skip_nested_repos = |path: &Path, _spec: &[u8]| -> i32 {
-        let nested = path
-            .ancestors()
+
+    let (removed, changed) = changed_workdir_paths(repo, &index)?;
+    // A path is skipped if it, or any folder above it inside the project,
+    // is its own repo — which also covers folders the outer repo already
+    // tracked before someone ran `git init`/`git clone` there.
+    let nested = |path: &Path| {
+        path.ancestors()
             .filter(|a| !a.as_os_str().is_empty())
-            .any(|a| workdir.join(a).join(".git").exists());
-        if nested { 1 } else { 0 }
+            .any(|a| workdir.join(a).join(".git").exists())
     };
-    index
-        .add_all(["*"], IndexAddOption::DEFAULT, Some(&mut skip_nested_repos))
-        .context("failed to stage changed files")?;
-    index
-        .update_all(["*"], Some(&mut skip_nested_repos))
-        .context("failed to stage deleted files")?;
+    // Removals first, so a file that replaced a tracked folder (or the
+    // other way round) never collides with the old entries.
+    for path in removed.iter().filter(|p| !nested(p)) {
+        index
+            .remove_path(path)
+            .with_context(|| format!("failed to stage the removal of '{}'", path.display()))?;
+    }
+    for path in changed.iter().filter(|p| !nested(p)) {
+        stage_file(&mut index, &workdir, path)?;
+    }
     index.write().context("failed to write the Git index")?;
     index
         .write_tree()
         .context("failed to write the staged tree")
+}
+
+/// Attempts at the index-to-workdir comparison, and at staging one file
+/// through libgit2, before `stage_everything` falls back to something that
+/// can't fail on a changing file.
+const STAGE_ATTEMPTS: u32 = 3;
+
+/// Pause between those attempts: long enough for a save in progress to
+/// finish, short enough not to hold up the snapshot noticeably.
+const STAGE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(30);
+
+/// The paths `git add -A` would act on, as (removed from disk, new or
+/// changed on disk), relative to the project. Untracked folders are listed
+/// file by file (a nested repository shows up as its folder, which the
+/// caller skips).
+///
+/// The diff hashes a file whose size or time alone can't tell whether it
+/// changed, and fails if that file changes mid-read; it's retried a few
+/// times. A file that never holds still (say, a big file being rewritten
+/// over and over) can keep failing it, so the last resort is
+/// `all_workdir_paths`, which reads nothing.
+fn changed_workdir_paths(
+    repo: &Repository,
+    index: &Index,
+) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+    let mut attempt = 1;
+    let diff = loop {
+        let mut opts = DiffOptions::new();
+        opts.include_untracked(true)
+            .recurse_untracked_dirs(true)
+            .include_typechange(true);
+        match repo.diff_index_to_workdir(Some(index), Some(&mut opts)) {
+            Ok(diff) => break diff,
+            Err(_) if attempt < STAGE_ATTEMPTS => {
+                attempt += 1;
+                std::thread::sleep(STAGE_RETRY_DELAY);
+            }
+            Err(_) => return all_workdir_paths(repo, index),
+        }
+    };
+    let (mut removed, mut changed) = (Vec::new(), Vec::new());
+    for delta in diff.deltas() {
+        match delta.status() {
+            Delta::Deleted => removed.extend(delta.old_file().path().map(Path::to_path_buf)),
+            Delta::Added | Delta::Untracked | Delta::Modified | Delta::Typechange => {
+                changed.extend(delta.new_file().path().map(Path::to_path_buf))
+            }
+            _ => {}
+        }
+    }
+    Ok((removed, changed))
+}
+
+/// `changed_workdir_paths` without the diff: every file on disk that git
+/// would track (not ignored, or already in the index) counts as changed —
+/// staging an unchanged file is harmless, just slower — and every indexed
+/// file that's gone counts as removed. Nested repositories are left for the
+/// caller to skip; `.git` itself is never entered.
+fn all_workdir_paths(repo: &Repository, index: &Index) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+    let workdir = repo
+        .workdir()
+        .context("the project's repository has no working folder")?;
+    let mut changed = Vec::new();
+    let mut folders = vec![PathBuf::new()];
+    while let Some(rel) = folders.pop() {
+        let entries = std::fs::read_dir(workdir.join(&rel))
+            .with_context(|| format!("failed to read the folder '{}'", rel.display()))?;
+        for entry in entries {
+            let entry = entry.with_context(|| format!("failed to read the folder '{}'", rel.display()))?;
+            let child = rel.join(entry.file_name());
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                if entry.file_name() != ".git" {
+                    folders.push(child);
+                }
+            } else if index.get_path(&child, 0).is_some()
+                || !repo.is_path_ignored(&child).unwrap_or(true)
+            {
+                changed.push(child);
+            }
+        }
+    }
+    let removed = index
+        .iter()
+        .map(|e| PathBuf::from(String::from_utf8_lossy(&e.path).into_owned()))
+        // Gone, or now a folder (its files are listed above instead).
+        .filter(|p| {
+            !workdir
+                .join(p)
+                .symlink_metadata()
+                .is_ok_and(|m| !m.is_dir())
+        })
+        .collect();
+    Ok((removed, changed))
+}
+
+/// Stages one new or changed file. First the normal way (libgit2 reads it,
+/// applying `.gitattributes` filters such as line-ending normalization),
+/// retried a few times if the file changes while it's being read. If it
+/// never holds still, the last complete read is staged as it is — a
+/// snapshot of a file that's mid-save beats no snapshot at all, and the
+/// next snapshot picks up whatever it settles to. A file that disappeared
+/// meanwhile is staged as removed.
+fn stage_file(index: &mut Index, workdir: &Path, rel: &Path) -> Result<()> {
+    let full = workdir.join(rel);
+    let meta = match full.symlink_metadata() {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return remove_if_indexed(index, rel),
+        Err(e) => {
+            return Err(e).with_context(|| format!("failed to read '{}'", rel.display()));
+        }
+    };
+    if meta.is_dir() {
+        // Only a nested repository or an empty untracked folder gets here;
+        // git stages neither.
+        return Ok(());
+    }
+    let mut last_err = None;
+    for attempt in 0..STAGE_ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(STAGE_RETRY_DELAY);
+        }
+        match index.add_path(rel) {
+            Ok(()) => return Ok(()),
+            Err(e) => last_err = Some(e),
+        }
+        if !full.exists() {
+            return remove_if_indexed(index, rel);
+        }
+    }
+    let last_err = last_err.expect("at least one attempt was made");
+    if !meta.is_file() {
+        // A symlink libgit2 can't read: nothing to fall back on.
+        return Err(last_err).with_context(|| format!("failed to stage '{}'", rel.display()));
+    }
+
+    let data = match read_settled(&full) {
+        Ok(data) => data,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return remove_if_indexed(index, rel),
+        Err(e) => return Err(e).with_context(|| format!("failed to read '{}'", rel.display())),
+    };
+    let entry = IndexEntry {
+        // No stat data: git then never trusts this entry's cached stat and
+        // compares the file's content next time, since what was read may
+        // not match what's on disk by then.
+        ctime: IndexTime::new(0, 0),
+        mtime: IndexTime::new(0, 0),
+        dev: 0,
+        ino: 0,
+        mode: file_mode(&meta),
+        uid: 0,
+        gid: 0,
+        file_size: 0,
+        id: Oid::ZERO_SHA1,
+        flags: 0,
+        flags_extended: 0,
+        path: index_path(rel),
+    };
+    index
+        .add_frombuffer(&entry, &data)
+        .with_context(|| format!("failed to stage '{}'", rel.display()))
+}
+
+fn remove_if_indexed(index: &mut Index, rel: &Path) -> Result<()> {
+    if index.get_path(rel, 0).is_some() {
+        index
+            .remove_path(rel)
+            .with_context(|| format!("failed to stage the removal of '{}'", rel.display()))?;
+    }
+    Ok(())
+}
+
+/// A path as the index stores it: forward slashes on every platform.
+fn index_path(rel: &Path) -> Vec<u8> {
+    rel.components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/")
+        .into_bytes()
+}
+
+#[cfg(unix)]
+fn file_mode(meta: &std::fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    if meta.permissions().mode() & 0o111 != 0 { 0o100755 } else { 0o100644 }
+}
+
+#[cfg(not(unix))]
+fn file_mode(_meta: &std::fs::Metadata) -> u32 {
+    0o100644
+}
+
+/// What changes when a file is written: its size and modification time.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FileStamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+impl FileStamp {
+    fn of(path: &Path) -> std::io::Result<Self> {
+        let meta = std::fs::metadata(path)?;
+        Ok(Self {
+            len: meta.len(),
+            modified: meta.modified().ok(),
+        })
+    }
+}
+
+/// One read of a file with its stamp just before and just after.
+fn read_once(path: &Path) -> std::io::Result<(FileStamp, Vec<u8>, FileStamp)> {
+    let before = FileStamp::of(path)?;
+    let data = std::fs::read(path)?;
+    let after = FileStamp::of(path)?;
+    Ok((before, data, after))
+}
+
+/// Reads `path` until a read is consistent (same stamp before and after,
+/// and as many bytes as the file then holds), up to `STAGE_ATTEMPTS`
+/// times; after that, the last read is returned as it is.
+fn read_settled(path: &Path) -> std::io::Result<Vec<u8>> {
+    read_settled_with(|| read_once(path))
+}
+
+fn read_settled_with(
+    mut read: impl FnMut() -> std::io::Result<(FileStamp, Vec<u8>, FileStamp)>,
+) -> std::io::Result<Vec<u8>> {
+    let mut last = Vec::new();
+    for attempt in 0..STAGE_ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(STAGE_RETRY_DELAY);
+        }
+        let (before, data, after) = read()?;
+        if before == after && data.len() as u64 == after.len {
+            return Ok(data);
+        }
+        last = data;
+    }
+    Ok(last)
 }
 
 /// The (id, mode) of the entry at `path` (split into components) in `tree`,
@@ -637,6 +896,13 @@ fn changed_paths(repo: &Repository, old: &Tree, new: &Tree) -> Result<Vec<PathBu
         }
     }
     Ok(paths)
+}
+
+/// Whether `tree` matches `head`'s tree everywhere except, possibly,
+/// `.ibproject/chat/`.
+fn same_outside_chat(repo: &Repository, tree: &Tree, head: &Commit) -> Result<bool> {
+    let head_chat = entry_at(&head.tree()?, &CHAT_DIR);
+    Ok(set_path(repo, tree, &CHAT_DIR, head_chat)? == head.tree_id())
 }
 
 /// Whether `commit` changed anything besides `.ibproject/chat/` relative to
@@ -1240,6 +1506,25 @@ mod tests {
         );
     }
 
+    /// Commits everything as a snapshot the way earlier versions of
+    /// `create_snapshot` did, even when only the chat changed.
+    fn legacy_snapshot(dir: &Path, title: &str) -> Snapshot {
+        let repo = Repository::open(dir).unwrap();
+        let tree_id = stage_everything(&repo).unwrap();
+        let head = head_commit(&repo).unwrap();
+        let oid = commit_tree(
+            &repo,
+            tree_id,
+            head.as_ref(),
+            title,
+            &[(TRAILER_SNAPSHOT, "1".to_string())],
+        )
+        .unwrap();
+        to_snapshot(&repo, &repo.find_commit(oid).unwrap())
+            .unwrap()
+            .unwrap()
+    }
+
     #[test]
     fn undo_skips_chat_only_snapshots() {
         use crate::chat_store::{append, create_thread};
@@ -1250,10 +1535,14 @@ mod tests {
         create_snapshot(dir.path(), "Two", None).unwrap().unwrap();
         let thread = create_thread(dir.path(), "Just talking", "claude-code").unwrap();
         append(dir.path(), &thread.id, &user("hi", 1)).unwrap();
-        let chat_only = create_snapshot(dir.path(), "Chat only", Some((&thread.id, 1)))
-            .unwrap()
-            .unwrap();
+        // `create_snapshot` no longer makes these; older versions did.
+        assert_eq!(
+            create_snapshot(dir.path(), "Chat only", Some((&thread.id, 1))).unwrap(),
+            None
+        );
+        let chat_only = legacy_snapshot(dir.path(), "Chat only");
         assert_eq!(chat_only.files_changed, 0);
+        assert_eq!(list_snapshots(dir.path(), 1).unwrap()[0], chat_only);
 
         let undo = undo_last(dir.path()).unwrap().unwrap();
         assert_eq!(undo.title, "Went back to: One");
@@ -1456,7 +1745,7 @@ mod tests {
     fn manual_commit(dir: &Path, message: &str) {
         let repo = Repository::open(dir).unwrap();
         let mut index = repo.index().unwrap();
-        index.add_all(["*"], IndexAddOption::DEFAULT, None).unwrap();
+        index.add_all(["*"], git2::IndexAddOption::DEFAULT, None).unwrap();
         index.write().unwrap();
         let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
         let sig = Signature::now("Dev", "dev@example.com").unwrap();
@@ -1590,7 +1879,7 @@ mod tests {
     /// `game.gd` on top of the "Went back to" commit, silently undoing it
     /// under the turn's title. With snapshots and restores racing from two
     /// threads, no turn commit may ever touch `game.gd` (the turn thread only
-    /// writes chat files, which restores keep), every restore commit must
+    /// writes chat files and its own notes file), every restore commit must
     /// hold its target's `game.gd`, and the disk must end matching HEAD.
     #[test]
     fn concurrent_snapshots_and_restores_keep_history_consistent() {
@@ -1621,9 +1910,16 @@ mod tests {
                     // file, then rename), never truncated in place: this
                     // write runs outside the lock, and staging a file that is
                     // being truncated under it fails in libgit2.
-                    let rel = format!(".ibproject/chat/turn-{i}.jsonl");
-                    write(&project, &format!("{rel}.tmp"), "{}\n");
-                    fs::rename(project.join(format!("{rel}.tmp")), project.join(&rel)).unwrap();
+                    // A chat-only change is no snapshot, so each turn also
+                    // leaves a notes file of its own (never `game.gd`).
+                    for rel in [
+                        format!(".ibproject/chat/turn-{i}.jsonl"),
+                        format!("notes/turn-{i}.txt"),
+                    ] {
+                        write(&project, &format!("{rel}.tmp"), "{}\n");
+                        fs::rename(project.join(format!("{rel}.tmp")), project.join(&rel))
+                            .unwrap();
+                    }
                     if create_snapshot(&project, &format!("Turn {i}"), Some(("t", i)))
                         .unwrap()
                         .is_some()
@@ -1674,5 +1970,281 @@ mod tests {
         assert!(turn_commits > 0);
         let head = repo.head().unwrap().peel_to_commit().unwrap();
         assert_eq!(read(&project, "game.gd").as_bytes(), game(&head).as_slice());
+    }
+
+    // ---- Phase B follow-ups -------------------------------------------
+
+    /// The Phase A follow-up: a hand edit is left unsaved, then an AI turn
+    /// edits the file back to what the last snapshot holds. The turn wrote
+    /// the chat and reported a file change, but no game file differs from
+    /// HEAD — so no "No files changed" snapshot.
+    #[test]
+    fn a_turn_that_reverts_an_unsaved_hand_edit_makes_no_snapshot() {
+        use crate::chat_store::{append, create_thread, load_thread};
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "player.gd", "var speed = 1\n");
+        let thread = create_thread(dir.path(), "Speed", "claude-code").unwrap();
+        let start = create_snapshot(dir.path(), "Start", None).unwrap().unwrap();
+
+        // The person edits by hand and doesn't save a snapshot.
+        write(dir.path(), "player.gd", "var speed = 5\n");
+        // The AI turn: chat written, and its edit puts the file back.
+        append(dir.path(), &thread.id, &user("set the speed back to 1", 1)).unwrap();
+        write(dir.path(), "player.gd", "var speed = 1\n");
+
+        assert_eq!(
+            create_snapshot(dir.path(), "set the speed back to 1", Some((&thread.id, 1)))
+                .unwrap(),
+            None
+        );
+        assert_eq!(list_snapshots(dir.path(), 10).unwrap(), vec![start]);
+
+        // Nothing lost: the file is as the AI left it, and the chat is on
+        // disk and goes into the next real snapshot.
+        assert_eq!(read(dir.path(), "player.gd"), "var speed = 1\n");
+        append(dir.path(), &thread.id, &user("now make it 3", 2)).unwrap();
+        write(dir.path(), "player.gd", "var speed = 3\n");
+        let next = create_snapshot(dir.path(), "now make it 3", Some((&thread.id, 2)))
+            .unwrap()
+            .unwrap();
+        assert_eq!(next.files_changed, 1);
+        let repo = Repository::open(dir.path()).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        let chat = tree
+            .get_path(Path::new(&format!(".ibproject/chat/{}.jsonl", thread.id)))
+            .unwrap();
+        let committed =
+            String::from_utf8(repo.find_blob(chat.id()).unwrap().content().to_vec()).unwrap();
+        assert!(committed.contains("set the speed back to 1"));
+        assert!(committed.contains("now make it 3"));
+        let (_, records) = load_thread(dir.path(), &thread.id).unwrap();
+        assert_eq!(records.len(), 2);
+    }
+
+    #[test]
+    fn a_chat_only_change_is_not_a_snapshot_but_a_new_project_with_chat_is() {
+        use crate::chat_store::{append, create_thread};
+        let dir = TempDir::new().unwrap();
+        // First snapshot of a project holding only a chat: still made (an
+        // unborn HEAD only skips an empty project).
+        let thread = create_thread(dir.path(), "Hello", "claude-code").unwrap();
+        create_snapshot(dir.path(), "First", None).unwrap().unwrap();
+
+        append(dir.path(), &thread.id, &user("just talking", 1)).unwrap();
+        let other = create_thread(dir.path(), "Another", "claude-code").unwrap();
+        append(dir.path(), &other.id, &user("hi", 2)).unwrap();
+        assert_eq!(
+            create_snapshot(dir.path(), "Talk", Some((&thread.id, 1))).unwrap(),
+            None
+        );
+        assert_eq!(commit_count(dir.path()), 1);
+
+        // Chat plus a game file: a snapshot, with the chat in it.
+        write(dir.path(), "main.gd", "extends Node\n");
+        let snap = create_snapshot(dir.path(), "Add main", None).unwrap().unwrap();
+        assert_eq!(snap.files_changed, 1);
+        let repo = Repository::open(dir.path()).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(
+            tree.get_path(Path::new(&format!(".ibproject/chat/{}.jsonl", other.id)))
+                .is_ok()
+        );
+    }
+
+    fn stamp(len: u64, secs: u64) -> FileStamp {
+        FileStamp {
+            len,
+            modified: Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs)),
+        }
+    }
+
+    #[test]
+    fn read_settled_retries_until_a_read_is_consistent() {
+        // Changing on the first read (size moved), settled on the second.
+        let mut reads = vec![
+            (stamp(10, 1), b"0123456789".to_vec(), stamp(4, 2)),
+            (stamp(4, 2), b"abcd".to_vec(), stamp(4, 2)),
+        ]
+        .into_iter();
+        let mut calls = 0;
+        let data = read_settled_with(|| {
+            calls += 1;
+            Ok(reads.next().unwrap())
+        })
+        .unwrap();
+        assert_eq!(data, b"abcd");
+        assert_eq!(calls, 2);
+
+        // Same size but rewritten (mtime moved), then a short read.
+        let mut reads = vec![
+            (stamp(4, 1), b"abcd".to_vec(), stamp(4, 2)),
+            (stamp(4, 2), b"ab".to_vec(), stamp(4, 2)),
+            (stamp(4, 3), b"wxyz".to_vec(), stamp(4, 3)),
+        ]
+        .into_iter();
+        assert_eq!(
+            read_settled_with(|| Ok(reads.next().unwrap())).unwrap(),
+            b"wxyz"
+        );
+    }
+
+    #[test]
+    fn read_settled_gives_up_after_bounded_attempts_with_the_last_read() {
+        let mut calls = 0u64;
+        let data = read_settled_with(|| {
+            calls += 1;
+            let body = format!("version {calls}").into_bytes();
+            Ok((stamp(1, calls), body, stamp(2, calls + 1)))
+        })
+        .unwrap();
+        assert_eq!(calls, u64::from(STAGE_ATTEMPTS));
+        assert_eq!(data, format!("version {STAGE_ATTEMPTS}").into_bytes());
+
+        // A real read error is still an error.
+        let err = read_settled_with(|| Err(std::io::Error::other("disk gone"))).unwrap_err();
+        assert_eq!(err.to_string(), "disk gone");
+
+        // And a real file that isn't changing reads in one go.
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "a.txt", "steady");
+        assert_eq!(read_settled(&dir.path().join("a.txt")).unwrap(), b"steady");
+    }
+
+    /// A file rewritten in place (truncated, then filled) over and over
+    /// while snapshots are taken. libgit2's own `add_all` read such a file
+    /// through a memory map and crashed the process (SIGBUS) when it was
+    /// truncated underneath; staging must instead always succeed. The file
+    /// is big enough that reading it usually overlaps a rewrite, which
+    /// drives both fallbacks (the walk instead of the diff, and staging the
+    /// last read) — though which ones run depends on thread timing, the
+    /// outcome checked here doesn't.
+    #[test]
+    fn a_file_rewritten_during_snapshots_never_breaks_them() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "main.gd", "extends Node\n");
+        create_snapshot(dir.path(), "Start", None).unwrap().unwrap();
+
+        let busy = dir.path().join("level.tres");
+        let stop = Arc::new(AtomicBool::new(false));
+        let writer = {
+            let (busy, stop) = (busy.clone(), stop.clone());
+            std::thread::spawn(move || {
+                let mut i = 0usize;
+                while !stop.load(Ordering::SeqCst) {
+                    let len = if i % 2 == 0 { 30_000_000 + i } else { 10 + i };
+                    fs::write(&busy, vec![b'a' + (i % 26) as u8; len]).unwrap();
+                    i += 1;
+                }
+            })
+        };
+        let mut made = 0;
+        for n in 0..40 {
+            write(dir.path(), "main.gd", &format!("extends Node # {n}\n"));
+            if create_snapshot(dir.path(), &format!("Turn {n}"), None)
+                .unwrap()
+                .is_some()
+            {
+                made += 1;
+            }
+        }
+        stop.store(true, Ordering::SeqCst);
+        writer.join().unwrap();
+        assert_eq!(made, 40, "every turn changed main.gd");
+
+        // Once the file holds still, the next snapshot has it exactly.
+        let settled = fs::read(&busy).unwrap();
+        write(dir.path(), "main.gd", "extends Node # done\n");
+        create_snapshot(dir.path(), "Done", None).unwrap().unwrap();
+        let repo = Repository::open(dir.path()).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        let entry = tree.get_name("level.tres").unwrap();
+        assert_eq!(
+            repo.find_blob(entry.id()).unwrap().content(),
+            settled.as_slice()
+        );
+        assert_eq!(create_snapshot(dir.path(), "Nothing", None).unwrap(), None);
+    }
+
+    /// The no-diff fallback finds everything the diff finds (plus unchanged
+    /// files, which are harmless to stage again), and nothing ignored.
+    #[test]
+    fn the_walking_fallback_covers_what_the_diff_finds() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), ".gitignore", "secret.cfg\n");
+        write(dir.path(), "keep.gd", "same\n");
+        write(dir.path(), "edit.gd", "v1\n");
+        write(dir.path(), "gone.gd", "bye\n");
+        write(dir.path(), "levels", "a file for now\n");
+        create_snapshot(dir.path(), "Start", None).unwrap().unwrap();
+
+        write(dir.path(), "edit.gd", "v2\n");
+        fs::remove_file(dir.path().join("gone.gd")).unwrap();
+        fs::remove_file(dir.path().join("levels")).unwrap();
+        write(dir.path(), "levels/one.tscn", "[gd_scene]\n");
+        write(dir.path(), "new/deep/thing.gd", "extends Node\n");
+        write(dir.path(), "secret.cfg", "local only\n");
+        write(dir.path(), ".godot/cache.bin", "cache");
+
+        let repo = Repository::open(dir.path()).unwrap();
+        repo.add_ignore_rule(DEFAULT_IGNORES).unwrap();
+        let index = repo.index().unwrap();
+        let sorted = |mut v: Vec<PathBuf>| {
+            v.sort();
+            v
+        };
+        let (diff_removed, diff_changed) = changed_workdir_paths(&repo, &index).unwrap();
+        let (walk_removed, walk_changed) = all_workdir_paths(&repo, &index).unwrap();
+        assert_eq!(sorted(diff_removed), sorted(walk_removed.clone()));
+        let walk_changed = sorted(walk_changed);
+        for path in &diff_changed {
+            assert!(walk_changed.contains(path), "{} missing", path.display());
+        }
+        let p = |s: &str| PathBuf::from(s);
+        assert_eq!(sorted(walk_removed), [p("gone.gd"), p("levels")]);
+        assert_eq!(
+            walk_changed,
+            [
+                p(".gitignore"),
+                p("edit.gd"),
+                p("keep.gd"),
+                p("levels/one.tscn"),
+                p("new/deep/thing.gd"),
+            ]
+        );
+    }
+
+    #[test]
+    fn staging_handles_new_folders_deletions_and_executables() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "a.txt", "a");
+        write(dir.path(), "levels/one/intro.tscn", "[gd_scene]\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            write(dir.path(), "export.sh", "#!/bin/sh\n");
+            fs::set_permissions(
+                dir.path().join("export.sh"),
+                fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        let first = create_snapshot(dir.path(), "First", None).unwrap().unwrap();
+        assert_eq!(first.files_changed, if cfg!(unix) { 3 } else { 2 });
+        let repo = Repository::open(dir.path()).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(tree.get_path(Path::new("levels/one/intro.tscn")).is_ok());
+        #[cfg(unix)]
+        assert_eq!(tree.get_name("export.sh").unwrap().filemode(), 0o100755);
+
+        fs::remove_dir_all(dir.path().join("levels")).unwrap();
+        let second = create_snapshot(dir.path(), "Remove levels", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(second.files_changed, 1);
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(tree.get_name("levels").is_none());
     }
 }
