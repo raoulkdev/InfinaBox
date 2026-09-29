@@ -296,7 +296,8 @@ export async function phaseC(run, app, config, fakes) {
     await call("app_settings_set", { settings: { ...current, first_run_done: true } });
     await clickWhenEnabled(driver, tid("nav-home"));
     await waitVisible(driver, tid("home-layout"), { timeoutMs: 30_000 });
-    await waitVisible(driver, tid("nav-studio")); // the sidebar is on Home too
+    await waitVisible(driver, tid("home-sidebar")); // Home has its own sidebar
+    if ((await driver.findElements(tid("nav-studio"))).length > 0) throw new Error("the game sidebar shows on Home");
     await waitUntil(async () => (await driver.findElements(tid("project-row"))).length >= 1, { what: "a game in the list" });
     const facts = await waitVisible(driver, tid("inspector-facts"), { timeoutMs: 30_000 });
     const text = await driver.executeScript("return arguments[0].innerText", facts);
@@ -305,7 +306,7 @@ export async function phaseC(run, app, config, fakes) {
     }
     if ((await driver.findElements(tid("status-ai"))).length > 0) throw new Error("the Setup block is still on Home");
     await run.shot("home-list-and-inspector");
-    await clickWhenEnabled(driver, tid("nav-settings"));
+    await clickWhenEnabled(driver, tid("home-nav-settings"));
     await waitVisible(driver, tid("settings-section"));
     for (const id of ["ai", "godot", "accounts", "about"]) {
       await clickWhenEnabled(driver, tid(`settings-${id}`));

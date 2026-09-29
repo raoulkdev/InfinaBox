@@ -11,6 +11,7 @@ import { AssetsSection } from "@/components/assets/AssetsSection";
 import { StudioSection } from "@/components/studio/StudioSection";
 import { fadeRise, fadeTransition } from "@/lib/motion";
 import { recordProjectOpened } from "@/lib/recent-projects";
+import { HomeSidebar } from "@/components/cockpit/HomeSidebar";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { JourneyPanel } from "@/components/journey/JourneyPanel";
 import { chatCreateThread } from "@/lib/studio-api";
@@ -26,6 +27,11 @@ import { cn } from "@/lib/utils";
 // share this one render map so adding a real one later doesn't mean
 // copy-pasting another `{section === "x" && (...)}` block into an
 // ever-growing if-chain.
+/** Home and Settings are the app-level pages, outside any game. */
+function isHomeArea(section: Section): section is "home" | "settings" {
+  return section === "home" || section === "settings";
+}
+
 type SimpleSection = Exclude<Section, "home" | "studio" | "context" | "advanced">;
 
 // The three panels that stay permanently mounted (see the comment further
@@ -152,12 +158,18 @@ function App() {
         data-tauri-drag-region
         className="flex h-screen w-screen gap-2 overflow-hidden bg-background p-2 text-foreground"
       >
-        <Sidebar
-          active={section}
-          onSelect={setSection}
-          projectPath={projectPath}
-          onOpenProject={handleOpenProject}
-        />
+        {/* Home (your games, settings) is its own place with its own
+            sidebar; a game's screens have the game sidebar. */}
+        {isHomeArea(section) ? (
+          <HomeSidebar active={section} onSelect={setSection} />
+        ) : (
+          <Sidebar
+            active={section}
+            onSelect={setSection}
+            projectPath={projectPath}
+            onOpenProject={handleOpenProject}
+          />
+        )}
 
         <AnimatePresence mode="wait" initial={false}>
           {section === "home" && (
