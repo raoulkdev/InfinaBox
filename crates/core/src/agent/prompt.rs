@@ -57,6 +57,23 @@ pub const MAX_PROJECT_INSTRUCTIONS_BYTES: usize = 64 * 1024;
 /// `AGENTS.md`, already read (and size-capped) by the caller — see
 /// `read_agents_md`.
 pub fn system_prompt(options: &TurnOptions, agents_md: Option<&str>) -> String {
+    let mut prompt = format!(
+        "{}\n\n{}",
+        DIRECTOR_PROMPT.trim_end(),
+        turn_instructions(options)
+    );
+    if let Some(text) = agents_md.map(str::trim).filter(|t| !t.is_empty()) {
+        prompt.push_str(&format!(
+            "\n---\n\n# This project's {PROJECT_INSTRUCTIONS_FILE}\n\n{text}\n"
+        ));
+    }
+    prompt
+}
+
+/// The part of the instructions that depends on the turn's options: the
+/// plan section, "what I did and why", and the lesson when "Teach me" is
+/// on (ends with a newline).
+pub fn turn_instructions(options: &TurnOptions) -> String {
     let plan = match (options.origin, options.plan_policy) {
         (MessageOrigin::User, PlanPolicy::AlwaysPlan) => PLAN_ALWAYS,
         (MessageOrigin::User, PlanPolicy::SmallChangesDirect) => PLAN_SMALL_CHANGES,
@@ -64,22 +81,27 @@ pub fn system_prompt(options: &TurnOptions, agents_md: Option<&str>) -> String {
         (MessageOrigin::AutoFix, _) => ORIGIN_AUTO_FIX,
         (MessageOrigin::FirstBuild, _) => ORIGIN_FIRST_BUILD,
     };
-    let mut sections = vec![
-        DIRECTOR_PROMPT.trim_end(),
-        plan.trim_end(),
-        EXPLAIN.trim_end(),
-    ];
+    let mut sections = vec![plan.trim_end(), EXPLAIN.trim_end()];
     if options.teach {
         sections.push(TEACH.trim_end());
     }
-    let mut prompt = sections.join("\n\n");
-    prompt.push('\n');
-    if let Some(text) = agents_md.map(str::trim).filter(|t| !t.is_empty()) {
-        prompt.push_str(&format!(
-            "\n---\n\n# This project's {PROJECT_INSTRUCTIONS_FILE}\n\n{text}\n"
-        ));
-    }
-    prompt
+    let mut text = sections.join("\n\n");
+    text.push('\n');
+    text
+}
+
+/// The message sent to a CLI that resumes an earlier conversation. A
+/// resumed conversation keeps the system prompt it started with (Claude
+/// Code ignores `--append-system-prompt` with `--resume`, checked against
+/// the real CLI), so this turn's own instructions — a plan first or not,
+/// why the message was sent, "Teach me" — travel with the message instead,
+/// marked as InfinaBox's and replacing the earlier ones.
+pub fn message_with_turn_instructions(options: &TurnOptions, message: &str) -> String {
+    format!(
+        "<infinabox-instructions>\nInfinaBox's instructions for this message. They replace \
+         any earlier ones about plans, explanations and lessons.\n\n{}</infinabox-instructions>\n\n{message}",
+        turn_instructions(options)
+    )
 }
 
 /// The project's `AGENTS.md`, cut to `MAX_PROJECT_INSTRUCTIONS_BYTES`, or

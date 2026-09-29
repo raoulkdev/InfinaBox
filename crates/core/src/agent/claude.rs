@@ -432,7 +432,13 @@ pub(crate) fn build_args(
     args.push("--append-system-prompt".into());
     args.push(system_prompt.into());
     args.push("--".into());
-    args.push(req.message.clone().into());
+    // A resumed conversation keeps its first turn's system prompt, so this
+    // turn's own instructions go with the message (see
+    // `prompt::message_with_turn_instructions`).
+    args.push(match &req.resume_provider_session_id {
+        Some(_) => prompt::message_with_turn_instructions(&req.options, &req.message).into(),
+        None => req.message.clone().into(),
+    });
     args
 }
 

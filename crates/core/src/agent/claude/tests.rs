@@ -49,6 +49,7 @@ fn builds_the_expected_arguments() {
         .into_iter()
         .map(|a| a.into_string().unwrap())
         .collect();
+    let wrapped = prompt::message_with_turn_instructions(&req.options, "-make it blue");
     let expected: Vec<String> = [
         "-p",
         "--output-format",
@@ -71,7 +72,7 @@ fn builds_the_expected_arguments() {
         "--append-system-prompt",
         "PROMPT",
         "--",
-        "-make it blue",
+        wrapped.as_str(),
     ]
     .iter()
     .map(|s| s.to_string())
@@ -81,6 +82,34 @@ fn builds_the_expected_arguments() {
     req.resume_provider_session_id = None;
     let args = build_args(&req, Path::new("/tmp/mcp.json"), "PROMPT");
     assert!(!args.iter().any(|a| a == "--resume"));
+    assert_eq!(args.last().unwrap(), "-make it blue");
+}
+
+#[test]
+fn a_resumed_turn_carries_its_own_instructions_in_the_message() {
+    use crate::agent::{MessageOrigin, PlanPolicy, TurnOptions};
+    // The CLI ignores `--append-system-prompt` on `--resume` (checked with
+    // the real CLI: a resumed conversation kept its first prompt), so a
+    // first build's "no plan" would otherwise rule every later turn.
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path(), "add a double jump");
+    req.resume_provider_session_id = Some("sess-1".into());
+    req.options = TurnOptions {
+        plan_policy: PlanPolicy::AlwaysPlan,
+        teach: true,
+        origin: MessageOrigin::User,
+    };
+    let args = build_args(&req, Path::new("/tmp/mcp.json"), "PROMPT");
+    let message = args.last().unwrap().to_str().unwrap();
+    assert!(message.starts_with("<infinabox-instructions>\n"), "{message}");
+    assert!(message.contains("## Plans come first"), "{message}");
+    assert!(message.contains("## Teach me"), "{message}");
+    assert!(!message.contains(prompt::DIRECTOR_PROMPT.trim_end()));
+    assert!(message.ends_with("</infinabox-instructions>\n\nadd a double jump"), "{message}");
+    assert_eq!(
+        prompt::system_prompt(&req.options, None),
+        format!("{}\n\n{}", prompt::DIRECTOR_PROMPT.trim_end(), prompt::turn_instructions(&req.options))
+    );
 }
 
 #[test]
