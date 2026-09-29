@@ -17,6 +17,7 @@
 //!   uncommitted change has been saved into its own snapshot first.
 //! - Going back never rewinds the chat: `.ibproject/chat/` is a record of
 //!   what happened, so a restore keeps the current chat files as they are.
+//!   The same goes for the project's settings (`.ibproject/settings.json`).
 //! - Going back never overwrites a file that exists on disk but was never
 //!   committed (an ignored local file such as a config or `.env`).
 //! - It refuses to act while git is mid-merge/rebase, or when the project
@@ -68,6 +69,12 @@ const CHAT_DIR: [&str; 2] = [".ibproject", "chat"];
 /// The project marker (`src/lib/project-picker.ts`): the project's identity,
 /// not game content, so a restore never removes or rewinds it.
 const PROJECT_MARKER: [&str; 2] = [".ibproject", ".ibx"];
+
+/// The project's own settings (`project_settings`: plans, "Teach me",
+/// automatic fixing): how the person wants the AI to work with them, not
+/// game content, so a restore keeps them as they are now — undoing an AI
+/// change must never quietly switch automatic fixing back on.
+const PROJECT_SETTINGS: [&str; 2] = [".ibproject", "settings.json"];
 
 /// Ignore rules applied in memory on top of the project's own `.gitignore`
 /// (never written to disk), so a project without one — or with an
@@ -183,9 +190,11 @@ pub fn list_snapshots(project: &Path, limit: usize) -> Result<Vec<Snapshot>> {
 /// the new commit as it is instead (see below), so going back after a turn
 /// that only talked leaves no empty "Auto-save" entry in the history.
 ///
-/// Three things are deliberately *not* taken from the target:
+/// Four things are deliberately *not* taken from the target:
 /// - `.ibproject/chat/` stays as it is now (chat history is a record, and
 ///   the conversation about going back must survive going back);
+/// - `.ibproject/settings.json` stays as it is now (present or not): it
+///   holds the person's preferences, not the game;
 /// - `.ibproject/.ibx` stays as it is now (when HEAD has one), so going
 ///   back to before InfinaBox was set up never un-makes the project;
 /// - a file the target has but which currently exists on disk without
@@ -253,6 +262,12 @@ fn restore_to_locked(project: &Path, snapshot_id: &str) -> Result<Snapshot> {
         &target_tree,
         &CHAT_DIR,
         current_entry(&CHAT_DIR),
+    )?;
+    restore_id = set_path(
+        &repo,
+        &repo.find_tree(restore_id)?,
+        &PROJECT_SETTINGS,
+        current_entry(&PROJECT_SETTINGS),
     )?;
     if let Some(marker) = current_entry(&PROJECT_MARKER) {
         restore_id = set_path(
@@ -1848,6 +1863,42 @@ mod tests {
         let repo = Repository::open(dir.path()).unwrap();
         let tree = repo.head().unwrap().peel_to_tree().unwrap();
         assert!(tree.get_path(Path::new(".ibproject/.ibx")).is_ok());
+    }
+
+    #[test]
+    fn going_back_keeps_the_project_settings() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), "main.gd", "extends Node\n");
+        create_snapshot(dir.path(), "New project", None).unwrap().unwrap();
+
+        // The person switches automatic fixing off; the AI's next change
+        // carries the settings file into its snapshot.
+        let settings = "{\"plan_policy\":\"always_plan\",\"teach\":false,\"auto_fix\":false}\n";
+        write(dir.path(), ".ibproject/settings.json", settings);
+        write(dir.path(), "main.gd", "extends Node2D\n");
+        create_snapshot(dir.path(), "AI change", Some(("t", 1)))
+            .unwrap()
+            .unwrap();
+
+        // Undoing the change doesn't bring back the old (default) settings.
+        undo_last(dir.path()).unwrap().unwrap();
+        assert_eq!(read(dir.path(), "main.gd"), "extends Node\n");
+        assert_eq!(read(dir.path(), ".ibproject/settings.json"), settings);
+        let repo = Repository::open(dir.path()).unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(tree.get_path(Path::new(".ibproject/settings.json")).is_ok());
+
+        // Nor does going back to a snapshot with other settings in it.
+        let changed = "{\"plan_policy\":\"small_changes_direct\",\"teach\":true,\"auto_fix\":false}\n";
+        write(dir.path(), ".ibproject/settings.json", changed);
+        let ai_change = list_snapshots(dir.path(), 10)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.title == "AI change")
+            .unwrap();
+        restore_to(dir.path(), &ai_change.id).unwrap();
+        assert_eq!(read(dir.path(), "main.gd"), "extends Node2D\n");
+        assert_eq!(read(dir.path(), ".ibproject/settings.json"), changed);
     }
 
     #[test]
