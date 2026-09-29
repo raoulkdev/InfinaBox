@@ -7,6 +7,9 @@
 pub mod local_folder;
 pub mod polyhaven;
 
+#[cfg(test)]
+mod tests;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
