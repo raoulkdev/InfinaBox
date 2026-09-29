@@ -579,13 +579,17 @@ pub fn signed_out_result(info: &ProviderInfo, duration_ms: u64) -> Option<Connec
 /// A real one-line turn with the provider's own CLI; takes as long as the
 /// AI does (up to `TEST_TIMEOUT`).
 #[tauri::command(async)]
-pub fn ai_test_connection(provider: ProviderId) -> Result<ConnectionTest, String> {
+pub fn ai_test_connection(app: AppHandle, provider: ProviderId) -> Result<ConnectionTest, String> {
     let started = Instant::now();
-    if let Some(result) = signed_out_result(
-        &connect::detect(provider),
-        started.elapsed().as_millis() as u64,
-    ) {
-        return Ok(result);
+    // The API providers have no CLI to be signed in to; a missing key or
+    // model shows up as the turn's own plain error below.
+    if !provider.is_api() {
+        if let Some(result) = signed_out_result(
+            &connect::detect(provider),
+            started.elapsed().as_millis() as u64,
+        ) {
+            return Ok(result);
+        }
     }
     let command = std::env::current_exe().map_err(|e| {
         format!("InfinaBox couldn't find its own program file to give the AI its tools: {e}")
@@ -600,6 +604,27 @@ pub fn ai_test_connection(provider: ProviderId) -> Result<ConnectionTest, String
     let runtime: Box<dyn AgentRuntime> = match provider {
         ProviderId::ClaudeCode => Box::new(ClaudeCodeRuntime::new()),
         ProviderId::Codex => Box::new(CodexRuntime::new()),
+        api => {
+            let dir = super::settings::settings_dir(&app)?;
+            let settings = super::settings::load_from(&dir)?;
+            let config = settings.models.get(api.as_str()).cloned().unwrap_or_default();
+            let secrets = app.state::<super::credentials::SecretState>();
+            let backend =
+                match infinabox_core::agent::api::backend_for(api, &config, secrets.0.as_ref()) {
+                    Ok(backend) => backend,
+                    // Not set up yet: reported as the test's result, not a crash.
+                    Err(message) => {
+                        return Ok(ConnectionTest {
+                            ok: false,
+                            reply: None,
+                            error_kind: Some(AgentErrorKind::NotAuthenticated),
+                            message: Some(message),
+                            duration_ms: started.elapsed().as_millis() as u64,
+                        });
+                    }
+                };
+            Box::new(infinabox_core::agent::api::ApiRuntime::new(backend))
+        }
     };
     Ok(test_connection(
         &RuntimeTurn(runtime.as_ref()),

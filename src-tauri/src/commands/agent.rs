@@ -43,6 +43,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
+use infinabox_core::agent::api::{self, ApiRuntime};
 use infinabox_core::agent::claude::ClaudeCodeRuntime;
 use infinabox_core::agent::claude_stream::STOPPED_MESSAGE;
 use infinabox_core::agent::codex::CodexRuntime;
@@ -154,27 +155,95 @@ pub(crate) struct ActiveTurn {
 /// Threads with a turn in flight.
 pub(crate) type ActiveTurns = Arc<Mutex<HashMap<String, ActiveTurn>>>;
 
-/// Both agent runtimes. Each keeps its own map of running CLI processes,
-/// so one instance of each lives for the whole app.
+/// The agent runtimes. The two CLI runtimes each keep their own map of
+/// running processes, so one instance of each lives for the whole app. An
+/// API runtime is built for each turn from the saved model settings and the
+/// key in the keychain, and kept (by thread) until the next turn there so a
+/// Stop can reach it.
 #[derive(Clone, Default)]
 pub(crate) struct Runtimes {
     claude: Arc<ClaudeCodeRuntime>,
     codex: Arc<CodexRuntime>,
+    api: Arc<Mutex<HashMap<String, Arc<ApiRuntime>>>>,
 }
 
 impl Runtimes {
-    fn runner(&self, provider: ProviderId) -> &dyn TurnRunner {
+    /// The runtime that runs a turn in `thread_id` for `provider`. An API
+    /// provider that isn't set up yet is an error in plain words.
+    fn runner(
+        &self,
+        app: &AppHandle,
+        provider: ProviderId,
+        thread_id: &str,
+    ) -> Result<Arc<dyn TurnRunner>, String> {
         match provider {
-            ProviderId::ClaudeCode => self.claude.as_ref(),
-            ProviderId::Codex => self.codex.as_ref(),
+            ProviderId::ClaudeCode => Ok(self.claude.clone()),
+            ProviderId::Codex => Ok(self.codex.clone()),
+            api => {
+                let runtime = Arc::new(self.api_runtime(app, api)?);
+                lock(&self.api).insert(thread_id.to_string(), runtime.clone());
+                Ok(runtime)
+            }
         }
     }
 
-    fn detect(&self, provider: ProviderId) -> RuntimeStatus {
+    fn api_runtime(&self, app: &AppHandle, provider: ProviderId) -> Result<ApiRuntime, String> {
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("Couldn't find the app data folder: {e}"))?;
+        let settings = app_settings::load(&dir)
+            .map_err(|e| format!("InfinaBox couldn't read its settings: {e:#}"))?;
+        let config = settings.models.get(provider.as_str()).cloned().unwrap_or_default();
+        let secrets = app.state::<super::credentials::SecretState>();
+        let backend = api::backend_for(provider, &config, secrets.0.as_ref())?;
+        Ok(ApiRuntime::new(backend))
+    }
+
+    /// Asks whatever is running `thread_id` (for `provider`) to stop.
+    fn cancel(&self, provider: ProviderId, thread_id: &str) {
+        match provider {
+            ProviderId::ClaudeCode => AgentRuntime::cancel(self.claude.as_ref(), thread_id),
+            ProviderId::Codex => AgentRuntime::cancel(self.codex.as_ref(), thread_id),
+            _ => {
+                let runtime = lock(&self.api).get(thread_id).cloned();
+                if let Some(runtime) = runtime {
+                    AgentRuntime::cancel(runtime.as_ref(), thread_id);
+                }
+            }
+        }
+    }
+
+    fn detect(&self, app: &AppHandle, provider: ProviderId) -> RuntimeStatus {
         match provider {
             ProviderId::ClaudeCode => self.claude.detect(),
             ProviderId::Codex => self.codex.detect(),
+            api => match self.api_runtime(app, api) {
+                Ok(runtime) => runtime.detect(),
+                // Not set up yet: say so, with the reason the person can act on.
+                Err(_) => RuntimeStatus {
+                    name: ProviderInfoName::of(api),
+                    installed: false,
+                    version: None,
+                    logged_in: Some(false),
+                },
+            },
         }
+    }
+}
+
+struct ProviderInfoName;
+
+impl ProviderInfoName {
+    fn of(provider: ProviderId) -> String {
+        match provider {
+            ProviderId::AnthropicApi => "Anthropic API",
+            ProviderId::OpenAiApi => "OpenAI API",
+            ProviderId::LocalModel => "Local model",
+            ProviderId::ClaudeCode => "Claude Code",
+            ProviderId::Codex => "Codex",
+        }
+        .to_string()
     }
 }
 
@@ -1007,7 +1076,7 @@ fn selected_provider(app: &AppHandle) -> Result<ProviderId, String> {
 #[tauri::command(async)]
 pub fn agent_status(app: AppHandle) -> Result<RuntimeStatus, String> {
     let provider = selected_provider(&app)?;
-    Ok(app.state::<AgentState>().runtimes.detect(provider))
+    Ok(app.state::<AgentState>().runtimes.detect(&app, provider))
 }
 
 /// `agent_send`'s whole path, shared with the auto-fix loop (which starts
@@ -1023,6 +1092,9 @@ pub(crate) fn send_turn(
     let provider = selected_provider(app)?;
     let state = app.state::<AgentState>();
     let project = PathBuf::from(&project_path);
+    // Before anything is saved: an API provider that isn't set up yet fails
+    // here with what to finish, and the chat stays untouched.
+    let runner = state.runtimes.runner(app, provider, &thread_id)?;
     let mut slot = start_turn(
         &state.active_turns,
         &project,
@@ -1034,7 +1106,6 @@ pub(crate) fn send_turn(
     slot.role = role;
     autofix::note_turn_started(app, &project_path, &thread_id, origin);
     let project_key = project_path.clone();
-    let runtimes = state.runtimes.clone();
     let worker_app = app.clone();
     let spawned = std::thread::Builder::new()
         .name("agent-turn".into())
@@ -1045,7 +1116,7 @@ pub(crate) fn send_turn(
                 project_path,
             };
             run_turn_to_end(
-                runtimes.runner(provider),
+                runner.as_ref(),
                 slot,
                 &project,
                 &message,
@@ -1091,12 +1162,12 @@ pub fn agent_send(
 pub fn agent_cancel(app: AppHandle, thread_id: String) -> Result<(), String> {
     let state = app.state::<AgentState>();
     match request_stop(&state.active_turns, &thread_id) {
-        Some(provider) => state.runtimes.runner(provider).cancel(&thread_id),
+        Some(provider) => state.runtimes.cancel(provider, &thread_id),
         // No turn here (it just ended): nothing can be running, but asking
         // both runtimes is harmless and covers any race with its end.
         None => {
-            for provider in ProviderId::ALL {
-                state.runtimes.runner(provider).cancel(&thread_id);
+            for provider in ProviderId::EVERY {
+                state.runtimes.cancel(provider, &thread_id);
             }
         }
     }

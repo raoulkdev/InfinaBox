@@ -219,3 +219,57 @@ impl AgentRuntime for ApiRuntime {
         }
     }
 }
+
+/// Where a local model is looked for when no address is set (Ollama).
+pub const LOCAL_DEFAULT_BASE: &str = "http://localhost:11434/v1";
+const OPENAI_BASE: &str = "https://api.openai.com/v1";
+
+/// The backend for an API provider from its saved settings and the key in
+/// the secret store. The error is a plain sentence for the person: what to
+/// finish setting up. A CLI provider is not an API provider.
+pub fn backend_for(
+    provider: crate::connect::ProviderId,
+    config: &crate::app_settings::ModelConfig,
+    secrets: &dyn crate::secrets::SecretStore,
+) -> std::result::Result<Arc<dyn ChatBackend>, String> {
+    use crate::connect::ProviderId;
+    use crate::secrets::SecretName;
+
+    let model = config
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .ok_or("Choose which model to use first (Advanced → Connect your AI).")?
+        .to_string();
+    let base = config.base_url.as_deref().map(str::trim).filter(|b| !b.is_empty());
+    let key = |name: SecretName, what: &str| -> std::result::Result<String, String> {
+        secrets
+            .get(name)
+            .map_err(|e| format!("{e:#}"))?
+            .filter(|k| !k.trim().is_empty())
+            .ok_or_else(|| format!("Paste your {what} first (Advanced → Connect your AI)."))
+    };
+    match provider {
+        ProviderId::AnthropicApi => Ok(Arc::new(anthropic::AnthropicMessages {
+            base_url: anthropic::DEFAULT_BASE.into(),
+            api_key: key(SecretName::AnthropicApiKey, "Anthropic API key")?,
+            model,
+        })),
+        ProviderId::OpenAiApi => Ok(Arc::new(openai::OpenAiCompatible {
+            base_url: base.unwrap_or(OPENAI_BASE).trim_end_matches('/').into(),
+            api_key: Some(key(SecretName::OpenAiApiKey, "OpenAI API key")?),
+            model,
+            label: "OpenAI API".into(),
+        })),
+        ProviderId::LocalModel => Ok(Arc::new(openai::OpenAiCompatible {
+            base_url: base.unwrap_or(LOCAL_DEFAULT_BASE).trim_end_matches('/').into(),
+            api_key: None,
+            model,
+            label: "Local model".into(),
+        })),
+        ProviderId::ClaudeCode | ProviderId::Codex => {
+            Err("That AI runs from its own program, not an API key.".into())
+        }
+    }
+}

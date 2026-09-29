@@ -42,21 +42,52 @@ pub enum ProviderId {
     ClaudeCode,
     #[serde(rename = "codex")]
     Codex,
+    /// The user's own Anthropic API key (InfinaBox runs the tool loop).
+    #[serde(rename = "anthropic-api")]
+    AnthropicApi,
+    /// The user's own OpenAI API key.
+    #[serde(rename = "openai-api")]
+    OpenAiApi,
+    /// An OpenAI-compatible server on this computer (Ollama, LM Studio).
+    #[serde(rename = "local-model")]
+    LocalModel,
 }
 
 impl ProviderId {
+    /// The CLI tools that can be detected, installed and signed in from the
+    /// connect screen. The API providers are configured, not installed.
     pub const ALL: [ProviderId; 2] = [ProviderId::ClaudeCode, ProviderId::Codex];
+
+    /// Every provider, CLI or API.
+    pub const EVERY: [ProviderId; 5] = [
+        ProviderId::ClaudeCode,
+        ProviderId::Codex,
+        ProviderId::AnthropicApi,
+        ProviderId::OpenAiApi,
+        ProviderId::LocalModel,
+    ];
+
+    /// Whether InfinaBox runs the tool loop itself against a model API.
+    pub fn is_api(self) -> bool {
+        matches!(
+            self,
+            ProviderId::AnthropicApi | ProviderId::OpenAiApi | ProviderId::LocalModel
+        )
+    }
 
     /// The name written into chat thread headers (`ThreadSummary::provider`).
     pub fn as_str(self) -> &'static str {
         match self {
             ProviderId::ClaudeCode => "claude-code",
             ProviderId::Codex => "codex",
+            ProviderId::AnthropicApi => "anthropic-api",
+            ProviderId::OpenAiApi => "openai-api",
+            ProviderId::LocalModel => "local-model",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|p| p.as_str() == s)
+        Self::EVERY.into_iter().find(|p| p.as_str() == s)
     }
 
     /// What the CLI is called on `PATH`.
@@ -64,6 +95,8 @@ impl ProviderId {
         match self {
             ProviderId::ClaudeCode => "claude",
             ProviderId::Codex => "codex",
+            // No program: these are never looked up on PATH.
+            ProviderId::AnthropicApi | ProviderId::OpenAiApi | ProviderId::LocalModel => "",
         }
     }
 
@@ -71,6 +104,9 @@ impl ProviderId {
         match self {
             ProviderId::ClaudeCode => "Claude Code",
             ProviderId::Codex => "Codex",
+            ProviderId::AnthropicApi => "Anthropic API",
+            ProviderId::OpenAiApi => "OpenAI API",
+            ProviderId::LocalModel => "A model on this computer",
         }
     }
 
@@ -86,6 +122,9 @@ impl ProviderId {
                 "OpenAI's coding assistant. Use it if you have a ChatGPT Plus, Pro or Business \
                  plan, or an OpenAI account."
             }
+            ProviderId::AnthropicApi => "Your own Anthropic API key; you pay Anthropic for what you use.",
+            ProviderId::OpenAiApi => "Your own OpenAI API key; you pay OpenAI for what you use.",
+            ProviderId::LocalModel => "A model running on your own computer through Ollama or LM Studio.",
         }
     }
 
@@ -94,6 +133,9 @@ impl ProviderId {
         match self {
             ProviderId::ClaudeCode => "https://code.claude.com/docs/en/overview",
             ProviderId::Codex => "https://developers.openai.com/codex",
+            ProviderId::AnthropicApi => "https://docs.anthropic.com",
+            ProviderId::OpenAiApi => "https://platform.openai.com/docs",
+            ProviderId::LocalModel => "https://ollama.com",
         }
     }
 
@@ -102,6 +144,7 @@ impl ProviderId {
         match self {
             ProviderId::ClaudeCode => &["auth", "login"],
             ProviderId::Codex => &["login"],
+            ProviderId::AnthropicApi | ProviderId::OpenAiApi | ProviderId::LocalModel => &[],
         }
     }
 
@@ -329,6 +372,8 @@ fn read_logged_in(
                 None
             }
         }
+        // No program to ask: the API providers have no CLI.
+        ProviderId::AnthropicApi | ProviderId::OpenAiApi | ProviderId::LocalModel => None,
     }
 }
 
@@ -504,6 +549,9 @@ fn install_plan(
     let (unix_shell, unix_script, windows_script) = match id {
         ProviderId::ClaudeCode => ("bash", CLAUDE_INSTALL_SH, CLAUDE_INSTALL_PS1),
         ProviderId::Codex => ("sh", CODEX_INSTALL_SH, CODEX_INSTALL_PS1),
+        ProviderId::AnthropicApi | ProviderId::OpenAiApi | ProviderId::LocalModel => {
+            return Err(format!("{name} isn't installed; you connect it with a key or address."));
+        }
     };
     if os == Os::Windows {
         let Some(powershell) = find_program("powershell", os, path_var) else {
