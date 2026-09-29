@@ -8,6 +8,10 @@
 
 ## Status
 
+- 2026-09-29 (done, pushed): Phase C is built and wired. Mid-way the user asked for far fewer subagents (token use), so the interrupted Wave 1 work (context cards, assets, libraries, generation, API loop, journey, four templates, Assets screen) was reviewed, completed and merged by the lead directly, followed by Wave 2 wiring (commands, role on `agent_send`, API providers in `ProviderId`, boot record for the journey, role picker in the composer, journey under Playtest & Launch, 2D/3D labels in the interview) and Wave 3 (new `phase-c` E2E scenario).
+- **Verified here:** `cargo test --workspace --no-default-features --no-fail-fast` — only the 7 known Mac-fixture failures; all 8 templates boot in real Godot 4.7.2 (`-- --ignored scaffold`); `npx tsc --noEmit`; `npm run build`; E2E in the real app: `phase-c` (fake Cloudflare and a fake OpenAI-compatible server) 5/5, `first-run` (stand-in AI) all pass, `core` with the real Claude Code 8/8.
+- **NOT verified:** every network provider against its real service (Poly Haven, Cloudflare Workers AI, Fish Audio, ElevenLabs, the OpenAI API, a real Ollama/LM Studio); the Anthropic API backend against the real API (no key here); the OS keychain round-trip (no keychain daemon; E2E used `INFINABOX_SECRETS=memory`); the Codex CLI; macOS and Windows; the 3D template feel and the Assets 3D viewer in a real GPU browser.
+- Decisions made along the way: the journey lives under **Playtest & Launch** (Home has no project open); `.ibproject/journey.json` is git-ignored (local record of the last clean run); blocking provider HTTP runs on its own thread (`generate::off_runtime`) because dropping the blocking client on a Tauri async worker panics; `INFINABOX_SECRETS=memory` is a test-only switch.
 - 2026-09-29: Wave 1 launched: 17 subagents (9 backend, 4 templates, 4 frontend).
 - 2026-09-29: plan written; Wave 0 done (contracts, stubs, template skeletons, dependencies `image`, `base64`, `keyring` 3, `tiny_http`, `three`). Subagent rules: `phase-c-subagent-rules.md` in the session scratchpad.
 

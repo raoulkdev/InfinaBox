@@ -527,11 +527,11 @@ export async function firstRun(run, app, config) {
     const text = await waitUntil(
       async () => {
         const t = await driver.executeScript("return arguments[0].innerText", section);
-        return ["concept.md", "style-guide.md", "mechanics", "tasks"].every((n) => t.includes(n)) ? t : null;
+        return [GAME_NAME, "Style guide", "First playable", "Mechanic", "Task"].every((n) => t.includes(n)) ? t : null;
       },
       { timeoutMs: 20_000, what: "the Context cards to be listed" },
     );
-    run.note(`Context lists: ${JSON.stringify(text.split("\n").filter((l) => /\.md$|^mechanics$|^tasks$/.test(l.trim())))}`);
+    run.note(`Context lists: ${JSON.stringify(text.split("\n").filter((l) => /^Cards|^(Concept|Mechanic|Style guide|Task)$/.test(l.trim())))}`);
     await run.shot("context-cards");
     for (const id of ["assets", "launch", "advanced"]) {
       await clickWhenEnabled(driver, tid(`nav-${id}`));
