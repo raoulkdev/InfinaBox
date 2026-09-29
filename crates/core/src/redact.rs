@@ -33,7 +33,8 @@ static TOKEN_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"\bsk-(?:ant|proj|svcacct|admin)-[A-Za-z0-9_\-]{16,}",
         r"\bsk-[A-Za-z0-9]{32,}",
         // Stripe secret/restricted/publishable keys and webhook secrets;
-        // ElevenLabs-style `sk_<hex>` keys.
+        // ElevenLabs `sk_` + 48 hex keys (heuristic: `sk_` then 20+
+        // alphanumerics; the `_live_`/`_test_` Stripe form is matched first).
         r"\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{8,}",
         r"\bwhsec_[A-Za-z0-9]{16,}",
         r"\bsk_[A-Za-z0-9]{20,}",
@@ -66,13 +67,36 @@ static AUTH_HEADER: LazyLock<Regex> = LazyLock::new(|| {
     .expect("auth header pattern must compile")
 });
 
-/// A bare `Bearer <credential>` without the header name in front.
+/// A bare `Bearer <credential>` without the header name in front. Heuristic:
+/// this is also what catches Cloudflare API tokens (40 chars of
+/// `[A-Za-z0-9_-]`, no fixed prefix) — they're redacted because `Bearer `
+/// precedes them, never as a bare 40-char string.
 static BEARER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?P<pre>\bbearer\s+)(?P<val>[A-Za-z0-9\-._~+/]{12,}=*)")
         .expect("bearer pattern must compile")
 });
 
-/// Credentials embedded in a URL: `scheme://user:password@host`.
+/// Heuristic: ElevenLabs sends its key in an `xi-api-key: <value>` header
+/// (also seen as a JSON key or `-H 'xi-api-key: ...'`). The header name is
+/// distinctive, so any value is redacted, however short — the generic
+/// `api_key` rule would skip values under 8 characters.
+static XI_API_KEY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)(?P<pre>\bxi-api-key["']?\s*[:=]\s*["']?)(?P<val>[^\s"',;]+)"#)
+        .expect("xi-api-key pattern must compile")
+});
+
+/// Heuristic: a Cloudflare account id is 32 hex characters. Bare 32-hex
+/// strings are everywhere (md5s, ids), so it's redacted only when labelled
+/// `account_id` / `accountId` / `account-id` (with `:` or `=`) or when it is
+/// the path segment after `accounts/` (the REST API's URL shape).
+static CF_ACCOUNT_ID: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?i)(?P<pre>\baccount[_\-]?id["']?\s*[:=]\s*["']?|\baccounts/)(?P<val>[0-9a-f]{32})\b"#,
+    )
+    .expect("account id pattern must compile")
+});
+
+/// Credentials embedded in a URL:`scheme://user:password@host`.
 static URL_USERINFO: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?P<pre>\b[a-z][a-z0-9+.\-]*://[^\s:/@]+:)(?P<val>[^\s@/]+)(?P<post>@)")
         .expect("url userinfo pattern must compile")
@@ -119,6 +143,18 @@ pub fn redact(text: &str) -> String {
     out = BEARER
         .replace_all(&out, |c: &Captures| format!("{}{REDACTED}", &c["pre"]))
         .into_owned();
+
+    for re in [&*XI_API_KEY, &*CF_ACCOUNT_ID] {
+        out = re
+            .replace_all(&out, |c: &Captures| {
+                if &c["val"] == REDACTED {
+                    c[0].to_string()
+                } else {
+                    format!("{}{REDACTED}", &c["pre"])
+                }
+            })
+            .into_owned();
+    }
 
     out = URL_USERINFO
         .replace_all(&out, |c: &Captures| {
@@ -408,6 +444,114 @@ mod tests {
         "var password = get_password()",
         "@onready var pwd = %PasswordField",
     ];
+
+    /// Provider shapes InfinaBox itself stores (fake values throughout).
+    const PROVIDER_REDACTS: &[(&str, &str)] = &[
+        // Anthropic.
+        (
+            "ANTHROPIC key sk-ant-api03-FAKEfakeFAKEfake0123456789_-abcdef in chat",
+            "ANTHROPIC key [redacted] in chat",
+        ),
+        // OpenAI: project and legacy shapes.
+        (
+            "sk-proj-FAKEfakeFAKEfake0123456789_-abcdefghij",
+            "[redacted]",
+        ),
+        ("key=sk-FAKEfakeFAKEfake0123456789abcdefghij", "key=[redacted]"),
+        // Cloudflare API token (40 chars): after Bearer, or KEY= labels.
+        (
+            "curl -H 'Authorization: Bearer cfAbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-'",
+            "curl -H 'Authorization: Bearer [redacted]'",
+        ),
+        (
+            "Bearer cfAbCdEfGhIjKlMnOpQrStUvWxYz0123456789_- was rejected",
+            "Bearer [redacted] was rejected",
+        ),
+        (
+            "CLOUDFLARE_API_TOKEN=cfAbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-",
+            "CLOUDFLARE_API_TOKEN=[redacted]",
+        ),
+        (
+            "export CF_API_TOKEN=cfAbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-",
+            "export CF_API_TOKEN=[redacted]",
+        ),
+        // ElevenLabs: header (any length value) and `sk_` + 48 hex.
+        ("xi-api-key: fake123", "xi-api-key: [redacted]"),
+        (
+            "-H 'xi-api-key: 0123456789abcdef0123456789abcdef'",
+            "-H 'xi-api-key: [redacted]'",
+        ),
+        (
+            r#"{"xi-api-key": "fake123"}"#,
+            r#"{"xi-api-key": "[redacted]"}"#,
+        ),
+        (
+            "ELEVENLABS sk_0123456789abcdef0123456789abcdef0123456789abcdef",
+            "ELEVENLABS [redacted]",
+        ),
+        // Fish Audio: Bearer + 32 hex.
+        (
+            "Authorization: Bearer 0123456789abcdef0123456789abcdef",
+            "Authorization: Bearer [redacted]",
+        ),
+        // Generic Authorization header lines.
+        (
+            "authorization: Bearer fake-token-value",
+            "authorization: Bearer [redacted]",
+        ),
+        // Cloudflare account id, only when labelled.
+        (
+            "account_id = 0123456789abcdef0123456789abcdef",
+            "account_id = [redacted]",
+        ),
+        (
+            r#"{"accountId": "0123456789abcdef0123456789abcdef"}"#,
+            r#"{"accountId": "[redacted]"}"#,
+        ),
+        (
+            "https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/pages/projects",
+            "https://api.cloudflare.com/client/v4/accounts/[redacted]/pages/projects",
+        ),
+    ];
+
+    /// Look-alikes that are ordinary text.
+    const PROVIDER_KEEPS: &[&str] = &[
+        // A 40-char hex commit hash on its own, and a bare 40-char token-like string.
+        "3f2a9c1e8b7d6a5f4e3d2c1b0a9f8e7d6c5b4a3f",
+        "cfAbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-",
+        // A bare 32-hex string (md5, uuid without dashes) and a dashed uuid.
+        "0123456789abcdef0123456789abcdef",
+        "7f9c2ba4-e88f-11ec-8ea0-0242ac120002",
+        "commit 3f2a9c1e8b7d6a5f4e3d2c1b0a9f8e7d6c5b4a3f fixed it",
+        "res://assets/sk_level_2/boss_fight/arena.tscn",
+        "/home/user/projects/my-game/accounts/notes.md",
+        "the account id is shown on the dashboard",
+        "var account_id = get_account_id()",
+        "The image data is iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg== inline",
+        "Use the xi voice model with the api for speech",
+    ];
+
+    #[test]
+    fn redacts_provider_credential_shapes() {
+        for (input, expected) in PROVIDER_REDACTS {
+            assert_eq!(&redact(input), expected, "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn leaves_provider_lookalikes_alone() {
+        for input in PROVIDER_KEEPS {
+            assert_eq!(&redact(input), input, "false positive on: {input:?}");
+        }
+    }
+
+    #[test]
+    fn provider_redaction_is_idempotent() {
+        for (input, _) in PROVIDER_REDACTS {
+            let once = redact(input);
+            assert_eq!(redact(&once), once, "input: {input:?}");
+        }
+    }
 
     #[test]
     fn redacts_known_credential_formats() {

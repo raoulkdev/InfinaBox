@@ -14,8 +14,10 @@
 //! | an automatic error fix | `origin-auto-fix.md` (never plans) |
 //! | the onboarding's first build | `origin-first-build.md` (never plans) |
 //!
-//! then always `explain.md` ("what I did and why"), then `teach.md` when
-//! "Teach me" is on, then the project's `AGENTS.md`.
+//! then, for a specialist role (anything but the Director), that role's
+//! section from `prompts/roles/<slug>.md`, then always `explain.md` ("what
+//! I did and why"), then `teach.md` when "Teach me" is on, then the
+//! project's `AGENTS.md`.
 //!
 //! This module also holds the limits of a `propose_plan` call, so the MCP
 //! server that accepts one and the stream parsers that turn it into
@@ -35,6 +37,29 @@ const ORIGIN_AUTO_FIX: &str = include_str!("prompts/origin-auto-fix.md");
 const ORIGIN_FIRST_BUILD: &str = include_str!("prompts/origin-first-build.md");
 const EXPLAIN: &str = include_str!("prompts/explain.md");
 const TEACH: &str = include_str!("prompts/teach.md");
+
+const ROLE_DESIGNER: &str = include_str!("prompts/roles/designer.md");
+const ROLE_PROGRAMMER: &str = include_str!("prompts/roles/programmer.md");
+const ROLE_ARTIST: &str = include_str!("prompts/roles/artist.md");
+const ROLE_SOUND: &str = include_str!("prompts/roles/sound.md");
+const ROLE_QA: &str = include_str!("prompts/roles/qa.md");
+const ROLE_PRODUCER: &str = include_str!("prompts/roles/producer.md");
+const ROLE_MARKETER: &str = include_str!("prompts/roles/marketer.md");
+
+/// The section for a specialist role; the Director has none (its prompt is
+/// the base prompt itself).
+fn role_section(role: Role) -> Option<&'static str> {
+    match role {
+        Role::Director => None,
+        Role::Designer => Some(ROLE_DESIGNER),
+        Role::Programmer => Some(ROLE_PROGRAMMER),
+        Role::Artist => Some(ROLE_ARTIST),
+        Role::Sound => Some(ROLE_SOUND),
+        Role::Qa => Some(ROLE_QA),
+        Role::Producer => Some(ROLE_PRODUCER),
+        Role::Marketer => Some(ROLE_MARKETER),
+    }
+}
 
 /// The InfinaBox MCP tool the agent calls to show the person a plan
 /// (`crates/mcp-server`). Runtimes turn a call to it into
@@ -81,7 +106,11 @@ pub fn turn_instructions(options: &TurnOptions) -> String {
         (MessageOrigin::AutoFix, _) => ORIGIN_AUTO_FIX,
         (MessageOrigin::FirstBuild, _) => ORIGIN_FIRST_BUILD,
     };
-    let mut sections = vec![plan.trim_end(), EXPLAIN.trim_end()];
+    let mut sections = vec![plan.trim_end()];
+    if let Some(role) = role_section(options.role) {
+        sections.push(role.trim_end());
+    }
+    sections.push(EXPLAIN.trim_end());
     if options.teach {
         sections.push(TEACH.trim_end());
     }
@@ -240,6 +269,145 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn role_heading(role: Role) -> String {
+        let name = match role {
+            Role::Director => unreachable!("the Director has no section"),
+            Role::Designer => "the Designer",
+            Role::Programmer => "the Programmer",
+            Role::Artist => "the Artist",
+            Role::Sound => "the Sound designer",
+            Role::Qa => "QA",
+            Role::Producer => "the Producer",
+            Role::Marketer => "the Marketer",
+        };
+        format!("## This message: work as {name}")
+    }
+
+    fn specialists() -> impl Iterator<Item = Role> {
+        Role::ALL.into_iter().filter(|r| *r != Role::Director)
+    }
+
+    #[test]
+    fn slugs_match_the_role_files() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/agent/prompts/roles");
+        for role in Role::ALL {
+            let file = dir.join(format!("{}.md", role.slug()));
+            // The Director has no file; every other role must.
+            assert_eq!(file.exists(), role != Role::Director, "{role:?}");
+        }
+        let files = std::fs::read_dir(&dir).unwrap().count();
+        assert_eq!(files, Role::ALL.len() - 1);
+    }
+
+    #[test]
+    fn every_role_file_starts_with_its_heading_and_is_finished() {
+        for role in specialists() {
+            let text = role_section(role).unwrap();
+            assert!(
+                text.starts_with(&format!("{}\n", role_heading(role))),
+                "{role:?}"
+            );
+            let lines = text.lines().count();
+            assert!((8..=24).contains(&lines), "{role:?} has {lines} lines");
+            for leftover in ["TODO", "TBD", "FIXME", "XXX", "lorem", "<placeholder", "{{"] {
+                assert!(!text.contains(leftover), "{role:?} contains {leftover}");
+            }
+            assert!(text.ends_with('\n'), "{role:?}");
+            // Each role keeps to InfinaBox's rules.
+            has(text, &["Don't touch git", "`addons/infinabox/`"]);
+        }
+    }
+
+    #[test]
+    fn every_role_section_appears_once_between_the_plan_and_explain() {
+        for role in specialists() {
+            for policy in POLICIES {
+                for teach in [false, true] {
+                    for origin in ORIGINS {
+                        let o = TurnOptions {
+                            role,
+                            ..options(policy, teach, origin)
+                        };
+                        let prompt = system_prompt(&o, Some("Notes."));
+                        let heading = role_heading(role);
+                        assert_eq!(prompt.matches(&heading).count(), 1, "{role:?} {o:?}");
+                        assert_eq!(
+                            prompt.matches("## This message: work as").count(),
+                            1,
+                            "{role:?} {o:?}"
+                        );
+                        let at = prompt.find(&heading).unwrap();
+                        let plan_heading = SECTIONS
+                            .iter()
+                            .find(|(name, _)| *name == expected(&o)[0])
+                            .unwrap()
+                            .1;
+                        assert!(prompt.find(plan_heading).unwrap() < at, "{role:?} {o:?}");
+                        assert!(
+                            at < prompt.find("## How to finish").unwrap(),
+                            "{role:?} {o:?}"
+                        );
+                        if teach {
+                            assert!(at < prompt.find("## Teach me").unwrap());
+                        }
+                        assert!(at < prompt.find("# This project's AGENTS.md").unwrap());
+                        assert!(prompt.starts_with(DIRECTOR_PROMPT.trim_end()));
+                        // The rest is what the Director gets, unchanged.
+                        let director =
+                            system_prompt(&options(policy, teach, origin), Some("Notes."));
+                        let without_role = prompt.replacen(
+                            &format!("{}\n\n", role_section(role).unwrap().trim_end()),
+                            "",
+                            1,
+                        );
+                        assert_eq!(without_role, director, "{role:?} {o:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_director_gets_no_role_section_and_an_unchanged_prompt() {
+        for policy in POLICIES {
+            for teach in [false, true] {
+                for origin in ORIGINS {
+                    let o = options(policy, teach, origin);
+                    let plan = match expected(&o)[0] {
+                        "plan-always" => PLAN_ALWAYS,
+                        "plan-small-changes" => PLAN_SMALL_CHANGES,
+                        "origin-plan-approval" => ORIGIN_PLAN_APPROVAL,
+                        "origin-auto-fix" => ORIGIN_AUTO_FIX,
+                        _ => ORIGIN_FIRST_BUILD,
+                    };
+                    let mut want = format!(
+                        "{}\n\n{}\n\n{}",
+                        DIRECTOR_PROMPT.trim_end(),
+                        plan.trim_end(),
+                        EXPLAIN.trim_end()
+                    );
+                    if teach {
+                        want.push_str(&format!("\n\n{}", TEACH.trim_end()));
+                    }
+                    want.push('\n');
+                    assert_eq!(system_prompt(&o, None), want, "{o:?}");
+                    assert!(!want.contains("## This message: work as"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_resumed_turn_carries_the_role_with_its_message() {
+        let o = TurnOptions {
+            role: Role::Qa,
+            ..TurnOptions::default()
+        };
+        let text = message_with_turn_instructions(&o, "Check the jump.");
+        assert!(text.contains("## This message: work as QA"));
+        assert!(text.ends_with("Check the jump."));
     }
 
     #[test]

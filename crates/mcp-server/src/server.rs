@@ -174,8 +174,11 @@ notes in .ibproject/context/). Use this first to see what's already decided abou
     )]
     async fn list_context_cards(&self) -> Result<String, String> {
         let ctx = self.context()?;
-        let cards = blocking("listing context cards", move || ctx.list()).await?;
-        Ok(to_json(&cards))
+        let overview = blocking("listing context cards", move || ctx.overview()).await?;
+        if overview.is_empty() {
+            return Ok("No Context cards yet.".to_string());
+        }
+        Ok(overview)
     }
 
     #[tool(
@@ -350,7 +353,10 @@ mod tests {
         let project = temp_project();
         let server = InfinaBoxServer::new(Some(project.clone()), None);
 
-        assert_eq!(server.list_context_cards().await.unwrap(), "[]");
+        assert_eq!(
+            server.list_context_cards().await.unwrap(),
+            "No Context cards yet."
+        );
         let saved = server
             .write_context_card(Parameters(WriteCard {
                 path: "mechanics/double-jump.md".into(),
@@ -365,9 +371,27 @@ mod tests {
                 .is_file()
         );
 
-        let list: Vec<String> =
-            serde_json::from_str(&server.list_context_cards().await.unwrap()).unwrap();
-        assert_eq!(list, vec!["mechanics/double-jump.md"]);
+        server
+            .write_context_card(Parameters(WriteCard {
+                path: "tasks/fix.md".into(),
+                markdown: "---\ntype: task\ntitle: Fix it\nstatus: doing\n---\nbody\n".into(),
+            }))
+            .await
+            .unwrap();
+        let bad = server
+            .write_context_card(Parameters(WriteCard {
+                path: "tasks/bad.md".into(),
+                markdown: "---\ntype: task\nnot a pair\n---\n".into(),
+            }))
+            .await
+            .unwrap_err();
+        assert!(bad.contains("front-matter"), "{bad}");
+        assert!(!project.join(".ibproject/context/tasks/bad.md").exists());
+        assert_eq!(
+            server.list_context_cards().await.unwrap(),
+            "mechanics/double-jump.md  [other]  Double jump\n\
+             tasks/fix.md  [task · doing]  Fix it"
+        );
 
         let text = server
             .read_context_card(Parameters(CardPath {

@@ -1,32 +1,35 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { motion } from "motion/react";
 import { BookOpen } from "lucide-react";
-import { FileBrowser } from "@/components/cockpit/FileBrowser";
 import { GraphsSection } from "@/components/cockpit/GraphsSection";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { onProjectFilesChanged } from "@/lib/fs-watch";
 import { fadeTransition } from "@/lib/motion";
+import { contextList } from "@/lib/studio-api";
+import type { CardSummary } from "@/lib/studio-types";
+import { BoardTab } from "./BoardTab";
+import { CardsTab, type OpenRequest } from "./CardsTab";
+import { MapTab } from "./MapTab";
+import { errorText } from "./cardTypes";
 
 // The Context section (product spec §7.2): the one model of the game —
-// its concept, style guide, mechanics and tasks — as Markdown cards in
-// `.ibproject/context/`, plus graph views over `.ibproject/graphs/`. Both
+// its concept, style guide, mechanics and tasks — as typed Markdown cards in
+// `.ibproject/context/`, seen as a list (Cards), a task Board, a Map of the
+// links between cards, and graph documents over `.ibproject/graphs/`. Both
 // the person and their AI read and write these cards. It's one of
-// App.tsx's permanently mounted sections: either tab can hold an unsaved
-// card or graph edit, so neither is ever unmounted by switching away.
+// App.tsx's permanently mounted sections: any tab can hold an unsaved card
+// or graph edit, so no tab is ever unmounted by switching away.
 
 export interface ContextSectionProps {
   projectPath: string | null;
 }
 
-// Same hidden-dotfolder convention the old Documents section used:
-// `list_directory`'s dotfile filter (src-tauri/src/commands/fs.rs) keeps
-// `.ibproject` out of general file browsers, while this section browses it
-// directly by path, which that filter doesn't apply to.
-const CONTEXT_DIR = ".ibproject/context";
-
-type ContextTab = "cards" | "graphs";
+type ContextTab = "cards" | "board" | "map" | "graphs";
 
 const TABS: { id: ContextTab; label: string }[] = [
   { id: "cards", label: "Cards" },
+  { id: "board", label: "Board" },
+  { id: "map", label: "Map" },
   { id: "graphs", label: "Graphs" },
 ];
 
@@ -62,40 +65,7 @@ export function ContextSection({ projectPath }: ContextSectionProps) {
       </div>
 
       {projectPath ? (
-        // Both tabs stay mounted, stacked in one slot — the same
-        // opacity + `inert` treatment App.tsx gives its persistent
-        // sections (see the comment there), so a half-edited card survives
-        // a look at the graphs and back. `forceMount` keeps Radix from
-        // unmounting the inactive tab's content.
-        <div className="relative min-h-0 flex-1">
-          <TabsContent value="cards" forceMount asChild>
-            <motion.div
-              className="absolute inset-0 flex min-h-0 min-w-0 overflow-hidden"
-              animate={{ opacity: tab === "cards" ? 1 : 0 }}
-              style={{ pointerEvents: tab === "cards" ? "auto" : "none" }}
-              transition={fadeTransition}
-              inert={tab !== "cards"}
-            >
-              <FileBrowser
-                label="Cards"
-                rootPath={`${projectPath}/${CONTEXT_DIR}`}
-                forceMdExtension
-                variant="list"
-              />
-            </motion.div>
-          </TabsContent>
-          <TabsContent value="graphs" forceMount asChild>
-            <motion.div
-              className="absolute inset-0 flex min-h-0 min-w-0 overflow-hidden"
-              animate={{ opacity: tab === "graphs" ? 1 : 0 }}
-              style={{ pointerEvents: tab === "graphs" ? "auto" : "none" }}
-              transition={fadeTransition}
-              inert={tab !== "graphs"}
-            >
-              <GraphsSection projectPath={projectPath} />
-            </motion.div>
-          </TabsContent>
-        </div>
+        <ContextViews projectPath={projectPath} tab={tab} setTab={setTab} />
       ) : (
         // Honest empty state, like Studio's: Context belongs to a project.
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-border bg-card text-center">
@@ -109,5 +79,102 @@ export function ContextSection({ projectPath }: ContextSectionProps) {
         </div>
       )}
     </Tabs>
+  );
+}
+
+/** The four tabs' content, for an open project. Owns the card list every
+ * view shares and the "something changed on disk" tick that makes each view
+ * re-read. */
+function ContextViews({
+  projectPath,
+  tab,
+  setTab,
+}: {
+  projectPath: string;
+  tab: ContextTab;
+  setTab: (tab: ContextTab) => void;
+}) {
+  const [cards, setCards] = useState<CardSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+  const [openRequest, setOpenRequest] = useState<OpenRequest | null>(null);
+
+  const bump = useCallback(() => setTick((n) => n + 1), []);
+
+  // Files changing on disk (the AI writing a card, git, our own Save)
+  // refreshes every view.
+  useEffect(() => onProjectFilesChanged(bump), [bump]);
+
+  useEffect(() => {
+    let cancelled = false;
+    contextList(projectPath).then(
+      (list) => {
+        if (cancelled) return;
+        setCards(list);
+        setError(null);
+      },
+      (err) => {
+        if (!cancelled) setError(errorText(err));
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [projectPath, tick]);
+
+  const openCard = useCallback(
+    (path: string) => {
+      setOpenRequest((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
+      setTab("cards");
+    },
+    [setTab],
+  );
+
+  // Every tab stays mounted, stacked in one slot — the same opacity +
+  // `inert` treatment App.tsx gives its persistent sections (see the
+  // comment there), so a half-edited card survives a look at the board and
+  // back. `forceMount` keeps Radix from unmounting the inactive content.
+  const pane = (id: ContextTab, children: ReactNode) => (
+    <TabsContent value={id} forceMount asChild>
+      <motion.div
+        className="absolute inset-0 flex min-h-0 min-w-0 overflow-hidden"
+        animate={{ opacity: tab === id ? 1 : 0 }}
+        style={{ pointerEvents: tab === id ? "auto" : "none" }}
+        transition={fadeTransition}
+        inert={tab !== id}
+      >
+        {children}
+      </motion.div>
+    </TabsContent>
+  );
+
+  return (
+    <div className="relative min-h-0 flex-1">
+      {pane(
+        "cards",
+        <CardsTab
+          projectPath={projectPath}
+          cards={cards}
+          loading={cards === null && error === null}
+          error={error}
+          refreshTick={tick}
+          openRequest={openRequest}
+          onReload={bump}
+          onChanged={bump}
+        />,
+      )}
+      {pane(
+        "board",
+        <BoardTab
+          projectPath={projectPath}
+          refreshTick={tick}
+          onOpen={openCard}
+          onChanged={bump}
+          existingPaths={(cards ?? []).map((c) => c.path)}
+        />,
+      )}
+      {pane("map", <MapTab projectPath={projectPath} refreshTick={tick} onOpen={openCard} />)}
+      {pane("graphs", <GraphsSection projectPath={projectPath} />)}
+    </div>
   );
 }
