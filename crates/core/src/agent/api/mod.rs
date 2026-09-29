@@ -16,8 +16,9 @@ pub mod mcp;
 pub mod openai;
 pub mod tools;
 
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
@@ -129,13 +130,57 @@ pub trait ChatBackend: Send + Sync {
 pub const MAX_MODEL_CALLS: usize = 40;
 pub const MAX_TOOL_RESULT_BYTES: usize = 200 * 1024;
 
+/// Cancel flags of the turns in flight, by thread id.
+type RunningMap = Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>;
+
 pub struct ApiRuntime {
     pub backend: Arc<dyn ChatBackend>,
+    running: RunningMap,
 }
 
 impl ApiRuntime {
     pub fn new(backend: Arc<dyn ChatBackend>) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            running: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
+
+/// Holds a thread's slot in the running map for as long as its turn runs.
+struct RunningGuard {
+    running: RunningMap,
+    thread_id: String,
+    flag: Arc<AtomicBool>,
+}
+
+impl RunningGuard {
+    /// Reserves `thread_id`, or `None` if a turn already holds it. Check and
+    /// insert happen under one lock.
+    fn reserve(running: &RunningMap, thread_id: &str) -> Option<Self> {
+        let mut map = running.lock().unwrap_or_else(|e| e.into_inner());
+        if map.contains_key(thread_id) {
+            return None;
+        }
+        let flag = Arc::new(AtomicBool::new(false));
+        map.insert(thread_id.to_string(), flag.clone());
+        Some(Self {
+            running: running.clone(),
+            thread_id: thread_id.to_string(),
+            flag,
+        })
+    }
+}
+
+impl Drop for RunningGuard {
+    fn drop(&mut self) {
+        let mut map = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        if map
+            .get(&self.thread_id)
+            .is_some_and(|f| Arc::ptr_eq(f, &self.flag))
+        {
+            map.remove(&self.thread_id);
+        }
     }
 }
 
@@ -149,12 +194,28 @@ impl AgentRuntime for ApiRuntime {
         }
     }
 
+    /// Runs the tool loop (`loop_::run_turn`). Returns `Err` without
+    /// emitting anything only when a turn is already running for the thread;
+    /// otherwise every outcome — including a failure or a stop — is reported
+    /// through the events, which end with `TurnCompleted`.
     fn run_turn(&self, req: TurnRequest, on_event: &mut dyn FnMut(AgentEvent)) -> Result<()> {
-        let _ = (req, on_event);
-        bail!("not implemented yet (Phase C, task RL)")
+        let Some(turn) = RunningGuard::reserve(&self.running, &req.thread_id) else {
+            bail!("A turn is already running in this chat.");
+        };
+        loop_::run_turn(&*self.backend, &req, &turn.flag, on_event)
     }
 
+    /// Asks the in-flight turn for `thread_id` to stop: the backend call and
+    /// any tool wait check the flag.
     fn cancel(&self, thread_id: &str) {
-        let _ = thread_id;
+        let flag = self
+            .running
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(thread_id)
+            .cloned();
+        if let Some(flag) = flag {
+            flag.store(true, Ordering::SeqCst);
+        }
     }
 }
