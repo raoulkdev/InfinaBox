@@ -1,0 +1,51 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://scenes/levels/island.tscn" id="2_level"]
+[ext_resource type="PackedScene" path="res://scenes/player.tscn" id="3_player"]
+[ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="4_hud"]
+[ext_resource type="PackedScene" path="res://scenes/ui/start_screen.tscn" id="5_start"]
+[ext_resource type="PackedScene" path="res://scenes/ui/end_screen.tscn" id="6_end"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
+sky_top_color = Color(0.3, 0.55, 0.9, 1.0)
+sky_horizon_color = Color(0.75, 0.87, 0.95, 1.0)
+ground_bottom_color = Color(0.35, 0.5, 0.6, 1.0)
+ground_horizon_color = Color(0.75, 0.87, 0.95, 1.0)
+
+[sub_resource type="Sky" id="Sky_main"]
+sky_material = SubResource("ProceduralSkyMaterial_sky")
+
+[sub_resource type="Environment" id="Environment_main"]
+background_mode = 2
+sky = SubResource("Sky_main")
+ambient_light_source = 2
+ambient_light_color = Color(0.62, 0.68, 0.8, 1.0)
+ambient_light_energy = 0.4
+tonemap_mode = 2
+fog_enabled = true
+fog_light_color = Color(0.75, 0.87, 0.95, 1.0)
+fog_density = 0.0015
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_main")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.8192, -0.4108, 0.3993, 0, 0.6946, 0.7193, -0.5736, -0.5893, 0.5690, 0, 20, 0)
+light_energy = 0.62
+shadow_enabled = true
+directional_shadow_mode = 0
+directional_shadow_max_distance = 70.0
+
+[node name="Level" parent="." instance=ExtResource("2_level")]
+
+[node name="Player" parent="." instance=ExtResource("3_player")]
+
+[node name="Hud" parent="." instance=ExtResource("4_hud")]
+
+[node name="StartScreen" parent="." instance=ExtResource("5_start")]
+
+[node name="EndScreen" parent="." instance=ExtResource("6_end")]

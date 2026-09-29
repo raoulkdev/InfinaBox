@@ -1,0 +1,61 @@
+[gd_scene format=3]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_trunk"]
+albedo_color = Color(0.45, 0.3, 0.2, 1.0)
+roughness = 1.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_leaves_low"]
+albedo_color = Color(0.2, 0.52, 0.3, 1.0)
+roughness = 1.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_leaves_high"]
+albedo_color = Color(0.3, 0.64, 0.34, 1.0)
+roughness = 1.0
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_trunk"]
+height = 1.6
+radius = 0.3
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_trunk"]
+material = SubResource("StandardMaterial3D_trunk")
+top_radius = 0.2
+bottom_radius = 0.3
+height = 1.6
+radial_segments = 8
+rings = 1
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_leaves_low"]
+material = SubResource("StandardMaterial3D_leaves_low")
+top_radius = 0.0
+bottom_radius = 1.5
+height = 2.2
+radial_segments = 8
+rings = 1
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_leaves_high"]
+material = SubResource("StandardMaterial3D_leaves_high")
+top_radius = 0.0
+bottom_radius = 1.1
+height = 1.9
+radial_segments = 8
+rings = 1
+
+[node name="Tree" type="StaticBody3D"]
+collision_layer = 1
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.8, 0)
+shape = SubResource("CylinderShape3D_trunk")
+
+[node name="Trunk" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.8, 0)
+mesh = SubResource("CylinderMesh_trunk")
+
+[node name="LeavesLow" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, 0)
+mesh = SubResource("CylinderMesh_leaves_low")
+
+[node name="LeavesHigh" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.55, 0)
+mesh = SubResource("CylinderMesh_leaves_high")
