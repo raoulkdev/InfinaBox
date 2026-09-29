@@ -4,9 +4,9 @@ A Tauri v2 + React 19 + TypeScript desktop app for indie game developers. This f
 
 ## What this is
 
-InfinaBox is becoming an **AI game studio for people with little or no game-dev knowledge** — see `docs/superpowers/specs/2026-09-25-ai-game-studio-product-spec.md` (the product direction) and `docs/superpowers/plans/2026-09-25-phase-a-foundations.md` (Phase A, the current build). The user's **own** AI (their installed, logged-in Claude Code CLI; later Codex, API keys, local models) does the work; InfinaBox never sells or proxies AI access and stores no AI credentials.
+InfinaBox is becoming an **AI game studio for people with little or no game-dev knowledge** — see `docs/superpowers/specs/2026-09-25-ai-game-studio-product-spec.md` (the product direction) `docs/superpowers/plans/2026-09-25-phase-a-foundations.md` (Phase A, done) and `docs/superpowers/plans/2026-09-28-phase-b-first-run.md` (Phase B, the first-run experience: the current build). The user's **own** AI (their installed, logged-in Claude Code or Codex CLI; later API keys, local models) does the work; InfinaBox never sells or proxies AI access and stores no AI credentials.
 
-Phase A delivers the core loop in a new **Studio** section: a **chat panel** (this is now the primary interface — the older "no chat panel" stance and the `agent_auth_model` memory are superseded by the spec), a **Play** panel running the user's Godot game, and a **History** panel of snapshots with undo. The pre-Phase-A workspace (Build's terminal + code editor, and the docs-style discipline sections) still exists and will move into an "Advanced" area in Phase B.
+Phase A delivers the core loop in a new **Studio** section: a **chat panel** (this is now the primary interface — the older "no chat panel" stance and the `agent_auth_model` memory are superseded by the spec), a **Play** panel running the user's Godot game, and a **History** panel of snapshots with undo. Phase B added: connecting the user's AI (Claude Code or Codex, detected, installed and signed in from Home), a seven-question onboarding interview that picks one of three 2D templates (`platformer-2d`, `topdown-2d`, `shooter-2d`; `blank-2d` for from scratch) and writes a starter Context, plan/approve turns (the agent calls the `propose_plan` MCP tool, shown as an approvable card), the automatic error-fix loop, and the 6-entry navigation (Home, Studio, Context, Assets, Playtest & Launch, Advanced). The old discipline sections were retired; Build's terminal + code editor now live in Advanced.
 
 The stated product discipline, from `docs/superpowers/specs/2026-09-12-workspace-redesign-design.md`:
 
@@ -25,19 +25,19 @@ Cargo workspace (`Cargo.toml` at repo root, which also holds the release profile
   - `chat_store.rs` — chat threads as `.ibproject/chat/<id>.jsonl` (committed with the project), every string passed through `redact.rs` first.
   - `scaffold.rs` — new projects from `templates/blank-2d/` plus the auto-installed runtime addon from `godot-addon/infinabox/`.
   - Older pieces: filesystem watcher, git indexer, SQLite project graph + deterministic `ask.rs` Q&A, and an `mcp_client.rs` spike.
-- **`crates/mcp-server`** (`infinabox-mcp-server`) — the MCP server the user's agent gets (10 tools: Context cards, run/stop the game, game status/errors/output, snapshot list). It is **not a separate binary**: the app executable runs it when launched as `<app exe> --mcp-server` (checked in `src-tauri/src/main.rs` before Tauri starts). Game tools reach the running app over a loopback **bridge** (`bridge_protocol.rs`: token-authenticated, newline-delimited JSON).
+- **`crates/mcp-server`** (`infinabox-mcp-server`) — the MCP server the user's agent gets (11 tools: Context cards, run/stop the game, game status/errors/output, snapshot list, `propose_plan`). It is **not a separate binary**: the app executable runs it when launched as `<app exe> --mcp-server` (checked in `src-tauri/src/main.rs` before Tauri starts). Game tools reach the running app over a loopback **bridge** (`bridge_protocol.rs`: token-authenticated, newline-delimited JSON).
 - **`crates/cli`** — dev binary: spike subcommands plus `infinabox-cli mcp-server` (same server, for testing); `mock_godot_mcp` is an old spike.
 - **`src-tauri`** — the Tauri v2 app. Commands live under `src-tauri/src/commands/`: `agent.rs` (chat turns: runs the agent on a background thread, persists every event, snapshots after file-changing turns, always emits `agent-turn-finished`), `godot.rs` (install/status/run/stop, events), `bridge.rs` (the MCP bridge server), `snapshot.rs`, `scaffold.rs`, plus the older `fs.rs`, `project.rs`, `terminal.rs`, `overview.rs`, `watcher.rs`, `environment.rs`. Each is re-exported through `commands/mod.rs` and registered in `src-tauri/src/lib.rs`'s `tauri::generate_handler![...]` list. Adding a new command means: write the `#[tauri::command]` fn, export it from `mod.rs`, add it to the `invoke_handler!` list — all three steps, or the frontend's `invoke()` call fails silently at runtime with no type error. **A command doing real work (git, files, child processes) must be `#[tauri::command(async)]`**: in Tauri v2 a plain sync command runs on the main thread and freezes the window.
 
-Frontend: `src/App.tsx` is the app shell; `src/components/studio/` holds Studio (`chat/`, `play/`, `history/`, `StudioSection.tsx`); `src/components/cockpit/` holds the older panels/sections; `src/lib/` holds shared utilities. **Studio calls the backend only through `src/lib/studio-api.ts`** (typed wrappers for every Phase A command and event) with types in `src/lib/studio-types.ts`, which mirror the Rust serde types — change both sides together.
+Frontend: `src/App.tsx` is the app shell; `src/components/studio/` holds Studio (`chat/`, `play/`, `history/`, `StudioSection.tsx`); `src/components/{connect,onboarding,context,advanced}/` hold the Phase B screens; `src/components/cockpit/` holds the older shared pieces (`FileBrowser`, editors, `BuildRow`, `Sidebar`, `DashboardSection`); `src/lib/` holds shared utilities. **Studio calls the backend only through `src/lib/studio-api.ts`** (typed wrappers for every Phase A and B command and event) with types in `src/lib/studio-types.ts`, which mirror the Rust serde types — change both sides together.
 
 Tauri events used by Studio: `agent-event`, `agent-turn-finished`, `godot-install-progress`, `game-state`, `game-output`, `game-error`, `snapshots-changed` (see `studio-api.ts`).
 
 ### `src/App.tsx`'s persistent-tab crossfade
 
-Read this file in full before touching navigation — it has a genuinely unusual mechanism. Four sections (**Studio**, **Build**, **Design/Documents**, **Graphs**) must never unmount once opened: Studio holds live chat turns and game state, Build owns the live terminal session (respawning it would kill whatever the user is doing in their shell), and Design/Graphs can each hold unsaved drafts. Opening a project from Home lands on Studio. Every other section (`art`, `audio`, `uiux`, `qa`, `release`, `business`, `marketing`, `community`, `liveops`) mounts only while selected and has nothing worth preserving.
+Read this file in full before touching navigation — it has a genuinely unusual mechanism. Three sections (**Studio**, **Context**, **Advanced**) must never unmount once opened: Studio holds live chat turns and game state, Advanced owns the live terminal session (respawning it would kill whatever the user is doing in their shell), and Context can hold unsaved card/graph drafts. Opening a project from Home lands on Studio (an onboarding first build is handed over as a `pendingTurn`). Assets and Playtest & Launch are honest "coming later" placeholders and mount only while selected.
 
-Because `AnimatePresence` (Motion's crossfade helper) only animates real mount/unmount, and these four panels never unmount, they can't use it directly. Instead all four sit **absolutely stacked in one slot, permanently mounted**, with only `opacity`/`pointer-events` toggling per the active `section`. Each inactive one also carries the HTML `inert` attribute — not just `pointer-events: none` — which additionally pulls it out of the tab order and accessibility tree, specifically because a prior bug in this codebase's history came from a descendant re-adding its own `pointer-events-auto` inside a "hidden" panel.
+Because `AnimatePresence` (Motion's crossfade helper) only animates real mount/unmount, and these panels never unmount, they can't use it directly. Instead all three sit **absolutely stacked in one slot, permanently mounted**, with only `opacity`/`pointer-events` toggling per the active `section`. Each inactive one also carries the HTML `inert` attribute — not just `pointer-events: none` — which additionally pulls it out of the tab order and accessibility tree, specifically because a prior bug in this codebase's history came from a descendant re-adding its own `pointer-events-auto` inside a "hidden" panel.
 
 Everything else (Home, and the 9 "simple" sections) goes through ordinary `AnimatePresence mode="wait"` mount/unmount, driven by a data-driven `simpleSections: Record<SimpleSection, () => ReactNode>` render map rather than a growing `{section === "x" && ...}` if-chain.
 
@@ -102,17 +102,12 @@ From `src/App.tsx`'s `simpleSections` map — deliberately honest placeholders, 
 
 | Section | State | Why |
 |---|---|---|
-| Studio | real (Phase A) | chat with the user's own Claude Code (streamed events, threads, stop), Play panel (managed Godot install, run/stop, output, parsed errors, "Ask AI to fix"), History panel (snapshots, undo, go back) |
-| Build | real | terminal + git-backed project data + `FileBrowser` code editor |
-| Documents (Design) | real | `FileBrowser` over `.ibproject/docs`, `.md`-only editing |
-| Graphs | real | `FileBrowser` over `.ibproject/graphs`, ReactFlow canvas for `.graph.json` |
-| Business / Marketing / Community / Release | real | `FileBrowser` clones over `.ibproject/{business,marketing,community,release}` — docs-only; Release has no real ship-state dashboard or tool detection yet |
-| Art / UI-UX | placeholder | needs image preview in the file browser, not markdown standing in for it |
-| Audio | placeholder | needs audio playback in the file browser |
-| QA | placeholder | bug tracking + grounded commit lookups — waiting on the core agent loop (i.e. the graph/`ask_question` pair) to get a real frontend caller |
-| Live Ops | placeholder | analytics/crash triage need a shipped game generating real data — inherently post-ship |
+| Studio | real | chat with the user's own Claude Code or Codex (streamed events, threads, stop, plan cards, auto-fix banner, settings), Play panel, History panel |
+| Context | real | `FileBrowser` over `.ibproject/context` (Markdown cards) plus a Graphs tab (ReactFlow, `.graph.json`) |
+| Advanced | real | Build's terminal + code editor, Godot settings (custom path, Open in Godot editor), the Connect-your-AI panel |
+| Assets / Playtest & Launch | placeholder | later phases (assets; playtest, launch, accounts) |
 
-Home/Dashboard is real: recent-projects list (`localStorage`), real CLI PATH detection (`check_cli_tools`), real New/Open Project flows — New Project now scaffolds a real blank 2D Godot project (`project_create`) with the addon, `.ibx` v2 and a first snapshot. Its own "Preferences" sub-panel is a placeholder too.
+Home/Dashboard is real: a first-run checklist (connect your AI, set up Godot, make your first game) until `first_run_done`, then recent projects, New game (the interview), Empty project, Open project, and AI/Godot status. All state shown comes from real detection (`connect::detect_all`, `godot_status`), never invented.
 
 ## Orientation for anything not covered here
 
