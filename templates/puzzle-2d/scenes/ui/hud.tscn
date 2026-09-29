@@ -1,0 +1,70 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/hud.gd" id="1_0mwgc"]
+
+[node name="HUD" type="Control" unique_id=1364968658]
+layout_mode = 3
+anchors_preset = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+script = ExtResource("1_0mwgc")
+
+[node name="LevelLabel" type="Label" parent="." unique_id=262957157]
+unique_name_in_owner = true
+layout_mode = 0
+offset_left = 40.0
+offset_top = 24.0
+offset_right = 740.0
+offset_bottom = 68.0
+theme_override_font_sizes/font_size = 32
+theme_override_colors/font_color = Color(1, 0.9529412, 0.8627451, 1)
+theme_override_colors/font_outline_color = Color(0.1, 0.09, 0.2, 0.9)
+theme_override_constants/outline_size = 8
+text = "Level 1 of 5"
+
+[node name="MovesLabel" type="Label" parent="." unique_id=1031693448]
+unique_name_in_owner = true
+layout_mode = 0
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -520.0
+offset_top = 24.0
+offset_right = -40.0
+offset_bottom = 68.0
+theme_override_font_sizes/font_size = 32
+theme_override_colors/font_color = Color(1, 0.9529412, 0.8627451, 1)
+theme_override_colors/font_outline_color = Color(0.1, 0.09, 0.2, 0.9)
+theme_override_constants/outline_size = 8
+text = "Moves: 0"
+horizontal_alignment = 2
+
+[node name="BestLabel" type="Label" parent="." unique_id=2109843695]
+unique_name_in_owner = true
+layout_mode = 0
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -520.0
+offset_top = 62.0
+offset_right = -40.0
+offset_bottom = 98.0
+theme_override_font_sizes/font_size = 24
+theme_override_colors/font_color = Color(0.95686275, 0.7882353, 0.54509807, 1)
+theme_override_colors/font_outline_color = Color(0.1, 0.09, 0.2, 0.9)
+theme_override_constants/outline_size = 8
+text = "Best: -"
+horizontal_alignment = 2
+
+[node name="HintLabel" type="Label" parent="." unique_id=2052396214]
+layout_mode = 0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -56.0
+offset_bottom = -20.0
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(1, 0.95, 0.86, 0.8)
+theme_override_colors/font_outline_color = Color(0.1, 0.09, 0.2, 0.9)
+theme_override_constants/outline_size = 8
+text = "Arrows or WASD: move     Z: undo     R: restart"
+horizontal_alignment = 1
