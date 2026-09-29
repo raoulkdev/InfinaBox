@@ -1,0 +1,37 @@
+// HOW STORY FILES WORK (you can edit these with any text editor, no code needed)
+//
+//   // text            a note to yourself; the game ignores it
+//   # scene: name      starts a scene. Names use letters, numbers and _ only.
+//   background: night  the backdrop: a name (night, day, dawn, sunset, cafe,
+//                      park, home, black), a color like #336699, or two colors
+//                      like #336699 #99ccff (top, bottom)
+//   Mira: Hello!       someone says something. The name must be in characters.txt
+//   > Rain taps.       narration: no speaker, no portrait
+//   ? Say hi -> hello  a choice. Put 2 to 4 of these in a row; each one jumps
+//                      to the scene named after the arrow
+//   set kind           remember something ("kind") for later
+//   if kind -> nice    jump to scene "nice" if "kind" was set (if not kind -> ... is the opposite)
+//   goto cafe          jump straight to another scene
+//   end: Good Ending   finish the story with this ending name
+//
+// Every scene has to finish with a choice, a goto or an end. Every scene
+// name used after an arrow must exist somewhere in the story folder.
+
+# scene: intro
+background: night
+> Rain hammers the windows of the Lantern Café. You push the door open and shake the water out of your hair.
+Mira: Welcome in! Grab any seat. The tea is hot and the cake is fresh.
+You: Thanks. I only meant to wait out the rain.
+Mira: Nobody only waits out the rain in here. You'll see.
+> You pick a table by the window. Something is tucked under the chair beside you: a small blue notebook, its cover still damp.
+You: Somebody forgot this...
+? Peek inside the notebook -> peek
+? Take it over to Mira -> cafe
+
+# scene: peek
+set peeked
+> You open it, just a little. Page after page of tiny drawings: the counter, the paper lanterns, steam curling out of a teapot.
+> The very last drawing is the window table, with a chair pulled out as if for a guest.
+You: These are really good.
+> You close the cover, feeling a bit guilty for looking.
+goto cafe
