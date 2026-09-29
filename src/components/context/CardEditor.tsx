@@ -291,6 +291,7 @@ function HeaderForm({ meta, patch, path, cards, summary, onOpen }: HeaderFormPro
       <Field label="Title" className="sm:col-span-2">
         <Input
           value={meta.title ?? ""}
+          aria-label="Title"
           placeholder={summary?.title ?? "Untitled"}
           onChange={(e) => patch({ title: e.target.value === "" ? null : e.target.value })}
         />
@@ -299,6 +300,7 @@ function HeaderForm({ meta, patch, path, cards, summary, onOpen }: HeaderFormPro
       <Field label="Type">
         <select
           value={meta.type ?? "other"}
+          aria-label="Type"
           onChange={(e) => patch({ type: e.target.value as CardType })}
           className={SELECT_CLASS}
         >

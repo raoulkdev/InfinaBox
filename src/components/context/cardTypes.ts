@@ -137,7 +137,7 @@ export function statusClasses(status: string | null | undefined): string {
     case "final":
       return "bg-emerald-500/15 text-emerald-300";
     default:
-      return "bg-secondary text-secondary-foreground";
+      return "bg-foreground/10 text-foreground";
   }
 }
 

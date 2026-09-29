@@ -1,5 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
-import { Background, Controls, MarkerType, Panel, ReactFlow, type Edge, type Node } from "@xyflow/react";
+import {
+  BaseEdge,
+  Background,
+  Controls,
+  Handle,
+  MarkerType,
+  Panel,
+  Position,
+  ReactFlow,
+  getStraightPath,
+  useInternalNode,
+  type Edge,
+  type EdgeProps,
+  type InternalNode,
+  type Node,
+  type NodeProps,
+} from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
 import { contextGraph } from "@/lib/studio-api";
@@ -16,7 +32,7 @@ interface MapTabProps {
 const NODE_W = 176;
 const NODE_H = 40;
 const GAP_X = 24;
-const GAP_Y = 72;
+const GAP_Y = 88;
 const PER_ROW = 6;
 const BROKEN = "#f87171";
 
@@ -48,6 +64,7 @@ export function layoutGraph(graph: LinkGraph): { nodes: Node[]; edges: Edge[] } 
           position: { x: -width / 2 + i * (NODE_W + GAP_X), y },
           data: item.data,
           style: item.style,
+          type: "card",
           draggable: false,
           connectable: false,
         });
@@ -121,6 +138,7 @@ export function layoutGraph(graph: LinkGraph): { nodes: Node[]; edges: Edge[] } 
         id: `${e.from}->${e.to}`,
         source: e.from,
         target: e.broken ? ghostId(e.to) : e.to,
+        type: "floating",
         markerEnd: { type: MarkerType.ArrowClosed, color },
         style: { stroke: color, strokeWidth: 1.5, strokeDasharray: e.broken ? "5 4" : undefined },
       };
@@ -130,6 +148,47 @@ export function layoutGraph(graph: LinkGraph): { nodes: Node[]; edges: Edge[] } 
 }
 
 const ghostId = (target: string) => `missing:${target}`;
+
+// Cards are plain boxes; the handles only exist because React Flow wants
+// somewhere to attach an edge, and stay invisible: the floating edge below
+// draws from box border to box border instead.
+function CardNode({ data }: NodeProps) {
+  return (
+    <>
+      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} isConnectable={false} />
+      {String(data.label)}
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} isConnectable={false} />
+    </>
+  );
+}
+
+// Where a line from the centre of `node` towards `other` leaves its box.
+function borderPoint(node: InternalNode, other: InternalNode): { x: number; y: number } {
+  const w = (node.measured.width ?? NODE_W) / 2;
+  const h = (node.measured.height ?? NODE_H) / 2;
+  const cx = node.internals.positionAbsolute.x + w;
+  const cy = node.internals.positionAbsolute.y + h;
+  const ox = other.internals.positionAbsolute.x + (other.measured.width ?? NODE_W) / 2;
+  const oy = other.internals.positionAbsolute.y + (other.measured.height ?? NODE_H) / 2;
+  const dx = ox - cx;
+  const dy = oy - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+  const scale = 1 / Math.max(Math.abs(dx) / w, Math.abs(dy) / h);
+  return { x: cx + dx * scale, y: cy + dy * scale };
+}
+
+function FloatingEdge({ id, source, target, markerEnd, style }: EdgeProps) {
+  const from = useInternalNode(source);
+  const to = useInternalNode(target);
+  if (!from || !to) return null;
+  const a = borderPoint(from, to);
+  const b = borderPoint(to, from);
+  const [path] = getStraightPath({ sourceX: a.x, sourceY: a.y, targetX: b.x, targetY: b.y });
+  return <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />;
+}
+
+const nodeTypes = { card: CardNode };
+const edgeTypes = { floating: FloatingEdge };
 
 /** A read-only picture of how cards link to each other. Click a card to
  * open it. Links to cards that don't exist are dashed red, pointing at a
@@ -185,6 +244,8 @@ export function MapTab({ projectPath, refreshTick, onOpen }: MapTabProps) {
               key={shapeKey}
               nodes={laid.nodes}
               edges={laid.edges}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               nodesDraggable={false}
               nodesConnectable={false}
               edgesFocusable={false}
