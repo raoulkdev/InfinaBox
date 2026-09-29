@@ -1,0 +1,52 @@
+// HOW STORY FILES WORK (you can edit these with any text editor, no code needed)
+//
+//   // text            a note to yourself; the game ignores it
+//   # scene: name      starts a scene. Names use letters, numbers and _ only.
+//   background: night  the backdrop: a name (night, day, dawn, sunset, cafe,
+//                      park, home, black), a color like #336699, or two colors
+//                      like #336699 #99ccff (top, bottom)
+//   Mira: Hello!       someone says something. The name must be in characters.txt
+//   > Rain taps.       narration: no speaker, no portrait
+//   ? Say hi -> hello  a choice. Put 2 to 4 of these in a row; each one jumps
+//                      to the scene named after the arrow
+//   set kind           remember something ("kind") for later
+//   if kind -> nice    jump to scene "nice" if "kind" was set (if not kind -> ... is the opposite)
+//   goto cafe          jump straight to another scene
+//   end: Good Ending   finish the story with this ending name
+//
+// Every scene has to finish with a choice, a goto or an end. Every scene
+// name used after an arrow must exist somewhere in the story folder.
+
+# scene: cafe
+background: cafe
+Mira: Oh, that's Theo's! He draws in here every evening.
+Mira: He can't have gone far. Sit tight, I'll bring you some tea.
+> A bell jingles. A tall, dripping figure bursts through the door and stares wildly around the room.
+Theo: Please tell me nobody... oh! My notebook! Is that... did you find it?
+? Hand it back with a smile -> give_back
+? Joke that finders keepers -> joke
+? Say you'll leave it with Mira, and get ready to go -> leave
+
+# scene: joke
+Theo: Ha... ha. Please don't. My whole summer is in there.
+You: I'm kidding! Here, it's all yours.
+goto give_back
+
+# scene: give_back
+Theo: Oh, thank goodness. Thank you, really.
+if peeked -> compliment
+Theo: I'd sit and chat, but... actually, would you like some tea? You look like you could use one.
+You: I'd love that.
+goto ending_friends
+
+# scene: compliment
+You: I hope you don't mind, I peeked. The drawing of the window table is my favorite.
+Theo: You looked? ...Good. Nobody ever looks.
+Theo: Sit down, please. I'll draw you into the next page.
+goto ending_friends
+
+# scene: leave
+You: I'll leave it with Mira. I should get going before the rain comes back.
+Theo: Oh. Right. Yes, thank you.
+> He takes the notebook and is already flipping through the pages, lost in it.
+goto ending_passing

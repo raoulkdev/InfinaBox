@@ -1,0 +1,63 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/title_screen.gd" id="1_title_screen"]
+
+[node name="TitleScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_title_screen")
+
+[node name="Center" type="CenterContainer" parent="."]
+mouse_filter = 2
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 290.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Rows" type="VBoxContainer" parent="Center"]
+mouse_filter = 2
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Title" type="Label" parent="Center/Rows"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.973, 0.925, 1)
+theme_override_colors/font_outline_color = Color(0.118, 0.106, 0.18, 1)
+theme_override_constants/outline_size = 10
+theme_override_font_sizes/font_size = 88
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="Center/Rows"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.82, 0.96, 1)
+theme_override_font_sizes/font_size = 30
+horizontal_alignment = 1
+
+[node name="Gap" type="Control" parent="Center/Rows"]
+custom_minimum_size = Vector2(0, 16)
+mouse_filter = 2
+layout_mode = 2
+
+[node name="Buttons" type="VBoxContainer" parent="Center/Rows"]
+mouse_filter = 2
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_constants/separation = 14
+
+[node name="Start" type="Button" parent="Center/Rows/Buttons"]
+custom_minimum_size = Vector2(340, 64)
+layout_mode = 2
+text = "Start"
+
+[node name="Quit" type="Button" parent="Center/Rows/Buttons"]
+custom_minimum_size = Vector2(340, 64)
+layout_mode = 2
+text = "Quit"
