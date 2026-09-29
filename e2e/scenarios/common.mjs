@@ -4,8 +4,8 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { By } from "selenium-webdriver";
-import { clickWhenEnabled, isInert, textOf, tid, waitUntil, waitVisible } from "../lib/ui.mjs";
+import { By, Key } from "selenium-webdriver";
+import { clickWhenEnabled, isInert, textOf, tid, waitAttr, waitUntil, waitVisible } from "../lib/ui.mjs";
 import { chooseFolderInGtkDialog, findWindows } from "../lib/x11.mjs";
 
 let tempRoot = null;
@@ -58,15 +58,67 @@ export async function createProjectFromHome(run, driver, parentDir, name) {
   `);
   if (outside.length > 0) throw new Error(`New Project dialog content runs past its edge: ${JSON.stringify(outside)}`);
   await clickWhenEnabled(driver, tid("new-project-create"));
-
-  // Studio is one of App.tsx's permanently mounted sections: it counts as
-  // "landed" when its Play panel is displayed and not inside an inert
-  // (parked) layer.
-  const panel = await waitVisible(driver, tid("play-panel"), { timeoutMs: 30_000 });
-  await waitUntil(async () => !(await isInert(driver, panel)), { what: "Studio to become the active section" });
+  await waitForStudio(driver);
   const projectPath = path.join(parentDir, name);
   run.note(`landed in Studio for ${projectPath}`);
   return projectPath;
+}
+
+/** Studio is one of App.tsx's permanently mounted sections: it counts as
+ * "landed" when its Play panel is displayed and not inside an inert
+ * (parked) layer. */
+export async function waitForStudio(driver) {
+  const panel = await waitVisible(driver, tid("play-panel"), { timeoutMs: 30_000 });
+  await waitUntil(async () => !(await isInert(driver, panel)), { what: "Studio to become the active section" });
+}
+
+/** The project's own settings file (`.ibproject/settings.json`), or null
+ * while it doesn't exist (the defaults apply). */
+export function projectSettingsOnDisk(project) {
+  const file = path.join(project, ".ibproject/settings.json");
+  return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
+}
+
+/** Opens the chat header's Studio settings, reads what it shows (freshly
+ * loaded from disk on every open), applies `change` (a switch's test id →
+ * the wanted on/off, or `plan` → a plan policy), and closes it again.
+ * Returns what it showed before the change. */
+export async function useStudioSettings(driver, change = {}) {
+  await clickWhenEnabled(driver, tid("studio-settings-button"));
+  const popover = await waitVisible(driver, tid("studio-settings"));
+  // Loaded when the switches are enabled.
+  await waitUntil(async () => (await driver.findElement(tid("setting-auto-fix"))).isEnabled(), {
+    what: "the Studio settings to load",
+  });
+  const read = async () => ({
+    plan: (await driver.findElement(tid("setting-plan-always_plan")).getAttribute("data-state")) === "checked"
+      ? "always_plan"
+      : (await driver.findElement(tid("setting-plan-small_changes_direct")).getAttribute("data-state")) === "checked"
+        ? "small_changes_direct"
+        : null,
+    teach: (await driver.findElement(tid("setting-teach")).getAttribute("data-state")) === "checked",
+    auto_fix: (await driver.findElement(tid("setting-auto-fix")).getAttribute("data-state")) === "checked",
+  });
+  const before = await read();
+  for (const [key, want] of Object.entries(change)) {
+    if (key === "plan") {
+      await driver.findElement(tid(`setting-plan-${want}`)).click();
+      await waitAttr(driver, tid(`setting-plan-${want}`), "data-state", "checked");
+    } else {
+      const id = key === "teach" ? "setting-teach" : "setting-auto-fix";
+      if (before[key] !== want) await driver.findElement(tid(id)).click();
+      await waitAttr(driver, tid(id), "data-state", want ? "checked" : "unchecked");
+    }
+  }
+  // Every change saves as it's made; the spinner shows until it has.
+  await waitUntil(async () => (await popover.findElements(By.css('[aria-label="Saving"]'))).length === 0, {
+    what: "the settings to finish saving",
+  });
+  await driver.actions().sendKeys(Key.ESCAPE).perform();
+  await waitUntil(async () => (await driver.findElements(tid("studio-settings"))).length === 0, {
+    what: "the Studio settings to close",
+  });
+  return before;
 }
 
 export function git(project, ...args) {

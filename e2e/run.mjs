@@ -3,7 +3,7 @@
 // tauri-driver + WebKitWebDriver), a real Godot, real git, and the real
 // file system. See README.md for prerequisites and options.
 //
-//   node run.mjs [--scenario core|install|all] [--real-ai] [--keep]
+//   node run.mjs [--scenario core|first-run|install|all] [--real-ai] [--keep]
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -14,6 +14,7 @@ import { startApp } from "./lib/app.mjs";
 import { Run } from "./lib/runner.mjs";
 import { setTempRoot } from "./scenarios/common.mjs";
 import { coreLoop } from "./scenarios/core-loop.mjs";
+import { firstRun } from "./scenarios/first-run.mjs";
 import { managedInstall } from "./scenarios/managed-install.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -37,7 +38,8 @@ const config = {
   tauriDriver:
     process.env.TAURI_DRIVER || which("tauri-driver") || path.join(os.homedir(), ".cargo/bin/tauri-driver"),
   nativeDriver: process.env.WEBKIT_DRIVER || which("WebKitWebDriver") || undefined,
-  // The Godot binary the core scenario hands the app via INFINABOX_GODOT.
+  // The Godot binary the core and first-run scenarios hand the app via
+  // INFINABOX_GODOT.
   godot: process.env.INFINABOX_GODOT || null,
   display: process.env.DISPLAY || ":99",
   scenario: arg("scenario", "all"),
@@ -160,6 +162,18 @@ try {
     cleanups.push(app);
     run.driver = app.driver;
     await coreLoop(run, app, config);
+    await app.stop();
+    cleanups.pop();
+  }
+  if (config.scenario === "first-run" || config.scenario === "all") {
+    if (!config.godot) {
+      console.error("The first-run scenario needs INFINABOX_GODOT pointing at a Godot 4 binary.");
+      process.exit(2);
+    }
+    const app = await launch("first-run", { INFINABOX_GODOT: config.godot });
+    cleanups.push(app);
+    run.driver = app.driver;
+    await firstRun(run, app, config);
     await app.stop();
     cleanups.pop();
   }

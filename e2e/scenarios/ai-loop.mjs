@@ -1,5 +1,6 @@
 // Exit-criterion steps 4–6 with the real AI (`--real-ai`): a real chat turn
-// through the user's own `claude` CLI changes the game, is snapshotted, and
+// through the user's own `claude` CLI proposes a plan, which is approved,
+// and the build that follows changes the game, is snapshotted, and
 // restarts it; "Undo last change" takes it back out; and a hand-made script
 // error goes to the AI through "Ask AI to fix", which the AI then fixes.
 // Runs after core-loop.mjs's steps 1–3 (project created, Godot there, the
@@ -19,8 +20,8 @@ import { gamePids, gameProcesses, gameWindows, git, visibleTexts } from "./commo
 export const AI_REQUEST = "make the background dark blue and add a label that says Hello";
 const READY_LINE = "[infinabox] ready 1";
 // A real turn reads the project, edits files, runs the game and checks it.
-const TURN_TIMEOUT_MS = 5 * 60_000;
-const COMPOSER = By.css('textarea[aria-label="Message the AI"]');
+export const TURN_TIMEOUT_MS = 10 * 60_000;
+export const COMPOSER = By.css('textarea[aria-label="Message the AI"]');
 const SEND = By.css('button[aria-label="Send"]');
 // Everything but the chat, which a snapshot always carries along and a
 // restore never rewinds (see crates/core/src/snapshot.rs).
@@ -42,7 +43,7 @@ export function snapshotTitleFor(message) {
 }
 
 /** Every record of every chat thread saved in the project. */
-function chatRecords(project) {
+export function chatRecords(project) {
   const dir = path.join(project, ".ibproject/chat");
   if (!fs.existsSync(dir)) return [];
   return fs
@@ -58,14 +59,14 @@ function chatRecords(project) {
 }
 
 /** The events of the last turn in the saved chat (after the last user message). */
-function lastTurnEvents(project) {
+export function lastTurnEvents(project) {
   const records = chatRecords(project);
   const lastUser = records.map((r) => r.kind).lastIndexOf("user");
   return records.slice(lastUser + 1).filter((r) => r.kind === "event").map((r) => r.event);
 }
 
 /** "name → ok|failed: summary" for every tool the turn used. */
-function toolLines(events) {
+export function toolLines(events) {
   const results = new Map(events.filter((e) => e.type === "tool_result").map((e) => [e.id, e]));
   return events
     .filter((e) => e.type === "tool_use")
@@ -76,7 +77,7 @@ function toolLines(events) {
 }
 
 /** Average colour of a PNG, as [r, g, b] 0–255 (ImageMagick). */
-function averageColor(file) {
+export function averageColor(file) {
   try {
     const out = execFileSync("convert", [file, "-resize", "1x1!", "-format", "%[fx:int(255*r)],%[fx:int(255*g)],%[fx:int(255*b)]", "info:"]).toString();
     return out.trim().split(",").map(Number);
@@ -86,7 +87,7 @@ function averageColor(file) {
 }
 
 /** Waits for the chat to be idle and ready, types `text`, and sends it. */
-async function sendChat(driver, text) {
+export async function sendChat(driver, text) {
   await waitAttr(driver, tid("chat-panel"), "data-ready", "true", { timeoutMs: 30_000 });
   await waitAttr(driver, tid("chat-panel"), "data-busy", "false", { timeoutMs: 30_000 });
   const composer = await waitVisible(driver, COMPOSER);
@@ -100,14 +101,14 @@ async function sendChat(driver, text) {
  * busy, then (once the backend's `agent-turn-finished` arrives) idle
  * again. Returns the transcript items after the last user message.
  */
-async function waitForTurn(run, driver, { startedBy }) {
+export async function waitForTurn(run, driver, { startedBy, timeoutMs = TURN_TIMEOUT_MS }) {
   const t0 = Date.now();
   // The busy flag is set synchronously on send; seeing it confirms the
   // message went to the AI rather than into a draft.
   await waitAttr(driver, tid("chat-panel"), "data-busy", "true", { timeoutMs: 10_000 }).catch(() => {
     run.note(`(didn't catch the chat going busy after ${startedBy}; it may have finished already)`);
   });
-  await waitAttr(driver, tid("chat-panel"), "data-busy", "false", { timeoutMs: TURN_TIMEOUT_MS });
+  await waitAttr(driver, tid("chat-panel"), "data-busy", "false", { timeoutMs });
   run.note(`AI turn finished after ${((Date.now() - t0) / 1000).toFixed(0)}s`);
   const items = await driver.executeScript(`
     const all = [...document.querySelectorAll('[data-testid="chat-item"]')].map((el) => ({
@@ -120,8 +121,63 @@ async function waitForTurn(run, driver, { startedBy }) {
   for (const i of items) run.note(`chat ${i.kind}: ${i.text.replace(/\s+/g, " ").slice(0, 300)}`);
   const errors = items.filter((i) => i.kind === "error");
   if (errors.length > 0) throw new Error(`the AI turn ended with an error: ${errors.map((e) => e.text).join(" | ")}`);
-  if (!items.some((i) => i.kind === "assistant")) throw new Error("the AI turn finished without any reply text");
+  // A plan turn may end on the plan card alone.
+  if (!items.some((i) => i.kind === "assistant" || i.kind === "plan")) {
+    throw new Error("the AI turn finished without any reply text or plan");
+  }
   return items;
+}
+
+/** The plan card still waiting for an OK, if the last turn ended on one:
+ * `{ el, title, steps }`. */
+export async function waitingPlan(driver) {
+  const cards = await driver.findElements(By.css('[data-testid="plan-card"][data-status="waiting"]'));
+  if (cards.length === 0) return null;
+  const el = cards[cards.length - 1];
+  const title = (await driver.executeScript("return arguments[0].textContent", await el.findElement(tid("plan-title")))).trim();
+  const steps = await driver.executeScript(
+    "return [...arguments[0].querySelectorAll('ol li')].map((li) => (li.innerText || li.textContent || '').trim())",
+    el,
+  );
+  return { el, title, steps };
+}
+
+/**
+ * The default plan policy is "always plan first", so a request usually
+ * ends on a plan card. When it does: note the plan, press Approve, and
+ * wait for the build turn that follows. Returns the approved plan's title,
+ * or null when the turn made its change without a plan.
+ */
+export async function approvePlanIfAny(run, driver) {
+  const plan = await waitingPlan(driver);
+  if (!plan) {
+    run.note("the turn ended without a plan to approve");
+    return null;
+  }
+  run.note(`plan "${plan.title}": ${plan.steps.map((s, i) => `${i + 1}. ${s}`).join(" ")}`);
+  await run.shot("plan-card");
+  await clickWhenEnabled(driver, tid("plan-approve"));
+  await waitForTurn(run, driver, { startedBy: "Approve" });
+  const status = await plan.el.getAttribute("data-status");
+  run.note(`the plan card now reads: ${status}`);
+  if (status !== "approved") throw new Error(`the approved plan's card shows ${status}, not approved`);
+  return plan.title;
+}
+
+/** A stopped turn ends on the neutral "Stopped" note, not an error card. */
+export async function expectStoppedNote(run, driver) {
+  const kinds = await waitUntil(
+    async () => {
+      const k = await driver.executeScript(`
+        const all = [...document.querySelectorAll('[data-testid="chat-item"]')].map((el) => el.dataset.kind);
+        return all.slice(all.lastIndexOf('user') + 1);
+      `);
+      return k.includes("stopped") ? k : null;
+    },
+    { timeoutMs: 15_000, what: 'the "Stopped" note after the stopped turn' },
+  );
+  run.note(`after Stop the turn shows: ${JSON.stringify(kinds)}`);
+  if (kinds.includes("error")) throw new Error("the stopped turn shows an error card, not just the Stopped note");
 }
 
 /** Waits until the game runs under a process id that's not in `before`,
@@ -260,6 +316,8 @@ export async function aiLoop(run, app, config, state, saveGameLog) {
       await sendChat(driver, AI_REQUEST);
       await run.shot("ai-turn-started");
       await waitForTurn(run, driver, { startedBy: "typing the request" });
+      // Plans come first by default: approve it, and the build follows.
+      state.aiPlanTitle = await approvePlanIfAny(run, driver);
 
       const events = lastTurnEvents(p());
       const tools = toolLines(events);
@@ -267,7 +325,8 @@ export async function aiLoop(run, app, config, state, saveGameLog) {
       run.attach("ai-turn-tools", tools.join("\n"));
       for (const t of tools) run.note(`tool: ${t.slice(0, 240)}`);
 
-      const want = snapshotTitleFor(AI_REQUEST);
+      // A turn carrying out an approved plan is titled from the plan.
+      const want = snapshotTitleFor(state.aiPlanTitle ?? AI_REQUEST);
       await waitUntil(async () => (await visibleTexts(driver, tid("snapshot-title")))[0] === want, {
         timeoutMs: 30_000,
         what: `History to list "${want}" on top`,
@@ -393,12 +452,15 @@ export async function aiLoop(run, app, config, state, saveGameLog) {
       await run.shot("fix-request-sent");
 
       await waitForTurn(run, driver, { startedBy: "Ask AI to fix" });
+      // A fix the person asked for is their own message, so it may be
+      // planned first too.
+      await approvePlanIfAny(run, driver);
       const events = lastTurnEvents(p());
       const tools = toolLines(events);
       state.toolNames = [...(state.toolNames ?? []), ...events.filter((e) => e.type === "tool_use").map((e) => e.name)];
       run.attach("fix-turn-tools", tools.join("\n"));
       for (const t of tools) run.note(`tool: ${t.slice(0, 240)}`);
-      const userText = chatRecords(p()).filter((r) => r.kind === "user").pop()?.text ?? "";
+      const userText = chatRecords(p()).filter((r) => r.kind === "user" && (r.origin ?? "user") === "user").pop()?.text ?? "";
       run.note(`message the AI got: ${JSON.stringify(userText.slice(0, 200))}`);
       if (!userText.includes(where)) throw new Error(`the saved chat's last message doesn't mention ${where}`);
 
@@ -426,7 +488,7 @@ export async function aiLoop(run, app, config, state, saveGameLog) {
     "5b",
     `"Go back" to the AI's change restores it (confirmed through the dialog)`,
     async () => {
-      const want = snapshotTitleFor(AI_REQUEST);
+      const want = snapshotTitleFor(state.aiPlanTitle ?? AI_REQUEST);
       let target = null;
       for (const row of await driver.findElements(tid("snapshot-row"))) {
         const id = await row.getAttribute("data-snapshot-id");
@@ -529,6 +591,7 @@ export async function aiLoop(run, app, config, state, saveGameLog) {
       await run.shot("chat-stopping");
       await waitAttr(driver, tid("chat-panel"), "data-busy", "false", { timeoutMs: 30_000 });
       run.note(`the chat freed itself ${((Date.now() - t0) / 1000).toFixed(1)}s after Stop`);
+      await expectStoppedNote(run, driver);
 
       // Straight away: a new message must be taken, not refused as "still working".
       await sendChat(driver, "Reply with just the word: ok");

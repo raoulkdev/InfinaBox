@@ -18,9 +18,11 @@ import {
   waitVisible,
 } from "../lib/ui.mjs";
 import { xdotool } from "../lib/x11.mjs";
-import { aiLoop } from "./ai-loop.mjs";
+import { aiLoop, expectStoppedNote } from "./ai-loop.mjs";
 import {
   createProjectFromHome,
+  projectSettingsOnDisk,
+  useStudioSettings,
   gamePids,
   gameProcesses,
   appWindows,
@@ -52,13 +54,14 @@ export async function coreLoop(run, app, config) {
   };
   const state = { project: null, originalPlayer: null, brokenPlayer: null, errorLine: null };
 
-  await run.step("1", "App starts on Home; claude and git show as installed", async () => {
-    await waitVisible(driver, tid("new-project"), { timeoutMs: 30_000 });
-    const claude = await waitAttr(driver, tid("cli-tool-claude"), "data-status", ["installed", "missing"]);
-    const gitStatus = await waitAttr(driver, tid("cli-tool-git"), "data-status", ["installed", "missing"]);
-    run.note(`claude: ${claude}, git: ${gitStatus}`);
-    if (claude !== "installed") throw new Error(`claude shows as ${claude}`);
-    if (gitStatus !== "installed") throw new Error(`git shows as ${gitStatus}`);
+  await run.step("1", "App starts on Home with the first-run checklist; Claude Code shows as installed", async () => {
+    // Fresh app data: nothing made yet, so Home is the first-run checklist.
+    await waitVisible(driver, tid("first-run-checklist"), { timeoutMs: 30_000 });
+    await waitVisible(driver, tid("new-project"));
+    const claude = await waitVisible(driver, tid("provider-claude-code"), { timeoutMs: 30_000 });
+    const installed = await claude.getAttribute("data-installed");
+    run.note(`Claude Code installed: ${installed}, signed in: ${await claude.getAttribute("data-signed-in")}`);
+    if (installed !== "true") throw new Error(`Claude Code shows as installed=${installed}`);
     const studio = await driver.findElements(tid("play-panel"));
     if (studio.length > 0 && (await studio[0].isDisplayed())) throw new Error("Studio is showing, not Home");
   });
@@ -101,6 +104,18 @@ export async function coreLoop(run, app, config) {
       throw new Error(`History panel should list just "New project", shows ${JSON.stringify(titles)}`);
     }
     await expectGripClear(run, driver);
+
+    // This scenario asks the AI for fixes itself ("Ask AI to fix"), so the
+    // automatic fixing (on by default) is switched off here, through the
+    // Studio settings, and must be saved to the project's settings file.
+    const before = await useStudioSettings(driver, { auto_fix: false });
+    run.note(`Studio settings as a new project has them: ${JSON.stringify(before)}`);
+    if (before.plan !== "always_plan" || before.teach || !before.auto_fix) {
+      throw new Error(`a new project's settings should be always plan / no teach / auto-fix on, were ${JSON.stringify(before)}`);
+    }
+    const saved = projectSettingsOnDisk(p);
+    run.note(`.ibproject/settings.json: ${JSON.stringify(saved)}`);
+    if (saved?.auto_fix !== false) throw new Error("switching auto-fix off wasn't saved to .ibproject/settings.json");
   });
 
   await run.step(
@@ -255,6 +270,7 @@ export async function coreLoop(run, app, config) {
         const stops = await driver.findElements(By.xpath('//*[@data-testid="chat-panel"]//button[normalize-space()="Stop"]'));
         if (stops.length > 0) await stops[0].click().catch(() => {});
         await waitAttr(driver, tid("chat-panel"), "data-busy", "false", { timeoutMs: 60_000 });
+        if (stops.length > 0) await expectStoppedNote(run, driver);
         const dirty = git(state.project, "status", "--porcelain", "--", ".", ":(exclude).ibproject/chat").trim();
         run.note(`stopped the AI turn the request started; uncommitted project changes: ${JSON.stringify(dirty)}`);
       }

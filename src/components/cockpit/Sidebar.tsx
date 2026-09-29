@@ -117,6 +117,7 @@ function SectionRow({
       variant="ghost"
       size="sm"
       aria-pressed={active}
+      data-testid={`nav-${item.id}`}
       onClick={onSelect}
       className={cn(
         "relative w-full gap-2 px-2 font-normal text-muted-foreground hover:text-foreground",

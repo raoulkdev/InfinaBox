@@ -175,13 +175,19 @@ function UserMessage({ text, origin }: { text: string; origin: Extract<ChatItem,
       );
     case "auto_fix":
       return (
-        <SystemNote icon={<Wrench className="size-3.5" />} title="Something broke — fixing it" detailsLabel="Show the errors">
+        <SystemNote
+          origin={origin}
+          icon={<Wrench className="size-3.5" />}
+          title="Something broke — fixing it"
+          detailsLabel="Show the errors"
+        >
           {text}
         </SystemNote>
       );
     case "first_build":
       return (
         <SystemNote
+          origin={origin}
           icon={<Hammer className="size-3.5" />}
           title="Building your game for the first time"
           detailsLabel="Show what I asked the AI"
@@ -208,11 +214,14 @@ function UserMessage({ text, origin }: { text: string; origin: Extract<ChatItem,
 /** A message InfinaBox sent on the person's behalf: a neutral one-line note,
  * with the real message it sent one click away. */
 function SystemNote({
+  origin,
   icon,
   title,
   detailsLabel,
   children,
 }: {
+  /** Which kind of message it stands for (read by the E2E tests). */
+  origin: "auto_fix" | "first_build";
   icon: ReactNode;
   title: string;
   detailsLabel: string;
@@ -224,6 +233,7 @@ function SystemNote({
       open={open}
       onOpenChange={setOpen}
       data-testid="system-note"
+      data-origin={origin}
       className="rounded-lg border border-dashed border-border bg-muted/30"
     >
       <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
@@ -283,7 +293,9 @@ function PlanCard({
         <ListChecks className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Plan</span>
-          <span className="text-sm font-medium break-words text-foreground">{title}</span>
+          <span data-testid="plan-title" className="text-sm font-medium break-words text-foreground">
+            {title}
+          </span>
         </div>
         {!waiting && (
           <span className="flex shrink-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
@@ -320,11 +332,18 @@ function PlanCard({
             )}
             Waiting for your OK
           </span>
-          <Button type="button" size="sm" variant="outline" onClick={onChange} disabled={!actionable}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="plan-change"
+            onClick={onChange}
+            disabled={!actionable}
+          >
             <PencilLine />
             Change something
           </Button>
-          <Button type="button" size="sm" onClick={onApprove} disabled={!actionable}>
+          <Button type="button" size="sm" data-testid="plan-approve" onClick={onApprove} disabled={!actionable}>
             <Check />
             Approve
           </Button>

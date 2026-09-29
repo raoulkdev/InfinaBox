@@ -89,6 +89,7 @@ export function StudioSettingsPopover({ projectPath }: { projectPath: string }) 
           size="icon-xs"
           variant="ghost"
           aria-label="Studio settings"
+          data-testid="studio-settings-button"
           title="Studio settings"
           className="text-muted-foreground"
         >
@@ -140,6 +141,7 @@ export function StudioSettingsPopover({ projectPath }: { projectPath: string }) 
                     <RadioGroup.Item
                       key={option.value}
                       value={option.value}
+                      data-testid={`setting-plan-${option.value}`}
                       className="group flex items-start gap-2.5 rounded-lg border border-border px-2.5 py-2 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50 data-[state=checked]:border-foreground/30 data-[state=checked]:bg-muted/40"
                     >
                       <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border border-foreground/30 group-data-[state=checked]:border-foreground">
@@ -156,6 +158,7 @@ export function StudioSettingsPopover({ projectPath }: { projectPath: string }) 
 
               <div className="flex flex-col gap-2.5 border-t border-border pt-3">
                 <ToggleRow
+                  testId="setting-teach"
                   label="Teach me as you go"
                   description="Explanations include a short lesson on how it works, pointing at the real files."
                   checked={settings?.teach ?? false}
@@ -163,6 +166,7 @@ export function StudioSettingsPopover({ projectPath }: { projectPath: string }) 
                   onChange={(teach) => settings && void save({ ...settings, teach })}
                 />
                 <ToggleRow
+                  testId="setting-auto-fix"
                   label="Fix errors automatically"
                   description="When your game shows an error, the AI tries to fix it on its own."
                   checked={settings?.auto_fix ?? false}
@@ -198,12 +202,14 @@ function SettingGroup({ label, children }: { label: string; children: ReactNode 
 }
 
 function ToggleRow({
+  testId,
   label,
   description,
   checked,
   disabled,
   onChange,
 }: {
+  testId: string;
   label: string;
   description: string;
   checked: boolean;
@@ -217,6 +223,7 @@ function ToggleRow({
         <span className="text-xs text-muted-foreground">{description}</span>
       </span>
       <Switch.Root
+        data-testid={testId}
         checked={checked}
         disabled={disabled}
         onCheckedChange={onChange}

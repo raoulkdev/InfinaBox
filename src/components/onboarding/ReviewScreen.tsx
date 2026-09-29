@@ -139,7 +139,13 @@ export function ReviewScreen({ answers, parentDir, templates, onBack, onCreated,
           >
             <PlanBlock icon={<Gamepad2 />} label="Starting point">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-base font-medium text-foreground">{templateName(templateId)}</span>
+                <span
+                  data-testid="onboarding-template"
+                  data-template-id={templateId}
+                  className="text-base font-medium text-foreground"
+                >
+                  {templateName(templateId)}
+                </span>
                 {templateList.length > 1 && (
                   <label className="flex items-center gap-2 text-xs text-muted-foreground">
                     Use a different starting point
@@ -162,7 +168,7 @@ export function ReviewScreen({ answers, parentDir, templates, onBack, onCreated,
                   </label>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground">
+              <p data-testid="onboarding-template-reason" className="text-sm text-muted-foreground">
                 {templateOverride
                   ? "You picked this one yourself."
                   : ready.choice.reason}
@@ -180,6 +186,8 @@ export function ReviewScreen({ answers, parentDir, templates, onBack, onCreated,
                       <li
                         key={path}
                         title={path}
+                        data-testid="onboarding-card"
+                        data-path={path}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1 text-sm text-foreground/90"
                       >
                         {card.group && <span className="text-xs text-muted-foreground">{card.group} ·</span>}
@@ -194,7 +202,7 @@ export function ReviewScreen({ answers, parentDir, templates, onBack, onCreated,
             <PlanBlock icon={<Hammer />} label="What I'll build first">
               <ol className="flex flex-col gap-1.5">
                 {ready.first_build_steps.map((step, i) => (
-                  <li key={i} className="flex gap-2.5 text-sm text-foreground/90">
+                  <li key={i} data-testid="onboarding-build-step" className="flex gap-2.5 text-sm text-foreground/90">
                     <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground/10 text-xs text-muted-foreground tabular-nums">
                       {i + 1}
                     </span>

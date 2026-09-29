@@ -37,6 +37,7 @@ export function ContextSection({ projectPath }: ContextSectionProps) {
     <Tabs
       value={tab}
       onValueChange={(value) => setTab(value as ContextTab)}
+      data-testid="context-section"
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2"
     >
       <div
