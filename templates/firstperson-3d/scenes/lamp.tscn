@@ -1,0 +1,17 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/lamp.gd" id="1_lamp"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_bulb"]
+size = Vector3(0.7, 0.08, 0.7)
+
+[node name="Lamp" type="Node3D"]
+script = ExtResource("1_lamp")
+
+[node name="Bulb" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, 0)
+mesh = SubResource("BoxMesh_bulb")
+
+[node name="Light" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
+omni_range = 9.0

@@ -1,0 +1,1323 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/block.tscn" id="1_block"]
+[ext_resource type="PackedScene" path="res://scenes/lamp.tscn" id="2_lamp"]
+[ext_resource type="PackedScene" path="res://scenes/locked_door.tscn" id="3_locked_door"]
+[ext_resource type="PackedScene" path="res://scenes/key.tscn" id="4_key"]
+[ext_resource type="PackedScene" path="res://scenes/exit.tscn" id="5_exit"]
+
+[node name="Level" type="Node3D"]
+
+[node name="Floors" type="Node3D" parent="."]
+
+[node name="Rugs" type="Node3D" parent="."]
+
+[node name="Ceilings" type="Node3D" parent="."]
+
+[node name="Walls" type="Node3D" parent="."]
+
+[node name="Trim" type="Node3D" parent="."]
+
+[node name="Props" type="Node3D" parent="."]
+
+[node name="Lamps" type="Node3D" parent="."]
+
+[node name="Doors" type="Node3D" parent="."]
+
+[node name="Keys" type="Node3D" parent="."]
+
+[node name="FloorSlab" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(24, -0.1, 15)
+size = Vector3(51, 0.2, 33)
+color = Color(0.1, 0.1, 0.11, 1)
+
+[node name="FloorStart" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(6, 0.01, 6)
+size = Vector3(9, 0.02, 9)
+color = Color(0.3, 0.2, 0.13, 1)
+solid = false
+
+[node name="CeilingStart" parent="Ceilings" instance=ExtResource("1_block")]
+position = Vector3(6, 3.3, 6)
+size = Vector3(9, 0.2, 9)
+color = Color(0.36, 0.34, 0.33, 1)
+
+[node name="FloorAlcoveHall" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(6, 0.01, 12)
+size = Vector3(3, 0.02, 3)
+color = Color(0.22, 0.22, 0.26, 1)
+solid = false
+
+[node name="CeilingAlcoveHall" parent="Ceilings" instance=ExtResource("1_block")]
+position = Vector3(6, 3.3, 12)
+size = Vector3(3, 0.2, 3)
+color = Color(0.36, 0.34, 0.33, 1)
+
+[node name="FloorStorage" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(6, 0.01, 16.5)
+size = Vector3(9, 0.02, 6)
+color = Color(0.26, 0.2, 0.15, 1)
+solid = false
+
+[node name="CeilingStorage" parent="Ceilings" instance=ExtResource("1_block")]
+position = Vector3(6, 3.3, 16.5)
+size = Vector3(9, 0.2, 6)
+color = Color(0.36, 0.34, 0.33, 1)
+
+[node name="FloorDoor1" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(12, 0.01, 6)
+size = Vector3(3, 0.02, 3)
+color = Color(0.22, 0.22, 0.26, 1)
+solid = false
+
+[node name="CeilingDoor1" parent="Ceilings" instance=ExtResource("1_block")]
+position = Vector3(12, 3.3, 6)
+size = Vector3(3, 0.2, 3)
+color = Color(0.36, 0.34, 0.33, 1)
+
+[node name="FloorHall1" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(16.5, 0.01, 6)
+size = Vector3(6, 0.02, 3)
+color = Color(0.22, 0.22, 0.26, 1)
+solid = false
+
+[node name="CeilingHall1" parent="Ceilings" instance=ExtResource("1_block")]
+position = Vector3(16.5, 3.3, 6)
+size = Vector3(6, 0.2, 3)
+color = Color(0.36, 0.34, 0.33, 1)
+
+[node name="FloorLibrary" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(25.5, 0.01, 7.5)
+size = Vector3(12, 0.02, 12)
+color = Color(0.17, 0.11, 0.1, 1)
+solid = false
+
+[node name="CeilingLibrary" parent="Ceilings" instance=ExtResource("1_block")]
+position = Vector3(25.5, 3.3, 7.5)
+size = Vector3(12, 0.2, 12)
+color = Color(0.36, 0.34, 0.33, 1)
+
+[node name="FloorDeadEndA" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(36, 0.01, 6)
+size = Vector3(9, 0.02, 3)
+color = Color(0.19, 0.19, 0.22, 1)
+solid = false
+
+[node name="CeilingDeadEndA" parent="Ceilings" instance=ExtResource("1_block")]
+position = Vector3(36, 3.3, 6)
+size = Vector3(9, 0.2, 3)
+color = Color(0.36, 0.34, 0.33, 1)
+
+[node name="FloorDeadEndB" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(39, 0.01, 12)
+size = Vector3(3, 0.02, 9)
+color = Color(0.19, 0.19, 0.22, 1)
+solid = false
+
+[node name="CeilingDeadEndB" parent="Ceilings" instance=ExtResource("1_block")]
+position = Vector3(39, 3.3, 12)
+size = Vector3(3, 0.2, 9)
+color = Color(0.36, 0.34, 0.33, 1)
+
+[node name="FloorDoor2" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(27, 0.01, 15)
+size = Vector3(3, 0.02, 3)
+color = Color(0.22, 0.22, 0.26, 1)
+solid = false
+
+[node name="CeilingDoor2" parent="Ceilings" instance=ExtResource("1_block")]
+position = Vector3(27, 3.3, 15)
+size = Vector3(3, 0.2, 3)
+color = Color(0.36, 0.34, 0.33, 1)
+
+[node name="FloorHall2" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(27, 0.01, 18)
+size = Vector3(3, 0.02, 3)
+color = Color(0.22, 0.22, 0.26, 1)
+solid = false
+
+[node name="CeilingHall2" parent="Ceilings" instance=ExtResource("1_block")]
+position = Vector3(27, 3.3, 18)
+size = Vector3(3, 0.2, 3)
+color = Color(0.36, 0.34, 0.33, 1)
+
+[node name="FloorCellar" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(27, 0.01, 24)
+size = Vector3(15, 0.02, 9)
+color = Color(0.12, 0.21, 0.21, 1)
+solid = false
+
+[node name="CeilingCellar" parent="Ceilings" instance=ExtResource("1_block")]
+position = Vector3(27, 3.3, 24)
+size = Vector3(15, 0.2, 9)
+color = Color(0.36, 0.34, 0.33, 1)
+
+[node name="FloorDoor3" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(36, 0.01, 24)
+size = Vector3(3, 0.02, 3)
+color = Color(0.22, 0.22, 0.26, 1)
+solid = false
+
+[node name="CeilingDoor3" parent="Ceilings" instance=ExtResource("1_block")]
+position = Vector3(36, 3.3, 24)
+size = Vector3(3, 0.2, 3)
+color = Color(0.36, 0.34, 0.33, 1)
+
+[node name="FloorExitRoom" parent="Floors" instance=ExtResource("1_block")]
+position = Vector3(42, 0.01, 24)
+size = Vector3(9, 0.02, 9)
+color = Color(0.56, 0.52, 0.42, 1)
+solid = false
+
+[node name="CeilingExitRoom" parent="Ceilings" instance=ExtResource("1_block")]
+position = Vector3(42, 3.3, 24)
+size = Vector3(9, 0.2, 9)
+color = Color(0.36, 0.34, 0.33, 1)
+
+[node name="Wall_r1_c1" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(3, 1.6, 0)
+size = Vector3(9, 3.2, 3)
+color = Color(0.74, 0.68, 0.56, 1)
+
+[node name="Wainscot_r1_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(3, 0.5, 0)
+size = Vector3(9.04, 1, 3.04)
+color = Color(0.407, 0.374, 0.308, 1)
+solid = false
+
+[node name="Rail_r1_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(3, 1.04, 0)
+size = Vector3(9.08, 0.08, 3.08)
+color = Color(0.746, 0.692, 0.584, 1)
+solid = false
+
+[node name="Wall_r1_c4" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(10.5, 1.6, 0)
+size = Vector3(6, 3.2, 3)
+color = Color(0.74, 0.68, 0.56, 1)
+
+[node name="Wainscot_r1_c4" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(10.5, 0.5, 0)
+size = Vector3(6.04, 1, 3.04)
+color = Color(0.407, 0.374, 0.308, 1)
+solid = false
+
+[node name="Rail_r1_c4" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(10.5, 1.04, 0)
+size = Vector3(6.08, 0.08, 3.08)
+color = Color(0.746, 0.692, 0.584, 1)
+solid = false
+
+[node name="Wall_r1_c7" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(21, 1.6, 0)
+size = Vector3(9, 3.2, 3)
+color = Color(0.56, 0.17, 0.21, 1)
+
+[node name="Wainscot_r1_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(21, 0.5, 0)
+size = Vector3(9.04, 1, 3.04)
+color = Color(0.308, 0.094, 0.116, 1)
+solid = false
+
+[node name="Rail_r1_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(21, 1.04, 0)
+size = Vector3(9.08, 0.08, 3.08)
+color = Color(0.584, 0.233, 0.269, 1)
+solid = false
+
+[node name="Wall_r1_c10" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(30, 1.6, 0)
+size = Vector3(9, 3.2, 3)
+color = Color(0.56, 0.17, 0.21, 1)
+
+[node name="Wainscot_r1_c10" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(30, 0.5, 0)
+size = Vector3(9.04, 1, 3.04)
+color = Color(0.308, 0.094, 0.116, 1)
+solid = false
+
+[node name="Rail_r1_c10" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(30, 1.04, 0)
+size = Vector3(9.08, 0.08, 3.08)
+color = Color(0.584, 0.233, 0.269, 1)
+solid = false
+
+[node name="Wall_r2_c1" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(0, 1.6, 3)
+size = Vector3(3, 3.2, 3)
+color = Color(0.74, 0.68, 0.56, 1)
+
+[node name="Wainscot_r2_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(0, 0.5, 3)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.407, 0.374, 0.308, 1)
+solid = false
+
+[node name="Rail_r2_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(0, 1.04, 3)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.746, 0.692, 0.584, 1)
+solid = false
+
+[node name="Wall_r2_c5" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(12, 1.6, 3)
+size = Vector3(3, 3.2, 3)
+color = Color(0.74, 0.68, 0.56, 1)
+
+[node name="Wainscot_r2_c5" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(12, 0.5, 3)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.407, 0.374, 0.308, 1)
+solid = false
+
+[node name="Rail_r2_c5" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(12, 1.04, 3)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.746, 0.692, 0.584, 1)
+solid = false
+
+[node name="Wall_r2_c6" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(15, 1.6, 3)
+size = Vector3(3, 3.2, 3)
+color = Color(0.4, 0.44, 0.54, 1)
+
+[node name="Wainscot_r2_c6" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(15, 0.5, 3)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.22, 0.242, 0.297, 1)
+solid = false
+
+[node name="Rail_r2_c6" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(15, 1.04, 3)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.44, 0.476, 0.566, 1)
+solid = false
+
+[node name="Wall_r2_c7" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(18, 1.6, 3)
+size = Vector3(3, 3.2, 3)
+color = Color(0.56, 0.17, 0.21, 1)
+
+[node name="Wainscot_r2_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(18, 0.5, 3)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.308, 0.094, 0.116, 1)
+solid = false
+
+[node name="Rail_r2_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(18, 1.04, 3)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.584, 0.233, 0.269, 1)
+solid = false
+
+[node name="Wall_r2_c12" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(33, 1.6, 3)
+size = Vector3(3, 3.2, 3)
+color = Color(0.56, 0.17, 0.21, 1)
+
+[node name="Wainscot_r2_c12" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(33, 0.5, 3)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.308, 0.094, 0.116, 1)
+solid = false
+
+[node name="Rail_r2_c12" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(33, 1.04, 3)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.584, 0.233, 0.269, 1)
+solid = false
+
+[node name="Wall_r2_c13" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(39, 1.6, 3)
+size = Vector3(9, 3.2, 3)
+color = Color(0.3, 0.31, 0.38, 1)
+
+[node name="Wainscot_r2_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(39, 0.5, 3)
+size = Vector3(9.04, 1, 3.04)
+color = Color(0.165, 0.171, 0.209, 1)
+solid = false
+
+[node name="Rail_r2_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(39, 1.04, 3)
+size = Vector3(9.08, 0.08, 3.08)
+color = Color(0.35, 0.359, 0.422, 1)
+solid = false
+
+[node name="Wall_r3_c1" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(0, 1.6, 6)
+size = Vector3(3, 3.2, 3)
+color = Color(0.74, 0.68, 0.56, 1)
+
+[node name="Wainscot_r3_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(0, 0.5, 6)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.407, 0.374, 0.308, 1)
+solid = false
+
+[node name="Rail_r3_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(0, 1.04, 6)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.746, 0.692, 0.584, 1)
+solid = false
+
+[node name="Wall_r3_c15" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(42, 1.6, 6)
+size = Vector3(3, 3.2, 3)
+color = Color(0.3, 0.31, 0.38, 1)
+
+[node name="Wainscot_r3_c15" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(42, 0.5, 6)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.165, 0.171, 0.209, 1)
+solid = false
+
+[node name="Rail_r3_c15" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(42, 1.04, 6)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.35, 0.359, 0.422, 1)
+solid = false
+
+[node name="Wall_r4_c1" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(0, 1.6, 9)
+size = Vector3(3, 3.2, 3)
+color = Color(0.74, 0.68, 0.56, 1)
+
+[node name="Wainscot_r4_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(0, 0.5, 9)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.407, 0.374, 0.308, 1)
+solid = false
+
+[node name="Rail_r4_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(0, 1.04, 9)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.746, 0.692, 0.584, 1)
+solid = false
+
+[node name="Wall_r4_c5" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(12, 1.6, 9)
+size = Vector3(3, 3.2, 3)
+color = Color(0.74, 0.68, 0.56, 1)
+
+[node name="Wainscot_r4_c5" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(12, 0.5, 9)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.407, 0.374, 0.308, 1)
+solid = false
+
+[node name="Rail_r4_c5" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(12, 1.04, 9)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.746, 0.692, 0.584, 1)
+solid = false
+
+[node name="Wall_r4_c6" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(15, 1.6, 9)
+size = Vector3(3, 3.2, 3)
+color = Color(0.4, 0.44, 0.54, 1)
+
+[node name="Wainscot_r4_c6" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(15, 0.5, 9)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.22, 0.242, 0.297, 1)
+solid = false
+
+[node name="Rail_r4_c6" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(15, 1.04, 9)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.44, 0.476, 0.566, 1)
+solid = false
+
+[node name="Wall_r4_c7" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(18, 1.6, 9)
+size = Vector3(3, 3.2, 3)
+color = Color(0.56, 0.17, 0.21, 1)
+
+[node name="Wainscot_r4_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(18, 0.5, 9)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.308, 0.094, 0.116, 1)
+solid = false
+
+[node name="Rail_r4_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(18, 1.04, 9)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.584, 0.233, 0.269, 1)
+solid = false
+
+[node name="Wall_r4_c12" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(33, 1.6, 9)
+size = Vector3(3, 3.2, 3)
+color = Color(0.56, 0.17, 0.21, 1)
+
+[node name="Wainscot_r4_c12" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(33, 0.5, 9)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.308, 0.094, 0.116, 1)
+solid = false
+
+[node name="Rail_r4_c12" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(33, 1.04, 9)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.584, 0.233, 0.269, 1)
+solid = false
+
+[node name="Wall_r4_c13" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(36, 1.6, 9)
+size = Vector3(3, 3.2, 3)
+color = Color(0.3, 0.31, 0.38, 1)
+
+[node name="Wainscot_r4_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(36, 0.5, 9)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.165, 0.171, 0.209, 1)
+solid = false
+
+[node name="Rail_r4_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(36, 1.04, 9)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.35, 0.359, 0.422, 1)
+solid = false
+
+[node name="Wall_r4_c15" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(42, 1.6, 9)
+size = Vector3(3, 3.2, 3)
+color = Color(0.3, 0.31, 0.38, 1)
+
+[node name="Wainscot_r4_c15" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(42, 0.5, 9)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.165, 0.171, 0.209, 1)
+solid = false
+
+[node name="Rail_r4_c15" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(42, 1.04, 9)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.35, 0.359, 0.422, 1)
+solid = false
+
+[node name="Wall_r5_c1" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(0, 1.6, 12)
+size = Vector3(3, 3.2, 3)
+color = Color(0.55, 0.44, 0.3, 1)
+
+[node name="Wainscot_r5_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(0, 0.5, 12)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.303, 0.242, 0.165, 1)
+solid = false
+
+[node name="Rail_r5_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(0, 1.04, 12)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.575, 0.476, 0.35, 1)
+solid = false
+
+[node name="Wall_r5_c2" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(3, 1.6, 12)
+size = Vector3(3, 3.2, 3)
+color = Color(0.4, 0.44, 0.54, 1)
+
+[node name="Wainscot_r5_c2" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(3, 0.5, 12)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.22, 0.242, 0.297, 1)
+solid = false
+
+[node name="Rail_r5_c2" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(3, 1.04, 12)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.44, 0.476, 0.566, 1)
+solid = false
+
+[node name="Wall_r5_c4" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(9, 1.6, 12)
+size = Vector3(3, 3.2, 3)
+color = Color(0.4, 0.44, 0.54, 1)
+
+[node name="Wainscot_r5_c4" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(9, 0.5, 12)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.22, 0.242, 0.297, 1)
+solid = false
+
+[node name="Rail_r5_c4" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(9, 1.04, 12)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.44, 0.476, 0.566, 1)
+solid = false
+
+[node name="Wall_r5_c5" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(12, 1.6, 12)
+size = Vector3(3, 3.2, 3)
+color = Color(0.55, 0.44, 0.3, 1)
+
+[node name="Wainscot_r5_c5" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(12, 0.5, 12)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.303, 0.242, 0.165, 1)
+solid = false
+
+[node name="Rail_r5_c5" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(12, 1.04, 12)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.575, 0.476, 0.35, 1)
+solid = false
+
+[node name="Wall_r5_c7" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(18, 1.6, 12)
+size = Vector3(3, 3.2, 3)
+color = Color(0.56, 0.17, 0.21, 1)
+
+[node name="Wainscot_r5_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(18, 0.5, 12)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.308, 0.094, 0.116, 1)
+solid = false
+
+[node name="Rail_r5_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(18, 1.04, 12)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.584, 0.233, 0.269, 1)
+solid = false
+
+[node name="Wall_r5_c12" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(33, 1.6, 12)
+size = Vector3(3, 3.2, 3)
+color = Color(0.56, 0.17, 0.21, 1)
+
+[node name="Wainscot_r5_c12" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(33, 0.5, 12)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.308, 0.094, 0.116, 1)
+solid = false
+
+[node name="Rail_r5_c12" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(33, 1.04, 12)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.584, 0.233, 0.269, 1)
+solid = false
+
+[node name="Wall_r5_c13" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(36, 1.6, 12)
+size = Vector3(3, 3.2, 3)
+color = Color(0.3, 0.31, 0.38, 1)
+
+[node name="Wainscot_r5_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(36, 0.5, 12)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.165, 0.171, 0.209, 1)
+solid = false
+
+[node name="Rail_r5_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(36, 1.04, 12)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.35, 0.359, 0.422, 1)
+solid = false
+
+[node name="Wall_r5_c15" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(42, 1.6, 12)
+size = Vector3(3, 3.2, 3)
+color = Color(0.3, 0.31, 0.38, 1)
+
+[node name="Wainscot_r5_c15" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(42, 0.5, 12)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.165, 0.171, 0.209, 1)
+solid = false
+
+[node name="Rail_r5_c15" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(42, 1.04, 12)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.35, 0.359, 0.422, 1)
+solid = false
+
+[node name="Wall_r6_c1" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(0, 1.6, 15)
+size = Vector3(3, 3.2, 3)
+color = Color(0.55, 0.44, 0.3, 1)
+
+[node name="Wainscot_r6_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(0, 0.5, 15)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.303, 0.242, 0.165, 1)
+solid = false
+
+[node name="Rail_r6_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(0, 1.04, 15)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.575, 0.476, 0.35, 1)
+solid = false
+
+[node name="Wall_r6_c5" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(12, 1.6, 15)
+size = Vector3(3, 3.2, 3)
+color = Color(0.55, 0.44, 0.3, 1)
+
+[node name="Wainscot_r6_c5" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(12, 0.5, 15)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.303, 0.242, 0.165, 1)
+solid = false
+
+[node name="Rail_r6_c5" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(12, 1.04, 15)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.575, 0.476, 0.35, 1)
+solid = false
+
+[node name="Wall_r6_c7" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(19.5, 1.6, 15)
+size = Vector3(6, 3.2, 3)
+color = Color(0.56, 0.17, 0.21, 1)
+
+[node name="Wainscot_r6_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(19.5, 0.5, 15)
+size = Vector3(6.04, 1, 3.04)
+color = Color(0.308, 0.094, 0.116, 1)
+solid = false
+
+[node name="Rail_r6_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(19.5, 1.04, 15)
+size = Vector3(6.08, 0.08, 3.08)
+color = Color(0.584, 0.233, 0.269, 1)
+solid = false
+
+[node name="Wall_r6_c9" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(24, 1.6, 15)
+size = Vector3(3, 3.2, 3)
+color = Color(0.4, 0.44, 0.54, 1)
+
+[node name="Wainscot_r6_c9" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(24, 0.5, 15)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.22, 0.242, 0.297, 1)
+solid = false
+
+[node name="Rail_r6_c9" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(24, 1.04, 15)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.44, 0.476, 0.566, 1)
+solid = false
+
+[node name="Wall_r6_c11" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(30, 1.6, 15)
+size = Vector3(3, 3.2, 3)
+color = Color(0.4, 0.44, 0.54, 1)
+
+[node name="Wainscot_r6_c11" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(30, 0.5, 15)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.22, 0.242, 0.297, 1)
+solid = false
+
+[node name="Rail_r6_c11" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(30, 1.04, 15)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.44, 0.476, 0.566, 1)
+solid = false
+
+[node name="Wall_r6_c12" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(33, 1.6, 15)
+size = Vector3(3, 3.2, 3)
+color = Color(0.56, 0.17, 0.21, 1)
+
+[node name="Wainscot_r6_c12" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(33, 0.5, 15)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.308, 0.094, 0.116, 1)
+solid = false
+
+[node name="Rail_r6_c12" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(33, 1.04, 15)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.584, 0.233, 0.269, 1)
+solid = false
+
+[node name="Wall_r6_c13" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(36, 1.6, 15)
+size = Vector3(3, 3.2, 3)
+color = Color(0.3, 0.31, 0.38, 1)
+
+[node name="Wainscot_r6_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(36, 0.5, 15)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.165, 0.171, 0.209, 1)
+solid = false
+
+[node name="Rail_r6_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(36, 1.04, 15)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.35, 0.359, 0.422, 1)
+solid = false
+
+[node name="Wall_r6_c15" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(42, 1.6, 15)
+size = Vector3(3, 3.2, 3)
+color = Color(0.3, 0.31, 0.38, 1)
+
+[node name="Wainscot_r6_c15" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(42, 0.5, 15)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.165, 0.171, 0.209, 1)
+solid = false
+
+[node name="Rail_r6_c15" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(42, 1.04, 15)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.35, 0.359, 0.422, 1)
+solid = false
+
+[node name="Wall_r7_c1" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(0, 1.6, 18)
+size = Vector3(3, 3.2, 3)
+color = Color(0.55, 0.44, 0.3, 1)
+
+[node name="Wainscot_r7_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(0, 0.5, 18)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.303, 0.242, 0.165, 1)
+solid = false
+
+[node name="Rail_r7_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(0, 1.04, 18)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.575, 0.476, 0.35, 1)
+solid = false
+
+[node name="Wall_r7_c5" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(12, 1.6, 18)
+size = Vector3(3, 3.2, 3)
+color = Color(0.55, 0.44, 0.3, 1)
+
+[node name="Wainscot_r7_c5" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(12, 0.5, 18)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.303, 0.242, 0.165, 1)
+solid = false
+
+[node name="Rail_r7_c5" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(12, 1.04, 18)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.575, 0.476, 0.35, 1)
+solid = false
+
+[node name="Wall_r7_c7" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(19.5, 1.6, 18)
+size = Vector3(6, 3.2, 3)
+color = Color(0.16, 0.46, 0.46, 1)
+
+[node name="Wainscot_r7_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(19.5, 0.5, 18)
+size = Vector3(6.04, 1, 3.04)
+color = Color(0.088, 0.253, 0.253, 1)
+solid = false
+
+[node name="Rail_r7_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(19.5, 1.04, 18)
+size = Vector3(6.08, 0.08, 3.08)
+color = Color(0.224, 0.494, 0.494, 1)
+solid = false
+
+[node name="Wall_r7_c9" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(24, 1.6, 18)
+size = Vector3(3, 3.2, 3)
+color = Color(0.4, 0.44, 0.54, 1)
+
+[node name="Wainscot_r7_c9" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(24, 0.5, 18)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.22, 0.242, 0.297, 1)
+solid = false
+
+[node name="Rail_r7_c9" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(24, 1.04, 18)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.44, 0.476, 0.566, 1)
+solid = false
+
+[node name="Wall_r7_c11" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(30, 1.6, 18)
+size = Vector3(3, 3.2, 3)
+color = Color(0.4, 0.44, 0.54, 1)
+
+[node name="Wainscot_r7_c11" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(30, 0.5, 18)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.22, 0.242, 0.297, 1)
+solid = false
+
+[node name="Rail_r7_c11" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(30, 1.04, 18)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.44, 0.476, 0.566, 1)
+solid = false
+
+[node name="Wall_r7_c12" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(33, 1.6, 18)
+size = Vector3(3, 3.2, 3)
+color = Color(0.16, 0.46, 0.46, 1)
+
+[node name="Wainscot_r7_c12" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(33, 0.5, 18)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.088, 0.253, 0.253, 1)
+solid = false
+
+[node name="Rail_r7_c12" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(33, 1.04, 18)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.224, 0.494, 0.494, 1)
+solid = false
+
+[node name="Wall_r7_c13" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(39, 1.6, 18)
+size = Vector3(9, 3.2, 3)
+color = Color(0.92, 0.87, 0.74, 1)
+
+[node name="Wainscot_r7_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(39, 0.5, 18)
+size = Vector3(9.04, 1, 3.04)
+color = Color(0.506, 0.479, 0.407, 1)
+solid = false
+
+[node name="Rail_r7_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(39, 1.04, 18)
+size = Vector3(9.08, 0.08, 3.08)
+color = Color(0.908, 0.863, 0.746, 1)
+solid = false
+
+[node name="Wall_r7_c16" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(46.5, 1.6, 18)
+size = Vector3(6, 3.2, 3)
+color = Color(0.92, 0.87, 0.74, 1)
+
+[node name="Wainscot_r7_c16" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(46.5, 0.5, 18)
+size = Vector3(6.04, 1, 3.04)
+color = Color(0.506, 0.479, 0.407, 1)
+solid = false
+
+[node name="Rail_r7_c16" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(46.5, 1.04, 18)
+size = Vector3(6.08, 0.08, 3.08)
+color = Color(0.908, 0.863, 0.746, 1)
+solid = false
+
+[node name="Wall_r8_c1" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(3, 1.6, 21)
+size = Vector3(9, 3.2, 3)
+color = Color(0.55, 0.44, 0.3, 1)
+
+[node name="Wainscot_r8_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(3, 0.5, 21)
+size = Vector3(9.04, 1, 3.04)
+color = Color(0.303, 0.242, 0.165, 1)
+solid = false
+
+[node name="Rail_r8_c1" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(3, 1.04, 21)
+size = Vector3(9.08, 0.08, 3.08)
+color = Color(0.575, 0.476, 0.35, 1)
+solid = false
+
+[node name="Wall_r8_c4" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(10.5, 1.6, 21)
+size = Vector3(6, 3.2, 3)
+color = Color(0.55, 0.44, 0.3, 1)
+
+[node name="Wainscot_r8_c4" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(10.5, 0.5, 21)
+size = Vector3(6.04, 1, 3.04)
+color = Color(0.303, 0.242, 0.165, 1)
+solid = false
+
+[node name="Rail_r8_c4" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(10.5, 1.04, 21)
+size = Vector3(6.08, 0.08, 3.08)
+color = Color(0.575, 0.476, 0.35, 1)
+solid = false
+
+[node name="Wall_r8_c7" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(18, 1.6, 21)
+size = Vector3(3, 3.2, 3)
+color = Color(0.16, 0.46, 0.46, 1)
+
+[node name="Wainscot_r8_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(18, 0.5, 21)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.088, 0.253, 0.253, 1)
+solid = false
+
+[node name="Rail_r8_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(18, 1.04, 21)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.224, 0.494, 0.494, 1)
+solid = false
+
+[node name="Wall_r8_c13" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(36, 1.6, 21)
+size = Vector3(3, 3.2, 3)
+color = Color(0.92, 0.87, 0.74, 1)
+
+[node name="Wainscot_r8_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(36, 0.5, 21)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.506, 0.479, 0.407, 1)
+solid = false
+
+[node name="Rail_r8_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(36, 1.04, 21)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.908, 0.863, 0.746, 1)
+solid = false
+
+[node name="Wall_r8_c17" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(48, 1.6, 21)
+size = Vector3(3, 3.2, 3)
+color = Color(0.92, 0.87, 0.74, 1)
+
+[node name="Wainscot_r8_c17" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(48, 0.5, 21)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.506, 0.479, 0.407, 1)
+solid = false
+
+[node name="Rail_r8_c17" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(48, 1.04, 21)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.908, 0.863, 0.746, 1)
+solid = false
+
+[node name="Wall_r9_c7" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(18, 1.6, 24)
+size = Vector3(3, 3.2, 3)
+color = Color(0.16, 0.46, 0.46, 1)
+
+[node name="Wainscot_r9_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(18, 0.5, 24)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.088, 0.253, 0.253, 1)
+solid = false
+
+[node name="Rail_r9_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(18, 1.04, 24)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.224, 0.494, 0.494, 1)
+solid = false
+
+[node name="Wall_r9_c17" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(48, 1.6, 24)
+size = Vector3(3, 3.2, 3)
+color = Color(0.92, 0.87, 0.74, 1)
+
+[node name="Wainscot_r9_c17" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(48, 0.5, 24)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.506, 0.479, 0.407, 1)
+solid = false
+
+[node name="Rail_r9_c17" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(48, 1.04, 24)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.908, 0.863, 0.746, 1)
+solid = false
+
+[node name="Wall_r10_c7" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(18, 1.6, 27)
+size = Vector3(3, 3.2, 3)
+color = Color(0.16, 0.46, 0.46, 1)
+
+[node name="Wainscot_r10_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(18, 0.5, 27)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.088, 0.253, 0.253, 1)
+solid = false
+
+[node name="Rail_r10_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(18, 1.04, 27)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.224, 0.494, 0.494, 1)
+solid = false
+
+[node name="Wall_r10_c13" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(36, 1.6, 27)
+size = Vector3(3, 3.2, 3)
+color = Color(0.92, 0.87, 0.74, 1)
+
+[node name="Wainscot_r10_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(36, 0.5, 27)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.506, 0.479, 0.407, 1)
+solid = false
+
+[node name="Rail_r10_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(36, 1.04, 27)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.908, 0.863, 0.746, 1)
+solid = false
+
+[node name="Wall_r10_c17" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(48, 1.6, 27)
+size = Vector3(3, 3.2, 3)
+color = Color(0.92, 0.87, 0.74, 1)
+
+[node name="Wainscot_r10_c17" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(48, 0.5, 27)
+size = Vector3(3.04, 1, 3.04)
+color = Color(0.506, 0.479, 0.407, 1)
+solid = false
+
+[node name="Rail_r10_c17" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(48, 1.04, 27)
+size = Vector3(3.08, 0.08, 3.08)
+color = Color(0.908, 0.863, 0.746, 1)
+solid = false
+
+[node name="Wall_r11_c7" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(21, 1.6, 30)
+size = Vector3(9, 3.2, 3)
+color = Color(0.16, 0.46, 0.46, 1)
+
+[node name="Wainscot_r11_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(21, 0.5, 30)
+size = Vector3(9.04, 1, 3.04)
+color = Color(0.088, 0.253, 0.253, 1)
+solid = false
+
+[node name="Rail_r11_c7" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(21, 1.04, 30)
+size = Vector3(9.08, 0.08, 3.08)
+color = Color(0.224, 0.494, 0.494, 1)
+solid = false
+
+[node name="Wall_r11_c10" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(30, 1.6, 30)
+size = Vector3(9, 3.2, 3)
+color = Color(0.16, 0.46, 0.46, 1)
+
+[node name="Wainscot_r11_c10" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(30, 0.5, 30)
+size = Vector3(9.04, 1, 3.04)
+color = Color(0.088, 0.253, 0.253, 1)
+solid = false
+
+[node name="Rail_r11_c10" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(30, 1.04, 30)
+size = Vector3(9.08, 0.08, 3.08)
+color = Color(0.224, 0.494, 0.494, 1)
+solid = false
+
+[node name="Wall_r11_c13" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(39, 1.6, 30)
+size = Vector3(9, 3.2, 3)
+color = Color(0.92, 0.87, 0.74, 1)
+
+[node name="Wainscot_r11_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(39, 0.5, 30)
+size = Vector3(9.04, 1, 3.04)
+color = Color(0.506, 0.479, 0.407, 1)
+solid = false
+
+[node name="Rail_r11_c13" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(39, 1.04, 30)
+size = Vector3(9.08, 0.08, 3.08)
+color = Color(0.908, 0.863, 0.746, 1)
+solid = false
+
+[node name="Wall_r11_c16" parent="Walls" instance=ExtResource("1_block")]
+position = Vector3(46.5, 1.6, 30)
+size = Vector3(6, 3.2, 3)
+color = Color(0.92, 0.87, 0.74, 1)
+
+[node name="Wainscot_r11_c16" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(46.5, 0.5, 30)
+size = Vector3(6.04, 1, 3.04)
+color = Color(0.506, 0.479, 0.407, 1)
+solid = false
+
+[node name="Rail_r11_c16" parent="Trim" instance=ExtResource("1_block")]
+position = Vector3(46.5, 1.04, 30)
+size = Vector3(6.08, 0.08, 3.08)
+color = Color(0.908, 0.863, 0.746, 1)
+solid = false
+
+[node name="PillarA" parent="Props" instance=ExtResource("1_block")]
+position = Vector3(24, 1.6, 9)
+size = Vector3(1.1, 3.2, 1.1)
+color = Color(0.45, 0.46, 0.5, 1)
+
+[node name="PillarB" parent="Props" instance=ExtResource("1_block")]
+position = Vector3(27, 1.6, 6)
+size = Vector3(1.1, 3.2, 1.1)
+color = Color(0.45, 0.46, 0.5, 1)
+
+[node name="PillarC" parent="Props" instance=ExtResource("1_block")]
+position = Vector3(27, 1.6, 24)
+size = Vector3(1.1, 3.2, 1.1)
+color = Color(0.45, 0.46, 0.5, 1)
+
+[node name="CrateA" parent="Props" instance=ExtResource("1_block")]
+position = Vector3(2.6, 0.45, 18.3)
+size = Vector3(0.9, 0.9, 0.9)
+color = Color(0.55, 0.38, 0.2, 1)
+
+[node name="CrateB" parent="Props" instance=ExtResource("1_block")]
+position = Vector3(2.7, 1.15, 18.2)
+size = Vector3(0.7, 0.5, 0.7)
+color = Color(0.62, 0.44, 0.24, 1)
+
+[node name="CrateC" parent="Props" instance=ExtResource("1_block")]
+position = Vector3(3.6, 0.35, 14.3)
+size = Vector3(0.7, 0.7, 0.7)
+color = Color(0.62, 0.44, 0.24, 1)
+
+[node name="CrateD" parent="Props" instance=ExtResource("1_block")]
+position = Vector3(20.5, 0.5, 23.6)
+size = Vector3(1, 1, 1)
+color = Color(0.55, 0.38, 0.2, 1)
+
+[node name="CrateE" parent="Props" instance=ExtResource("1_block")]
+position = Vector3(33.3, 0.4, 26.7)
+size = Vector3(0.8, 0.8, 0.8)
+color = Color(0.62, 0.44, 0.24, 1)
+
+[node name="CrateF" parent="Props" instance=ExtResource("1_block")]
+position = Vector3(39, 0.45, 15.6)
+size = Vector3(0.9, 0.9, 0.9)
+color = Color(0.55, 0.38, 0.2, 1)
+
+[node name="Bench" parent="Props" instance=ExtResource("1_block")]
+position = Vector3(9.5, 0.25, 3.9)
+size = Vector3(0.9, 0.5, 2.2)
+color = Color(0.35, 0.22, 0.12, 1)
+
+[node name="BookcaseA" parent="Props" instance=ExtResource("1_block")]
+position = Vector3(21.15, 1.3, 12)
+size = Vector3(0.6, 2.6, 2.2)
+color = Color(0.3, 0.18, 0.1, 1)
+
+[node name="BookcaseB" parent="Props" instance=ExtResource("1_block")]
+position = Vector3(30.7, 1.3, 9)
+size = Vector3(0.6, 2.6, 2.4)
+color = Color(0.3, 0.18, 0.1, 1)
+
+[node name="RugStart" parent="Rugs" instance=ExtResource("1_block")]
+position = Vector3(6, 0.03, 6)
+size = Vector3(5, 0.02, 4.2)
+color = Color(0.5, 0.12, 0.15, 1)
+solid = false
+
+[node name="RugLibrary" parent="Rugs" instance=ExtResource("1_block")]
+position = Vector3(25.5, 0.03, 7.5)
+size = Vector3(6, 0.02, 4.5)
+color = Color(0.55, 0.42, 0.14, 1)
+solid = false
+
+[node name="RugCellar" parent="Rugs" instance=ExtResource("1_block")]
+position = Vector3(27, 0.03, 24)
+size = Vector3(6, 0.02, 4.6)
+color = Color(0.09, 0.28, 0.3, 1)
+solid = false
+
+[node name="LampStart" parent="Lamps" instance=ExtResource("2_lamp")]
+position = Vector3(6, 2.95, 6)
+energy = 1.7
+light_range = 10
+color = Color(1, 0.86, 0.62, 1)
+shadows = true
+
+[node name="LampAlcoveHall" parent="Lamps" instance=ExtResource("2_lamp")]
+position = Vector3(6, 2.95, 12)
+energy = 0.9
+light_range = 7
+color = Color(0.75, 0.85, 1, 1)
+
+[node name="LampStorage" parent="Lamps" instance=ExtResource("2_lamp")]
+position = Vector3(6, 2.95, 16.5)
+energy = 1.5
+light_range = 9
+color = Color(1, 0.86, 0.62, 1)
+shadows = true
+
+[node name="LampHall1" parent="Lamps" instance=ExtResource("2_lamp")]
+position = Vector3(16.5, 2.95, 6)
+energy = 1.0
+light_range = 8
+color = Color(0.75, 0.85, 1, 1)
+
+[node name="LampLibrary1" parent="Lamps" instance=ExtResource("2_lamp")]
+position = Vector3(23.25, 2.95, 7.5)
+energy = 1.6
+light_range = 10
+color = Color(1, 0.86, 0.62, 1)
+shadows = true
+
+[node name="LampLibrary2" parent="Lamps" instance=ExtResource("2_lamp")]
+position = Vector3(27.75, 2.95, 7.5)
+energy = 1.6
+light_range = 10
+color = Color(1, 0.86, 0.62, 1)
+shadows = true
+
+[node name="LampDeadEndA" parent="Lamps" instance=ExtResource("2_lamp")]
+position = Vector3(36, 2.95, 6)
+energy = 0.9
+light_range = 7
+color = Color(0.75, 0.85, 1, 1)
+
+[node name="LampDeadEndB" parent="Lamps" instance=ExtResource("2_lamp")]
+position = Vector3(39, 2.95, 12)
+energy = 1.3
+light_range = 8
+color = Color(1, 0.45, 0.3, 1)
+flicker = true
+
+[node name="LampHall2" parent="Lamps" instance=ExtResource("2_lamp")]
+position = Vector3(27, 2.95, 18)
+energy = 1.0
+light_range = 7
+color = Color(0.75, 0.85, 1, 1)
+
+[node name="LampCellar1" parent="Lamps" instance=ExtResource("2_lamp")]
+position = Vector3(24, 2.95, 24)
+energy = 1.6
+light_range = 10
+color = Color(0.85, 1, 0.95, 1)
+shadows = true
+
+[node name="LampCellar2" parent="Lamps" instance=ExtResource("2_lamp")]
+position = Vector3(30, 2.95, 24)
+energy = 1.6
+light_range = 10
+color = Color(0.85, 1, 0.95, 1)
+shadows = true
+
+[node name="LampExitRoom" parent="Lamps" instance=ExtResource("2_lamp")]
+position = Vector3(42, 2.95, 24)
+energy = 2.0
+light_range = 11
+color = Color(1, 0.95, 0.8, 1)
+shadows = true
+
+[node name="Door1" parent="Doors" instance=ExtResource("3_locked_door")]
+position = Vector3(12, 0, 6)
+
+[node name="Door2" parent="Doors" instance=ExtResource("3_locked_door")]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 27, 0, 15)
+
+[node name="Door3" parent="Doors" instance=ExtResource("3_locked_door")]
+position = Vector3(36, 0, 24)
+
+[node name="Key1" parent="Keys" instance=ExtResource("4_key")]
+position = Vector3(9, 0, 18)
+
+[node name="Key2" parent="Keys" instance=ExtResource("4_key")]
+position = Vector3(30, 0, 3)
+
+[node name="Key3" parent="Keys" instance=ExtResource("4_key")]
+position = Vector3(21, 0, 27)
+
+[node name="Exit" parent="." instance=ExtResource("5_exit")]
+position = Vector3(46.15, 0, 24)
