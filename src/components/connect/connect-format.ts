@@ -47,6 +47,11 @@ export function runOutcome(
   if (success) {
     return action === "install" ? `${name} finished installing.` : `The sign-in finished.`;
   }
+  // The installer said it was fine, but the backend's check afterwards
+  // didn't find the CLI (a `curl … | sh` whose download failed still exits 0).
+  if (action === "install" && code === 0) {
+    return `The installer finished, but ${name} still isn't on this computer. Its output above says what went wrong.`;
+  }
   const what = action === "install" ? "The installer" : "The sign-in";
   return code === null ? `${what} stopped before it finished.` : `${what} stopped with an error (code ${code}).`;
 }

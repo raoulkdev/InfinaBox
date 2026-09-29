@@ -645,6 +645,7 @@ pub fn connect_run(
         move |exit| {
             // A new install may have added a folder to the shell profile.
             refresh_login_shell_path();
+            let success = run_succeeded(action, exit.success, || connect::detect(provider).installed);
             {
                 let state = exit_app.state::<ConnectState>();
                 let mut running = lock(&state.0);
@@ -657,7 +658,7 @@ pub fn connect_run(
                 ConnectExitPayload {
                     action,
                     provider,
-                    success: exit.success,
+                    success,
                     code: exit.code,
                 },
             );
@@ -669,6 +670,15 @@ pub fn connect_run(
         session: Arc::new(session),
     });
     Ok(())
+}
+
+/// Whether an install or sign-in worked. `curl … | sh` exits 0 even when
+/// the download fails (a pipe's status is its last command's), so an
+/// install only counts once the CLI is really there (`installed_now`, only
+/// asked after a clean exit). The command itself runs exactly as it was
+/// shown to the person.
+fn run_succeeded(action: ConnectAction, exited_ok: bool, installed_now: impl FnOnce() -> bool) -> bool {
+    exited_ok && (action != ConnectAction::Install || installed_now())
 }
 
 #[tauri::command(async)]
@@ -731,6 +741,19 @@ mod tests {
                 thread::sleep(Duration::from_millis(20));
             }
         }
+    }
+
+    #[test]
+    fn an_install_only_succeeds_when_the_cli_is_there_afterwards() {
+        // Seen for real: `curl -fsSL … | sh` with the download refused
+        // (curl: (22) … 403) exits 0 without installing anything.
+        assert!(!run_succeeded(ConnectAction::Install, true, || false));
+        assert!(run_succeeded(ConnectAction::Install, true, || true));
+        assert!(!run_succeeded(ConnectAction::Install, false, || true));
+        // A sign-in is judged by its own exit; nothing is re-detected.
+        assert!(run_succeeded(ConnectAction::Login, true, || panic!("not asked")));
+        assert!(!run_succeeded(ConnectAction::Login, false, || panic!("not asked")));
+        assert!(!run_succeeded(ConnectAction::Install, false, || panic!("not asked")));
     }
 
     fn spawn(script: &str, sink: &Arc<Sink>) -> ConnectSession {
