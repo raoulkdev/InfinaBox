@@ -146,7 +146,16 @@ mod tests {
     #[test]
     fn lists_the_real_templates() {
         let ids: Vec<String> = templates().into_iter().map(|t| t.id).collect();
-        for id in ["platformer-2d", "topdown-2d", "shooter-2d", "blank-2d"] {
+        for id in [
+            "platformer-2d",
+            "topdown-2d",
+            "shooter-2d",
+            "puzzle-2d",
+            "visualnovel-2d",
+            "explorer-3d",
+            "firstperson-3d",
+            "blank-2d",
+        ] {
             assert!(ids.iter().any(|i| i == id), "missing {id} in {ids:?}");
         }
     }

@@ -1,0 +1,9 @@
+{
+  "id": "firstperson-3d",
+  "name": "First-person",
+  "description": "See through your character's eyes: walk around a small 3D place, find keys and reach the exit.",
+  "dimension": "3d",
+  "controls": "WASD to move, mouse to look, E to pick up or open",
+  "features": ["Walking and looking in first person", "Rooms or a small maze", "Things to pick up and a door to open", "A goal and an ending screen"],
+  "keywords": ["first-person", "first", "person", "fps", "maze", "dungeon", "horror", "escape", "walking", "3d", "rooms", "keys"]
+}

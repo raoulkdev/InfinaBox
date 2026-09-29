@@ -9,8 +9,10 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0.104"
+base64 = "0.22"
 chrono = { version = "0.4.45", features = ["serde"] }
 git2 = "0.21.0"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 include_dir = "0.7.4"
 notify = "6"
 regex = "1.13.1"
@@ -22,9 +24,22 @@ sha2 = "0.11.0"
 uuid = { version = "1.26.1", features = ["v4"] }
 zip = "8.6.0"
 
+# The OS keychain for provider keys (secrets.rs). macOS Keychain, Windows
+# Credential Manager, Linux Secret Service (libdbus built from source).
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust", "vendored"] }
+
 [target.'cfg(unix)'.dependencies]
 # Killing a running game's whole process group (godot/run.rs).
 libc = "0.2.189"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# Local fake servers for the provider tests (no live network in tests).
+tiny_http = "0.12"

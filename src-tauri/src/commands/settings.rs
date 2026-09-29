@@ -72,6 +72,7 @@ mod tests {
                 ai_provider: Some(ProviderId::Codex),
                 godot_path: Some("  /opt/godot  ".into()),
                 first_run_done: true,
+                ..Default::default()
             },
         )
         .unwrap();

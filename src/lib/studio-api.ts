@@ -2,6 +2,26 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   AgentEventPayload,
+  AssetInfo,
+  Board,
+  Card,
+  CardMeta,
+  CardSummary,
+  CardType,
+  CredentialStatus,
+  FilePayload,
+  GenPreview,
+  GenProviderInfo,
+  GenRequest,
+  HealthReport,
+  Journey,
+  LibraryItem,
+  LibraryProviderInfo,
+  LibraryQuery,
+  LicenseInfo,
+  LinkGraph,
+  Role,
+  SecretName,
   AppSettings,
   AutoFixStatePayload,
   ConnectAction,
@@ -48,7 +68,8 @@ export const agentSend = (
   threadId: string,
   message: string,
   origin?: MessageOrigin,
-) => invoke<void>("agent_send", { projectPath, threadId, message, origin: origin ?? null });
+  role?: Role,
+) => invoke<void>("agent_send", { projectPath, threadId, message, origin: origin ?? null, role: role ?? null });
 
 export const agentCancel = (threadId: string) => invoke<void>("agent_cancel", { threadId });
 
@@ -146,6 +167,89 @@ export const onboardingPreview = (answers: InterviewAnswers) =>
 /** Creates the game in `<parentDir>/<answers.name>`. */
 export const onboardingCreate = (parentDir: string, answers: InterviewAnswers, templateId: string) =>
   invoke<CreatedProject>("onboarding_create", { parentDir, answers, templateId });
+
+// --- Context cards (Phase C) ---
+
+export const contextList = (projectPath: string) =>
+  invoke<CardSummary[]>("context_list", { projectPath });
+
+export const contextRead = (projectPath: string, path: string) =>
+  invoke<Card>("context_read", { projectPath, path });
+
+/** Creates or replaces a card; returns it as saved. */
+export const contextWrite = (projectPath: string, path: string, meta: CardMeta, body: string) =>
+  invoke<Card>("context_write", { projectPath, path, meta, body });
+
+export const contextSetStatus = (projectPath: string, path: string, status: string) =>
+  invoke<Card>("context_set_status", { projectPath, path, status });
+
+/** Cards of `types` (all when empty) in status columns. */
+export const contextBoard = (projectPath: string, types: CardType[]) =>
+  invoke<Board>("context_board", { projectPath, types });
+
+export const contextGraph = (projectPath: string) =>
+  invoke<LinkGraph>("context_graph", { projectPath });
+
+// --- Producer journey (Phase C) ---
+
+export const journeyGet = (projectPath: string) => invoke<Journey>("journey_get", { projectPath });
+
+export const journeySetManual = (projectPath: string, id: string, done: boolean) =>
+  invoke<Journey>("journey_set_manual", { projectPath, id, done });
+
+// --- Assets, libraries, generation, credentials (Phase C) ---
+
+export const assetsScan = (projectPath: string) => invoke<AssetInfo[]>("assets_scan", { projectPath });
+
+/** Copies a file into the project and records where it came from. */
+export const assetsImport = (
+  projectPath: string,
+  source: string,
+  destSubdir: string | null,
+  title: string,
+  license: LicenseInfo,
+) => invoke<AssetInfo>("assets_import", { projectPath, source, destSubdir, title, license });
+
+export const assetsHealth = (projectPath: string) => invoke<HealthReport>("assets_health", { projectPath });
+
+/** The credits page as Markdown. */
+export const assetsCredits = (projectPath: string) => invoke<string>("assets_credits", { projectPath });
+
+/** A project file for preview (size-capped). */
+export const assetsReadBase64 = (projectPath: string, path: string, maxBytes?: number) =>
+  invoke<FilePayload>("assets_read_base64", { projectPath, path, maxBytes: maxBytes ?? null });
+
+export const libraryProviders = () => invoke<LibraryProviderInfo[]>("library_providers");
+
+export const librarySearch = (provider: string, query: LibraryQuery) =>
+  invoke<LibraryItem[]>("library_search", { provider, query });
+
+/** Downloads/copies the item into the project's assets; `license` overrides an unknown one. */
+export const libraryImport = (
+  projectPath: string,
+  provider: string,
+  item: LibraryItem,
+  destSubdir?: string,
+) => invoke<AssetInfo[]>("library_import", { projectPath, provider, item, destSubdir: destSubdir ?? null });
+
+export const generateProviders = () => invoke<GenProviderInfo[]>("generate_providers");
+
+export const generateRun = (projectPath: string, request: GenRequest) =>
+  invoke<GenPreview>("generate_run", { projectPath, request });
+
+export const generateAccept = (projectPath: string, tempId: string, title: string, destSubdir?: string) =>
+  invoke<AssetInfo>("generate_accept", { projectPath, tempId, title, destSubdir: destSubdir ?? null });
+
+export const generateDiscard = (tempId: string) => invoke<void>("generate_discard", { tempId });
+
+/** Whether each name is set; a value is never returned. */
+export const credentialStatus = (names: SecretName[]) =>
+  invoke<CredentialStatus[]>("credential_status", { names });
+
+export const credentialSet = (name: SecretName, value: string) =>
+  invoke<void>("credential_set", { name, value });
+
+export const credentialClear = (name: SecretName) => invoke<void>("credential_clear", { name });
 
 // --- Events ---
 // Same subscribe/unsubscribe shape as `onProjectFilesChanged` in

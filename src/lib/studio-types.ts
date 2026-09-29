@@ -126,7 +126,13 @@ export interface GameStatePayload {
 
 // --- Phase B: connect your AI (crates/core/src/connect.rs, app_settings.rs) ---
 
-export type ProviderId = "claude-code" | "codex";
+export type ProviderId =
+  | "claude-code"
+  | "codex"
+  // Phase C (task X3 adds them on the Rust side).
+  | "anthropic-api"
+  | "openai-api"
+  | "local-model";
 
 export interface ProviderInfo {
   id: ProviderId;
@@ -150,6 +156,14 @@ export interface AppSettings {
   /** A Godot binary chosen in Advanced settings instead of the managed one. */
   godot_path: string | null;
   first_run_done: boolean;
+  /** Per-provider model settings, keyed by provider id. Never holds a key. */
+  models: Record<string, ModelConfig>;
+}
+
+export interface ModelConfig {
+  /** Up to and including /v1 for OpenAI-compatible servers. */
+  base_url: string | null;
+  model: string | null;
 }
 
 /** A real one-line test turn ("say hello"). */
@@ -246,4 +260,257 @@ export interface AutoFixStatePayload {
   state: AutoFixPhase;
   attempt: number;
   maxAttempts: number;
+}
+
+// --- Phase C: roles (crates/core/src/agent/types.rs) ---
+
+export type Role =
+  | "director"
+  | "designer"
+  | "programmer"
+  | "artist"
+  | "sound"
+  | "qa"
+  | "producer"
+  | "marketer";
+
+// --- Phase C: Context cards (crates/core/src/context_cards.rs) ---
+
+export type CardType =
+  | "concept"
+  | "mechanic"
+  | "character"
+  | "level"
+  | "story"
+  | "asset"
+  | "style-guide"
+  | "task"
+  | "playtest"
+  | "other";
+
+export interface CardMeta {
+  type: CardType | null;
+  title: string | null;
+  status: string | null;
+  /** Paths of other cards, relative to the context folder. */
+  links: string[];
+  /** Project files that implement this card. */
+  implemented_in: string[];
+  tags: string[];
+  /** Every other front-matter key, kept across rewrites. */
+  extra: Record<string, string[]>;
+}
+
+export interface Card {
+  /** Relative to the context folder, "/"-separated. */
+  path: string;
+  meta: CardMeta;
+  body: string;
+  /** The raw header text when it couldn't be read; meta is then empty. */
+  header_error: string | null;
+}
+
+export interface CardSummary {
+  path: string;
+  card_type: CardType;
+  title: string;
+  status: string | null;
+  links: string[];
+  broken_links: string[];
+  backlinks: string[];
+}
+
+export interface BoardColumn {
+  status: string;
+  cards: CardSummary[];
+}
+
+export interface Board {
+  columns: BoardColumn[];
+}
+
+export interface LinkEdge {
+  from: string;
+  to: string;
+  broken: boolean;
+}
+
+export interface LinkGraph {
+  nodes: CardSummary[];
+  edges: LinkEdge[];
+}
+
+// --- Phase C: assets (crates/core/src/assets.rs, library/) ---
+
+export type AssetKind = "image" | "audio" | "model3d" | "font" | "other";
+
+export interface LicenseInfo {
+  /** SPDX-style when known ("CC0-1.0"), else what the pack said. */
+  name: string | null;
+  /** "Poly Haven", "My own files: <pack>", "Generated". */
+  source: string | null;
+  author: string | null;
+  url: string | null;
+  /** Provider and model when generated. */
+  generated_by: string | null;
+}
+
+export interface AssetInfo {
+  /** Project-relative, "/"-separated. */
+  path: string;
+  kind: AssetKind;
+  size_bytes: number;
+  width: number | null;
+  height: number | null;
+  license: LicenseInfo | null;
+  /** The Asset card's path relative to the context folder. */
+  card: string | null;
+  used_by: string[];
+}
+
+export interface MissingRef {
+  from: string;
+  to: string;
+}
+
+export interface Oversized {
+  path: string;
+  width: number | null;
+  height: number | null;
+  size_bytes: number;
+}
+
+export interface HealthReport {
+  unused: string[];
+  missing_refs: MissingRef[];
+  oversized: Oversized[];
+  unlicensed: string[];
+}
+
+export interface FilePayload {
+  mime: string;
+  base64: string;
+  /** True when the file was over the cap and base64 is empty. */
+  truncated: boolean;
+  size: number;
+}
+
+export interface LibraryProviderInfo {
+  id: string;
+  name: string;
+  blurb: string;
+  /** True when "search" takes a folder path (My own files). */
+  needs_folder: boolean;
+  site_url: string | null;
+}
+
+export interface LibraryQuery {
+  text: string;
+  kind: AssetKind | null;
+  limit: number | null;
+}
+
+export interface LibraryItem {
+  provider: string;
+  id: string;
+  title: string;
+  kind: AssetKind;
+  license: LicenseInfo;
+  thumbnail_url: string | null;
+  page_url: string | null;
+}
+
+// --- Phase C: generation and credentials (crates/core/src/generate/, secrets.rs) ---
+
+export type GenKind = "image" | "voice" | "sfx" | "music";
+
+export type SecretName =
+  | "cloudflare_account_id"
+  | "cloudflare_api_token"
+  | "fish_audio_api_key"
+  | "eleven_labs_api_key"
+  | "anthropic_api_key"
+  | "open_ai_api_key";
+
+export interface GenOptions {
+  model: string | null;
+  width: number | null;
+  height: number | null;
+  seed: number | null;
+  pixel_art: boolean;
+  transparent: boolean;
+  duration_seconds: number | null;
+  voice_id: string | null;
+  looping: boolean;
+}
+
+export interface GenRequest {
+  kind: GenKind;
+  prompt: string;
+  options: GenOptions;
+  /** The Style Guide card's text, appended to the prompt. */
+  style_guide: string | null;
+}
+
+export interface GenProviderInfo {
+  id: string;
+  name: string;
+  kinds: GenKind[];
+  needs: SecretName[];
+  blurb: string;
+  signup_url: string;
+  /** Whether every secret in `needs` is set (from the keychain). */
+  connected: boolean;
+}
+
+/** A generated file waiting to be accepted or discarded. */
+export interface GenPreview {
+  temp_id: string;
+  mime: string;
+  base64: string;
+  extension: string;
+  provider: string;
+  model: string;
+  prompt_used: string;
+  duration_ms: number;
+}
+
+export interface CredentialStatus {
+  name: SecretName;
+  connected: boolean;
+}
+
+// --- Phase C: the Producer journey (crates/core/src/producer.rs) ---
+
+export type Stage = "idea" | "prototype" | "vertical_slice" | "alpha" | "beta" | "launch";
+
+export type Signal = "auto" | "manual";
+
+export interface Criterion {
+  id: string;
+  title: string;
+  signal: Signal;
+  done: boolean;
+  /** What was found, in plain words, or why it isn't done. */
+  evidence: string;
+}
+
+export interface StageStatus {
+  stage: Stage;
+  title: string;
+  criteria: Criterion[];
+  complete: boolean;
+}
+
+export interface NextStep {
+  criterion_id: string;
+  title: string;
+  /** A ready-to-send message for the Producer role. */
+  ask: string;
+}
+
+export interface Journey {
+  current: Stage;
+  stages: StageStatus[];
+  next_step: NextStep | null;
 }

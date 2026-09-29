@@ -1,0 +1,9 @@
+{
+  "id": "visualnovel-2d",
+  "name": "Visual novel",
+  "description": "A story told in scenes: characters talk, you make choices, and the ending depends on them.",
+  "dimension": "2d",
+  "controls": "Click or press Space to continue, click a choice to pick it",
+  "features": ["Dialogue scenes from a simple text script", "Characters with names", "Choices that branch the story", "A start screen and endings"],
+  "keywords": ["visual", "novel", "story", "narrative", "dialogue", "choices", "choice", "romance", "mystery", "interactive", "fiction", "characters"]
+}

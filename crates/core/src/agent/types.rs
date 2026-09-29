@@ -106,10 +106,55 @@ pub struct TurnRequest {
 /// `agent::prompt::system_prompt`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TurnOptions {
+    /// Which specialist the message is for (Phase C). `Director` adds nothing.
+    pub role: Role,
     pub plan_policy: PlanPolicy,
     /// "Teach me" mode: explanations grow into short lessons.
     pub teach: bool,
     pub origin: MessageOrigin,
+}
+
+/// A specialist the Director hands work to (spec §7.1). A role changes the
+/// instructions the agent gets, not its tools.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    #[default]
+    Director,
+    Designer,
+    Programmer,
+    Artist,
+    Sound,
+    Qa,
+    Producer,
+    Marketer,
+}
+
+impl Role {
+    pub const ALL: [Role; 8] = [
+        Role::Director,
+        Role::Designer,
+        Role::Programmer,
+        Role::Artist,
+        Role::Sound,
+        Role::Qa,
+        Role::Producer,
+        Role::Marketer,
+    ];
+
+    /// The file name (without extension) of the role's prompt section.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Role::Director => "director",
+            Role::Designer => "designer",
+            Role::Programmer => "programmer",
+            Role::Artist => "artist",
+            Role::Sound => "sound",
+            Role::Qa => "qa",
+            Role::Producer => "producer",
+            Role::Marketer => "marketer",
+        }
+    }
 }
 
 /// When the agent must propose a plan before changing the game (spec §5.4).

@@ -7,17 +7,23 @@
 
 pub mod agent;
 pub mod app_settings;
+pub mod assets;
 pub mod ask;
 pub mod autofix;
 pub mod chat_store;
 pub mod connect;
+pub mod context_cards;
+pub mod generate;
 pub mod git_indexer;
 pub mod godot;
 pub mod graph;
+pub mod library;
 pub mod mcp_client;
 pub mod onboarding;
+pub mod producer;
 pub mod project_settings;
 pub mod redact;
 pub mod scaffold;
+pub mod secrets;
 pub mod snapshot;
 pub mod watcher;

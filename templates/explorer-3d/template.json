@@ -1,0 +1,9 @@
+{
+  "id": "explorer-3d",
+  "name": "3D explorer",
+  "description": "Run and jump around a small 3D world behind your character, collect things and find the goal.",
+  "dimension": "3d",
+  "controls": "WASD to move, mouse to turn the camera, Space to jump",
+  "features": ["A third-person character with a following camera", "Jumping around a small 3D level", "Things to collect", "A goal and an ending screen"],
+  "keywords": ["3d", "explore", "explorer", "exploration", "island", "world", "open", "adventure", "third-person", "collect", "collectathon", "platformer"]
+}

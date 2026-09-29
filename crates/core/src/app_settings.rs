@@ -23,6 +23,19 @@ pub struct AppSettings {
     /// the managed install.
     pub godot_path: Option<String>,
     pub first_run_done: bool,
+    /// Per-provider model settings (Phase C), keyed by the provider's string
+    /// id (`anthropic-api`, `openai-api`, `local-model`). Never holds a key.
+    pub models: std::collections::BTreeMap<String, ModelConfig>,
+}
+
+/// Which model an API runtime uses, and where a local one lives.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct ModelConfig {
+    /// Up to and including `/v1` for OpenAI-compatible servers
+    /// (`http://localhost:11434/v1`); unused for the Anthropic API.
+    pub base_url: Option<String>,
+    pub model: Option<String>,
 }
 
 const FILE_NAME: &str = "settings.json";
@@ -91,6 +104,7 @@ mod tests {
             ai_provider: Some(ProviderId::Codex),
             godot_path: Some("/opt/godot/godot".into()),
             first_run_done: true,
+            ..Default::default()
         };
         save(&nested, &settings).unwrap();
         assert_eq!(load(&nested).unwrap(), settings);

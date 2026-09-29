@@ -27,20 +27,31 @@ static TEMPLATE_TOPDOWN_2D: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/../../templates/topdown-2d");
 static TEMPLATE_SHOOTER_2D: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/../../templates/shooter-2d");
+static TEMPLATE_PUZZLE_2D: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../templates/puzzle-2d");
+static TEMPLATE_VISUALNOVEL_2D: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/../../templates/visualnovel-2d");
+static TEMPLATE_EXPLORER_3D: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/../../templates/explorer-3d");
+static TEMPLATE_FIRSTPERSON_3D: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/../../templates/firstperson-3d");
 static TEMPLATE_BLANK_2D: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../templates/blank-2d");
 static ADDON: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../godot-addon/infinabox");
 
 /// The template `create_project` uses ("Start from scratch").
 pub const BLANK_TEMPLATE_ID: &str = "blank-2d";
 
-/// Every bundled template by id, in the order they're offered: the three
-/// genre templates, then "Start from scratch". Each id is also the
+/// Every bundled template by id, in the order they're offered: the genre
+/// templates (2D, then 3D), then "Start from scratch". Each id is also the
 /// template's folder name and the `id` in its `template.json` (checked by
 /// `template_info`).
-static TEMPLATES: [(&str, &Dir<'_>); 4] = [
+static TEMPLATES: [(&str, &Dir<'_>); 8] = [
     ("platformer-2d", &TEMPLATE_PLATFORMER_2D),
     ("topdown-2d", &TEMPLATE_TOPDOWN_2D),
     ("shooter-2d", &TEMPLATE_SHOOTER_2D),
+    ("puzzle-2d", &TEMPLATE_PUZZLE_2D),
+    ("visualnovel-2d", &TEMPLATE_VISUALNOVEL_2D),
+    ("explorer-3d", &TEMPLATE_EXPLORER_3D),
+    ("firstperson-3d", &TEMPLATE_FIRSTPERSON_3D),
     (BLANK_TEMPLATE_ID, &TEMPLATE_BLANK_2D),
 ];
 
@@ -876,7 +887,16 @@ mod tests {
         let ids: Vec<String> = list_templates().into_iter().map(|t| t.id).collect();
         assert_eq!(
             ids,
-            ["platformer-2d", "topdown-2d", "shooter-2d", "blank-2d"]
+            [
+                "platformer-2d",
+                "topdown-2d",
+                "shooter-2d",
+                "puzzle-2d",
+                "visualnovel-2d",
+                "explorer-3d",
+                "firstperson-3d",
+                "blank-2d"
+            ]
         );
 
         assert!(find_template("nope").is_err());

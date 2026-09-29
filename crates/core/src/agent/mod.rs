@@ -4,6 +4,7 @@
 //! above this module — the Tauri commands and the Studio chat UI — only
 //! ever sees `AgentEvent`s.
 
+pub mod api;
 pub mod claude;
 pub mod claude_stream;
 pub mod codex;

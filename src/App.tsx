@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
-import { Images, Rocket } from "lucide-react";
+import { Rocket } from "lucide-react";
 import { Sidebar, type Section } from "@/components/cockpit/Sidebar";
 import { DashboardSection } from "@/components/cockpit/DashboardSection";
 import { NotBuiltYetSection } from "@/components/cockpit/NotBuiltYetSection";
 import { AdvancedSection } from "@/components/advanced/AdvancedSection";
 import { ContextSection } from "@/components/context/ContextSection";
+import { AssetsSection } from "@/components/assets/AssetsSection";
 import { StudioSection } from "@/components/studio/StudioSection";
 import { fadeRise, fadeTransition, springTransition } from "@/lib/motion";
 import { recordProjectOpened } from "@/lib/recent-projects";
@@ -18,7 +19,7 @@ import { cn } from "@/lib/utils";
 // Studio's live AI turn stream and game tracking, Context's unsaved card
 // and graph edits, and Advanced's live terminal are the real exceptions,
 // handled separately below by staying permanently mounted. The rest (today
-// Assets and Playtest & Launch, both honest "not built yet" placeholders)
+// Assets, and Playtest & Launch, an honest "not built yet" placeholder)
 // share this one render map so adding a real one later doesn't mean
 // copy-pasting another `{section === "x" && (...)}` block into an
 // ever-growing if-chain.
@@ -86,12 +87,7 @@ function App() {
   }
 
   const simpleSections: Record<SimpleSection, () => ReactNode> = {
-    assets: () => (
-      <NotBuiltYetSection
-        icon={Images}
-        description="Browsing free asset libraries, previews and one-click import are coming in a later update."
-      />
-    ),
+    assets: () => <AssetsSection projectPath={projectPath} />,
     launch: () => (
       <NotBuiltYetSection
         icon={Rocket}

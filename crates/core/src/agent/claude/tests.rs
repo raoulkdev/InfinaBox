@@ -4,6 +4,7 @@
 //! a network or a signed-in CLI. The `#[ignore]`d test runs the real one.
 
 use super::*;
+use crate::agent::Role;
 use std::path::Path;
 
 fn fixture(name: &str) -> String {
@@ -95,6 +96,7 @@ fn a_resumed_turn_carries_its_own_instructions_in_the_message() {
     let mut req = request(dir.path(), "add a double jump");
     req.resume_provider_session_id = Some("sess-1".into());
     req.options = TurnOptions {
+        role: Role::Director,
         plan_policy: PlanPolicy::AlwaysPlan,
         teach: true,
         origin: MessageOrigin::User,
@@ -123,6 +125,7 @@ fn system_prompt_follows_the_turn_options_and_appends_the_projects_agents_md() {
     );
     std::fs::write(dir.path().join("AGENTS.md"), "# My game\nUse tabs.\n").unwrap();
     req.options = TurnOptions {
+        role: Role::Director,
         plan_policy: PlanPolicy::SmallChangesDirect,
         teach: true,
         origin: MessageOrigin::AutoFix,

@@ -590,6 +590,8 @@ fn turn_options(project: &Path, origin: MessageOrigin, log: &mut TurnLog) -> Tur
         project_settings::ProjectSettings::default()
     });
     TurnOptions {
+        // Phase C (task X1): the role chosen in the composer.
+        role: infinabox_core::agent::Role::Director,
         plan_policy: settings.plan_policy,
         teach: settings.teach,
         origin,
@@ -2214,6 +2216,7 @@ mod tests {
             .map(|r| r.options.clone())
             .collect();
         let expected = |origin| TurnOptions {
+            role: infinabox_core::agent::Role::Director,
             plan_policy: PlanPolicy::SmallChangesDirect,
             teach: true,
             origin,

@@ -23,7 +23,7 @@
 
 use std::path::Path;
 
-use super::types::{MessageOrigin, PlanPolicy, TurnOptions};
+use super::types::{MessageOrigin, PlanPolicy, Role, TurnOptions};
 
 /// The Director system prompt: who the agent is talking to and how it works.
 pub const DIRECTOR_PROMPT: &str = include_str!("prompts/director.md");
@@ -193,6 +193,7 @@ mod tests {
 
     fn options(plan_policy: PlanPolicy, teach: bool, origin: MessageOrigin) -> TurnOptions {
         TurnOptions {
+            role: Role::Director,
             plan_policy,
             teach,
             origin,

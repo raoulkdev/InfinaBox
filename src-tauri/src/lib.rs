@@ -5,7 +5,17 @@ use commands::agent::{
     chat_load_thread, AgentState,
 };
 use commands::autofix::AutoFixState;
+use commands::assets::{
+    assets_credits, assets_health, assets_import, assets_read_base64, assets_scan,
+};
 use commands::bridge::BridgeState;
+use commands::context::{
+    context_board, context_graph, context_list, context_read, context_set_status, context_write,
+};
+use commands::credentials::{credential_clear, credential_set, credential_status};
+use commands::generate::{generate_accept, generate_discard, generate_providers, generate_run};
+use commands::journey::{journey_get, journey_set_manual};
+use commands::library::{library_import, library_providers, library_search};
 use commands::connect::{
     ai_providers, ai_recommended, ai_test_connection, connect_cancel, connect_resize, connect_run,
     connect_write,
@@ -96,6 +106,29 @@ pub fn run() {
             onboarding_templates,
             onboarding_preview,
             onboarding_create,
+            context_list,
+            context_read,
+            context_write,
+            context_set_status,
+            context_board,
+            context_graph,
+            journey_get,
+            journey_set_manual,
+            assets_scan,
+            assets_import,
+            assets_health,
+            assets_credits,
+            assets_read_base64,
+            library_providers,
+            library_search,
+            library_import,
+            generate_providers,
+            generate_run,
+            generate_accept,
+            generate_discard,
+            credential_status,
+            credential_set,
+            credential_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

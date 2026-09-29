@@ -1,10 +1,16 @@
 pub mod agent;
+pub mod assets;
 pub mod autofix;
 pub mod bridge;
 pub mod connect;
+pub mod context;
+pub mod credentials;
 pub mod environment;
 pub mod fs;
+pub mod generate;
 pub mod godot;
+pub mod journey;
+pub mod library;
 pub mod onboarding;
 pub mod overview;
 pub mod project;
