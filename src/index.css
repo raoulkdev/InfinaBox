@@ -84,6 +84,10 @@
 }
 
 .dark {
+    /* Native controls (the review screen's <select>, scrollbars) follow the
+       app's dark theme; without it WebKitGTK draws a light select whose
+       text, in the theme's light foreground, can't be read. */
+    color-scheme: dark;
     --background: #0A0A0A;
     --foreground: #F2F2F2;
     --card: #161616;
