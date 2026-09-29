@@ -5,5 +5,5 @@
   "dimension": "3d",
   "controls": "WASD to move, mouse to turn the camera, Space to jump",
   "features": ["A third-person character with a following camera", "Jumping around a small 3D level", "Things to collect", "A goal and an ending screen"],
-  "keywords": ["3d", "explore", "explorer", "exploration", "island", "world", "open", "adventure", "third-person", "collect", "collectathon", "platformer"]
+  "keywords": ["3d", "explore", "explorer", "exploration", "island", "world", "open", "adventure", "third-person", "collect", "collectathon"]
 }

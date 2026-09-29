@@ -1,6 +1,8 @@
 import { useEffect, useRef, type KeyboardEvent, type RefObject } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { Role } from "@/lib/studio-types";
+import { RolePicker } from "./RolePicker";
 
 // Tallest the input grows (in px) before it scrolls instead — enough for a
 // short pasted error message without pushing the conversation off screen.
@@ -23,6 +25,9 @@ interface ChatComposerProps {
   hint?: string | null;
   /** Lets the chat focus the input (e.g. from a plan's "Change something"). */
   inputRef?: RefObject<HTMLTextAreaElement | null>;
+  /** Who the next message is sent to (default: the Director). */
+  role: Role;
+  onRoleChange: (role: Role) => void;
 }
 
 // Controlled by ChatPanel rather than owning its text, so a message injected
@@ -38,6 +43,8 @@ export function ChatComposer({
   disabled,
   hint,
   inputRef,
+  role,
+  onRoleChange,
 }: ChatComposerProps) {
   const ownRef = useRef<HTMLTextAreaElement | null>(null);
   const textareaRef = inputRef ?? ownRef;
@@ -64,7 +71,8 @@ export function ChatComposer({
   }
 
   return (
-    <div className="flex items-end gap-2 rounded-xl border border-border bg-background p-2 focus-within:border-ring">
+    <div className="flex flex-col gap-1.5 rounded-xl border border-border bg-background p-2 focus-within:border-ring">
+      <div className="flex items-end gap-2">
       <textarea
         ref={textareaRef}
         rows={1}
@@ -98,6 +106,11 @@ export function ChatComposer({
           <ArrowUp />
         </Button>
       )}
+      </div>
+      <div className="flex items-center gap-2 px-1">
+        <span className="text-xs text-muted-foreground">Ask as</span>
+        <RolePicker value={role} onChange={onRoleChange} disabled={busy} />
+      </div>
     </div>
   );
 }

@@ -11,6 +11,8 @@ import { AssetsSection } from "@/components/assets/AssetsSection";
 import { StudioSection } from "@/components/studio/StudioSection";
 import { fadeRise, fadeTransition, springTransition } from "@/lib/motion";
 import { recordProjectOpened } from "@/lib/recent-projects";
+import { JourneyPanel } from "@/components/journey/JourneyPanel";
+import { chatCreateThread } from "@/lib/studio-api";
 import type { PendingTurn } from "@/lib/studio-types";
 import { cn } from "@/lib/utils";
 
@@ -86,14 +88,33 @@ function App() {
     setSection("studio");
   }
 
+  // "Ask the Producer" on the journey: a new chat in Studio, sent as the
+  // Producer. A failure to make the chat leaves the person where they are.
+  function handleAskProducer(message: string) {
+    if (!projectPath) return;
+    const path = projectPath;
+    chatCreateThread(path, "Producer")
+      .then((thread) => {
+        setPendingTurn({
+          projectPath: path,
+          turn: { threadId: thread.id, message, origin: "user", role: "producer" },
+        });
+        setSection("studio");
+      })
+      .catch(() => {});
+  }
+
   const simpleSections: Record<SimpleSection, () => ReactNode> = {
     assets: () => <AssetsSection projectPath={projectPath} />,
-    launch: () => (
-      <NotBuiltYetSection
-        icon={Rocket}
-        description="Sharing test builds, collecting feedback, release builds and publishing your game are coming in a later update."
-      />
-    ),
+    launch: () =>
+      projectPath ? (
+        <JourneyPanel projectPath={projectPath} onAskProducer={handleAskProducer} />
+      ) : (
+        <NotBuiltYetSection
+          icon={Rocket}
+          description="Open a game to see how far along it is. Sharing test builds, collecting feedback, release builds and publishing your game are coming in a later update."
+        />
+      ),
   };
 
   return (

@@ -15,6 +15,7 @@ import type {
   AgentEvent,
   AutoFixStatePayload,
   MessageOrigin,
+  Role,
   PendingTurn,
   ThreadSummary,
 } from "@/lib/studio-types";
@@ -121,6 +122,9 @@ export function ChatPanel({
   const [problem, setProblem] = useState<Problem | null>(null);
   const [draft, setDraft] = useState("");
   const [composerHint, setComposerHint] = useState<string | null>(null);
+  const [role, setRole] = useState<Role>("director");
+  const roleRef = useRef<Role>("director");
+  roleRef.current = role;
   const [stopping, setStopping] = useState(false);
   // Threads with a turn in flight, including ones in the background after
   // switching away. Kept separately from `view.turnInProgress` because the
@@ -404,7 +408,7 @@ export function ChatPanel({
   // Decides synchronously whether the text goes to the AI or stays as a
   // draft (so the caller can say which), then sends in the background.
   const send = useCallback(
-    (text: string, origin: MessageOrigin = "user"): ChatSendOutcome => {
+    (text: string, origin: MessageOrigin = "user", roleOverride?: Role): ChatSendOutcome => {
       const message = text.trim();
       const threadId = activeRef.current;
       // A second Approve (a double click) while the first is being sent:
@@ -432,7 +436,7 @@ export function ChatPanel({
       markRunning(threadId, true);
       // A send that fails from here on still went to the chat: its error
       // shows in the transcript, right under the message.
-      agentSend(projectPath, threadId, message, origin).catch((err) => {
+      agentSend(projectPath, threadId, message, origin, roleOverride ?? roleRef.current).catch((err) => {
         markRunning(threadId, false);
         syncedTurns.current.delete(threadId);
         if (activeRef.current === threadId) setView((v) => applyLocalError(v, String(err)));
@@ -481,7 +485,8 @@ export function ChatPanel({
         pendingTaken.current = null;
         return;
       }
-      sendRef.current(pendingTurn.message, pendingTurn.origin);
+      if (pendingTurn.role) setRole(pendingTurn.role);
+      sendRef.current(pendingTurn.message, pendingTurn.origin, pendingTurn.role);
       takenCallback.current?.();
     })();
   }, [pendingTurn, chatOpen, projectPath, openThread]);
@@ -648,6 +653,8 @@ export function ChatPanel({
             disabled={!ready}
             hint={composerHint}
             inputRef={composerRef}
+            role={role}
+            onRoleChange={setRole}
           />
         </div>
       </div>

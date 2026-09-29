@@ -504,7 +504,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
           <DialogHeader>
             <DialogTitle>Empty project</DialogTitle>
             <DialogDescription>
-              Creates a new folder with a blank 2D Godot game, ready to open in Studio.
+              Creates a new folder with a blank Godot game, ready to open in Studio.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">

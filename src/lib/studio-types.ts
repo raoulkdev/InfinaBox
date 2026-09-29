@@ -237,6 +237,8 @@ export interface PendingTurn {
   threadId: string;
   message: string;
   origin: MessageOrigin;
+  /** The specialist to ask as (the journey's "Ask the Producer"). */
+  role?: Role;
 }
 
 // --- Phase B event payloads ---

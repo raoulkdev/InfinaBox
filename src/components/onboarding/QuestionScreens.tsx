@@ -128,7 +128,7 @@ export function GenreScreen({
                 testId={`onboarding-genre-${t.id}`}
                 selected={answers.genre === t.id}
                 onSelect={() => update({ genre: t.id, genre_other: null })}
-                title={t.name}
+                title={`${t.name} · ${t.dimension.toUpperCase()}`}
                 icon={<Gamepad2 className="size-4 text-muted-foreground" />}
               >
                 <span className="text-sm text-muted-foreground">{t.description}</span>
@@ -164,7 +164,7 @@ export function GenreScreen({
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs text-muted-foreground">
-        <span>Games start in 2D for now — 3D is coming.</span>
+        <span>2D games are the easiest place to start; 3D ones take a little more from the AI.</span>
         <button
           type="button"
           data-chip
