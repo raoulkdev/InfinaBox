@@ -12,6 +12,7 @@ use std::io::{Read as _, Write as _};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow, bail};
+use infinabox_core::context_cards as cards;
 use serde::Serialize;
 
 /// Where Context lives inside a project (spec §9).
@@ -92,6 +93,36 @@ impl ContextDir {
         Ok(text)
     }
 
+    /// One readable line per card for the agent: `path  [type · status]  title`.
+    /// Cards without front-matter show as `[other]` with their heading or
+    /// file name. Empty when there are no cards.
+    pub fn overview(&self) -> Result<String> {
+        let mut lines = Vec::new();
+        for rel in self.list()? {
+            // Unreadable (e.g. not UTF-8) cards still get a line.
+            let card = match self.read(&rel) {
+                Ok(text) => cards::parse_card(&rel, &text),
+                Err(_) => {
+                    lines.push(format!("{rel}  [other]  (couldn't be read as text)"));
+                    continue;
+                }
+            };
+            let kind = card.meta.card_type.unwrap_or(cards::CardType::Other);
+            let tag = match card.meta.status.as_deref().map(str::trim) {
+                Some(status) if !status.is_empty() => format!("{} · {status}", kind.as_str()),
+                _ => kind.as_str().to_string(),
+            };
+            let title = cards::display_title(&card);
+            let note = if card.header_error.is_some() {
+                "  (front-matter can't be read)"
+            } else {
+                ""
+            };
+            lines.push(format!("{rel}  [{tag}]  {title}{note}"));
+        }
+        Ok(lines.join("\n"))
+    }
+
     /// Case-insensitive plain-text search across every card's lines.
     pub fn search(&self, query: &str) -> Result<Vec<SearchHit>> {
         let needle = query.trim().to_lowercase();
@@ -123,6 +154,12 @@ impl ContextDir {
         check_card_components(&rel_path, rel)?;
         if rel_path.extension().and_then(|e| e.to_str()) != Some(CARD_EXTENSION) {
             bail!("context cards are markdown files; use a path ending in .{CARD_EXTENSION}");
+        }
+        if let Some(problem) = cards::header_problem(markdown) {
+            bail!(
+                "not saved: the card's front-matter (the --- block at the top) can't be read: \
+                 {problem}. Fix it or leave the block out."
+            );
         }
         fs::create_dir_all(&self.root)
             .with_context(|| format!("couldn't create {}", self.root.display()))?;
