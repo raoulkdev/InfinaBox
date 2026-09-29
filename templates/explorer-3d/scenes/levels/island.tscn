@@ -83,18 +83,18 @@ size = Vector3(3.5, 2.6, 3.5)
 color = Color(0.5, 0.5, 0.56, 1.0)
 
 [node name="Plank1" parent="Platforms" instance=ExtResource("1_platform")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -25.5, 0.5, 4)
-size = Vector3(3, 0.5, 3)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -25, 0.5, 4)
+size = Vector3(4, 0.5, 4)
 color = Color(0.6, 0.4, 0.24, 1.0)
 
 [node name="Plank2" parent="Platforms" instance=ExtResource("1_platform")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30.5, 1.2, 4)
-size = Vector3(3, 0.5, 3)
+size = Vector3(4, 0.5, 4)
 color = Color(0.6, 0.4, 0.24, 1.0)
 
 [node name="Plank3" parent="Platforms" instance=ExtResource("1_platform")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -36, 1.9, 4)
-size = Vector3(3, 0.5, 3)
+size = Vector3(4, 0.5, 4)
 color = Color(0.6, 0.4, 0.24, 1.0)
 
 [node name="Step1" parent="Platforms" instance=ExtResource("1_platform")]
