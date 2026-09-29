@@ -468,8 +468,18 @@ export async function firstRun(run, app, config) {
       }
       const subjects = snapshotSubjects(p());
       run.note(`git log: ${JSON.stringify(subjects.slice(0, 3))}`);
-      if (git(p(), "rev-parse", "HEAD").trim() === headBefore) throw new Error("the fix made no snapshot");
-      if (subjects[0] !== "Automatic fix for game errors") run.note(`(newest snapshot is "${subjects[0]}")`);
+      if (git(p(), "rev-parse", "HEAD").trim() === headBefore) {
+        // Undoing my hand edit exactly (the usual fix: delete the bad
+        // function) leaves the project identical to its last snapshot, and
+        // then no snapshot is made, by design. That's fine only if nothing
+        // outside the chat is left uncommitted and player.gd is back as
+        // committed; anything else means the fix's edits were lost.
+        const dirty = git(p(), "status", "--porcelain", "--", ".", ":!.ibproject/chat").trim();
+        if (dirty) throw new Error(`the fix made no snapshot and left changes uncommitted:\n${dirty}`);
+        run.note("the fix put player.gd back exactly as committed, so no snapshot was needed");
+      } else if (subjects[0] !== "Automatic fix for game errors") {
+        run.note(`(newest snapshot is "${subjects[0]}")`);
+      }
       await ensureGameRunning(run, driver, p());
       await new Promise((r) => setTimeout(r, 4000));
       const errors = await ownErrors(driver);
