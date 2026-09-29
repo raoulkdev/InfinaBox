@@ -27,6 +27,20 @@ fn temp_root() -> PathBuf {
     std::env::temp_dir().join("infinabox-generated")
 }
 
+/// Runs blocking network work on a thread of its own. The blocking HTTP
+/// client starts a runtime inside, and dropping one on an async worker
+/// (where `#[tauri::command(async)]` runs) panics.
+pub(crate) fn off_runtime<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    std::thread::Builder::new()
+        .name("network".into())
+        .spawn(work)
+        .map_err(|e| format!("Couldn't start a network connection: {e}"))?
+        .join()
+        .unwrap_or_else(|_| Err("The network request stopped unexpectedly.".into()))
+}
+
 fn err(e: anyhow::Error) -> String {
     format!("{e:#}")
 }
@@ -100,7 +114,8 @@ pub fn generate_run(
     let out_dir = temp_root();
     std::fs::create_dir_all(&out_dir)
         .map_err(|e| format!("Couldn't make a temporary folder: {e}"))?;
-    let result = generate::run(&request, secrets.0.as_ref(), &out_dir).map_err(err)?;
+    let store = secrets.0.clone();
+    let result = off_runtime(move || generate::run(&request, store.as_ref(), &out_dir).map_err(err))?;
     let bytes = std::fs::read(&result.file)
         .map_err(|e| format!("Couldn't read the generated file: {e}"))?;
     let temp_id = format!(

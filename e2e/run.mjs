@@ -3,7 +3,7 @@
 // tauri-driver + WebKitWebDriver), a real Godot, real git, and the real
 // file system. See README.md for prerequisites and options.
 //
-//   node run.mjs [--scenario core|first-run|install|all] [--real-ai] [--keep]
+//   node run.mjs [--scenario core|first-run|phase-c|install|all] [--real-ai] [--keep]
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -16,6 +16,7 @@ import { setTempRoot } from "./scenarios/common.mjs";
 import { coreLoop } from "./scenarios/core-loop.mjs";
 import { firstRun } from "./scenarios/first-run.mjs";
 import { managedInstall } from "./scenarios/managed-install.mjs";
+import { phaseC, startFakes } from "./scenarios/phase-c.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
@@ -176,6 +177,27 @@ try {
     await firstRun(run, app, config);
     await app.stop();
     cleanups.pop();
+  }
+  if (config.scenario === "phase-c" || config.scenario === "all") {
+    if (!config.godot) {
+      console.error("The phase-c scenario needs INFINABOX_GODOT pointing at a Godot 4 binary.");
+      process.exit(2);
+    }
+    const fakes = await startFakes();
+    cleanups.push({ stop: async () => fakes.close() });
+    const app = await launch("phase-c", {
+      INFINABOX_GODOT: config.godot,
+      // Fake providers on this machine; keys kept in memory, not the keychain.
+      INFINABOX_CLOUDFLARE_BASE: `http://127.0.0.1:${fakes.cloudflarePort}`,
+      INFINABOX_SECRETS: "memory",
+    });
+    cleanups.push(app);
+    run.driver = app.driver;
+    await phaseC(run, app, config, fakes);
+    await app.stop();
+    cleanups.pop();
+    cleanups.pop();
+    fakes.close();
   }
   if (config.scenario === "install" || config.scenario === "all") {
     const app = await launch("install", {});

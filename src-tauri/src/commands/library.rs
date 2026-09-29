@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use infinabox_core::assets::{self, AssetInfo};
+use super::generate::off_runtime;
 use infinabox_core::library::{self, LibraryItem, LibraryProviderInfo, LibraryQuery};
 
 #[tauri::command(async)]
@@ -15,7 +16,7 @@ pub fn library_providers() -> Result<Vec<LibraryProviderInfo>, String> {
 pub fn library_search(provider: String, query: LibraryQuery) -> Result<Vec<LibraryItem>, String> {
     let provider = library::provider(&provider)
         .ok_or_else(|| format!("There's no library called “{provider}”."))?;
-    provider.search(&query).map_err(|e| format!("{e:#}"))
+    off_runtime(move || provider.search(&query).map_err(|e| format!("{e:#}")))
 }
 
 #[tauri::command(async)]
@@ -28,8 +29,11 @@ pub fn library_import(
     let found = library::provider(&provider)
         .ok_or_else(|| format!("There's no library called “{provider}”."))?;
     let staging = std::env::temp_dir().join(format!("infinabox-library-{}", unique_id()));
-    let result = import_from(&*found, &item, &staging, Path::new(&project_path), dest_subdir.as_deref());
-    let _ = std::fs::remove_dir_all(&staging);
+    let cleanup = staging.clone();
+    let result = off_runtime(move || {
+        import_from(&*found, &item, &staging, Path::new(&project_path), dest_subdir.as_deref())
+    });
+    let _ = std::fs::remove_dir_all(&cleanup);
     result
 }
 
