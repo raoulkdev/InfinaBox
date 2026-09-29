@@ -79,7 +79,7 @@ use anyhow::Context as _;
 
 use super::codex_stream::{CodexStream, MCP_SERVER_NAME, StreamEnd};
 use super::path::{find_on_path, login_shell_path};
-use super::prompt::system_prompt;
+use super::prompt::{self, system_prompt};
 use super::types::{AgentErrorKind, AgentEvent, AgentRuntime, RuntimeStatus, TurnRequest};
 
 /// The CLI's program name, looked up on the login-shell PATH.
@@ -360,7 +360,15 @@ pub(crate) fn build_args(req: &TurnRequest, instructions: &str) -> Vec<OsString>
         args.push(id.into());
     }
     args.push("--".into());
-    args.push(req.message.clone().into());
+    // A resumed thread keeps the developer instructions it started with
+    // (checked with the real CLI against the mock Responses server: the
+    // resumed request still carried the first turn's), so this turn's own
+    // instructions go with the message (see
+    // `prompt::message_with_turn_instructions`).
+    args.push(match &req.resume_provider_session_id {
+        Some(_) => prompt::message_with_turn_instructions(&req.options, &req.message).into(),
+        None => req.message.clone().into(),
+    });
     args
 }
 

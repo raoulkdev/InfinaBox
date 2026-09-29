@@ -48,6 +48,9 @@ fn builds_the_expected_arguments() {
         .into_iter()
         .map(|a| a.into_string().unwrap())
         .collect();
+    // A resumed thread keeps its first instructions, so this turn's travel
+    // with the message.
+    let wrapped = prompt::message_with_turn_instructions(&req.options, "-make it blue");
     let expected: Vec<&str> = vec![
         "exec",
         "--json",
@@ -80,7 +83,7 @@ fn builds_the_expected_arguments() {
         "resume",
         "01a0e7bd-6cf8-7d72-be15-07e549057aec",
         "--",
-        "-make it blue",
+        wrapped.as_str(),
     ];
     assert_eq!(args, expected);
     // The bridge token's value is never on the command line.
@@ -90,6 +93,7 @@ fn builds_the_expected_arguments() {
     let args = build_args(&req, "P");
     assert!(!args.iter().any(|a| a == "resume"));
     assert_eq!(args[args.len() - 2], "--");
+    assert_eq!(args[args.len() - 1], "-make it blue");
 }
 
 #[test]
