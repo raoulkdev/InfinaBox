@@ -94,7 +94,7 @@ export function AssetThumb({
       className={cn("flex items-center justify-center overflow-hidden", className)}
     >
       {src ? (
-        <img src={src} alt="" className="max-h-full max-w-full object-contain [image-rendering:pixelated]" />
+        <img src={src} alt="" className="size-full object-contain [image-rendering:pixelated]" />
       ) : (
         <Icon className="size-7 text-muted-foreground/70" />
       )}

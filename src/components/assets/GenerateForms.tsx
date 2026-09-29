@@ -70,7 +70,12 @@ export function GenerateForm({ kind, projectPath, styleGuide, onAccepted }: Gene
   const [accepting, setAccepting] = useState(false);
   const [accepted, setAccepted] = useState<string | null>(null);
   const resultRef = useRef<GenPreview | null>(null);
+  const resultBoxRef = useRef<HTMLDivElement>(null);
   resultRef.current = result;
+
+  useEffect(() => {
+    if (result) resultBoxRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [result]);
 
   useEffect(() => {
     if (!running) return;
@@ -252,6 +257,7 @@ export function GenerateForm({ kind, projectPath, styleGuide, onAccepted }: Gene
         {accepted && <Note tone="success">{accepted}</Note>}
       </form>
 
+      <div ref={resultBoxRef}>
       {result && (
         <ResultCard
           result={result}
@@ -261,6 +267,7 @@ export function GenerateForm({ kind, projectPath, styleGuide, onAccepted }: Gene
           onAccept={() => setAccepting(true)}
         />
       )}
+      </div>
 
       <AcceptDialog
         open={accepting && result !== null}
