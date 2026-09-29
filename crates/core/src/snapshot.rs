@@ -79,13 +79,14 @@ const PROJECT_SETTINGS: [&str; 2] = [".ibproject", "settings.json"];
 /// Ignore rules applied in memory on top of the project's own `.gitignore`
 /// (never written to disk), so a project without one — or with an
 /// incomplete one — doesn't commit Godot's cache, OS clutter, local secrets
-/// or `chat_store`'s temp files. Export output folders are deliberately not
+/// `chat_store`'s temp files or the journey's local record (last game run). Export output folders are deliberately not
 /// listed: their names vary and a user may well keep sources in `build/`.
 const DEFAULT_IGNORES: &str = "\
 .godot/
 .import/
 .env
 .env.*
+.ibproject/journey.json
 *.tmp
 .DS_Store
 Thumbs.db

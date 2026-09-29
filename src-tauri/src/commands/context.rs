@@ -1,21 +1,22 @@
 //! Context card commands (`infinabox_core::context_cards`).
 //!
-//! Wave 0 stubs — task X1 fills in the bodies.
 
-use infinabox_core::context_cards::{Board, Card, CardMeta, CardSummary, CardType, LinkGraph};
+use std::path::Path;
 
-const NOT_YET: &str = "Not implemented yet (Phase C, task X1)";
+use infinabox_core::context_cards::{self, Board, Card, CardMeta, CardSummary, CardType, LinkGraph};
+
+fn err(e: anyhow::Error) -> String {
+    format!("{e:#}")
+}
 
 #[tauri::command(async)]
 pub fn context_list(project_path: String) -> Result<Vec<CardSummary>, String> {
-    let _ = project_path;
-    Err(NOT_YET.into())
+    context_cards::list_cards(Path::new(&project_path)).map_err(err)
 }
 
 #[tauri::command(async)]
 pub fn context_read(project_path: String, path: String) -> Result<Card, String> {
-    let _ = (project_path, path);
-    Err(NOT_YET.into())
+    context_cards::read_card(Path::new(&project_path), &path).map_err(err)
 }
 
 #[tauri::command(async)]
@@ -25,24 +26,20 @@ pub fn context_write(
     meta: CardMeta,
     body: String,
 ) -> Result<Card, String> {
-    let _ = (project_path, path, meta, body);
-    Err(NOT_YET.into())
+    context_cards::write_card(Path::new(&project_path), &path, &meta, &body).map_err(err)
 }
 
 #[tauri::command(async)]
 pub fn context_set_status(project_path: String, path: String, status: String) -> Result<Card, String> {
-    let _ = (project_path, path, status);
-    Err(NOT_YET.into())
+    context_cards::set_status(Path::new(&project_path), &path, &status).map_err(err)
 }
 
 #[tauri::command(async)]
 pub fn context_board(project_path: String, types: Vec<CardType>) -> Result<Board, String> {
-    let _ = (project_path, types);
-    Err(NOT_YET.into())
+    context_cards::board(Path::new(&project_path), &types).map_err(err)
 }
 
 #[tauri::command(async)]
 pub fn context_graph(project_path: String) -> Result<LinkGraph, String> {
-    let _ = project_path;
-    Err(NOT_YET.into())
+    context_cards::graph(Path::new(&project_path)).map_err(err)
 }

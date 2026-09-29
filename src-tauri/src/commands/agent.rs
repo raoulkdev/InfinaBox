@@ -259,6 +259,8 @@ pub(crate) struct TurnSlot {
     provider: ProviderId,
     /// Why the message was sent.
     origin: MessageOrigin,
+    /// The specialist the person asked for (prompt sections only).
+    role: infinabox_core::agent::Role,
 }
 
 impl Drop for TurnSlot {
@@ -317,6 +319,7 @@ pub(crate) fn start_turn(
         stop_requested,
         provider,
         origin,
+        role: Default::default(),
     };
     let record = ChatRecord::User {
         text: message.to_string(),
@@ -578,7 +581,12 @@ impl<'a> TurnLog<'a> {
 /// settings (always plan first, no lessons) — the safe choice, since
 /// planning first never changes the game unasked — and the reason is shown
 /// in the chat, so the person knows why and how to fix it.
-fn turn_options(project: &Path, origin: MessageOrigin, log: &mut TurnLog) -> TurnOptions {
+fn turn_options(
+    project: &Path,
+    origin: MessageOrigin,
+    role: infinabox_core::agent::Role,
+    log: &mut TurnLog,
+) -> TurnOptions {
     let settings = project_settings::load(project).unwrap_or_else(|e| {
         // Recorded as a plain error (the chat shows it), but it doesn't
         // count as the turn's own failure: the runtime still reports that.
@@ -590,8 +598,7 @@ fn turn_options(project: &Path, origin: MessageOrigin, log: &mut TurnLog) -> Tur
         project_settings::ProjectSettings::default()
     });
     TurnOptions {
-        // Phase C (task X1): the role chosen in the composer.
-        role: infinabox_core::agent::Role::Director,
+        role,
         plan_policy: settings.plan_policy,
         teach: settings.teach,
         origin,
@@ -663,7 +670,7 @@ fn drive(
             log.note_store_error(e);
         }
     }
-    let options = turn_options(project, slot.origin, log);
+    let options = turn_options(project, slot.origin, slot.role, log);
 
     let mut retried = false;
     loop {
@@ -1011,11 +1018,12 @@ pub(crate) fn send_turn(
     thread_id: String,
     message: String,
     origin: MessageOrigin,
+    role: infinabox_core::agent::Role,
 ) -> Result<(), String> {
     let provider = selected_provider(app)?;
     let state = app.state::<AgentState>();
     let project = PathBuf::from(&project_path);
-    let slot = start_turn(
+    let mut slot = start_turn(
         &state.active_turns,
         &project,
         &thread_id,
@@ -1023,6 +1031,7 @@ pub(crate) fn send_turn(
         origin,
         provider,
     )?;
+    slot.role = role;
     autofix::note_turn_started(app, &project_path, &thread_id, origin);
     let project_key = project_path.clone();
     let runtimes = state.runtimes.clone();
@@ -1063,6 +1072,7 @@ pub fn agent_send(
     thread_id: String,
     message: String,
     origin: Option<MessageOrigin>,
+    role: Option<infinabox_core::agent::Role>,
 ) -> Result<(), String> {
     send_turn(
         &app,
@@ -1070,6 +1080,7 @@ pub fn agent_send(
         thread_id,
         message,
         origin.unwrap_or_default(),
+        role.unwrap_or_default(),
     )
 }
 

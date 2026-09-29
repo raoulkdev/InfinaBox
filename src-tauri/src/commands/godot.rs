@@ -605,6 +605,7 @@ impl GameHost for AppHost {
     }
 
     fn on_state(&self, state: GameState) {
+        note_boot_state(state);
         crate::commands::autofix::note_game_state(&self.0, state);
         let _ = self.0.emit(EVENT_GAME_STATE, GameStatePayload { state });
     }
@@ -614,8 +615,47 @@ impl GameHost for AppHost {
     }
 
     fn on_error(&self, error: &GameError) {
+        boot_run().errors = true;
         crate::commands::autofix::note_game_error(&self.0, error);
         let _ = self.0.emit(EVENT_GAME_ERROR, error);
+    }
+}
+
+/// What the current game run has shown so far, for the journey's "runs
+/// without errors" record (`producer::record_boot`).
+struct BootRun {
+    project: Option<PathBuf>,
+    reached_running: bool,
+    errors: bool,
+}
+
+fn boot_run() -> MutexGuard<'static, BootRun> {
+    static RUN: Mutex<BootRun> =
+        Mutex::new(BootRun { project: None, reached_running: false, errors: false });
+    RUN.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A run that reached Running and was then stopped without printing an
+/// error is a clean run; a crash or any error is not. Runs that never got
+/// going record nothing. (Called under the game manager's lock, so it never
+/// asks the manager for anything.)
+fn note_boot_state(state: GameState) {
+    let mut run = boot_run();
+    match state {
+        GameState::Starting => {
+            run.reached_running = false;
+            run.errors = false;
+        }
+        GameState::Running => run.reached_running = true,
+        GameState::Stopped | GameState::Crashed => {
+            if run.reached_running {
+                if let Some(project) = run.project.clone() {
+                    let ok = state == GameState::Stopped && !run.errors;
+                    let _ = infinabox_core::producer::record_boot(&project, ok);
+                }
+            }
+            run.reached_running = false;
+        }
     }
 }
 
@@ -744,6 +784,7 @@ pub fn restart_if_running(app: &AppHandle) -> Result<(), String> {
 /// `game_run` command and the bridge's `RunGame`. Blocks until the game
 /// process has started or failed to.
 pub fn run_game(app: &AppHandle, project_path: &str) -> Result<(), String> {
+    boot_run().project = Some(PathBuf::from(project_path));
     manager(app).run(&app_host(app), project_path)
 }
 

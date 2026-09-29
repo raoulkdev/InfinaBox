@@ -401,6 +401,7 @@ impl FixHost for AppFixHost {
             thread_id.to_string(),
             message.to_string(),
             MessageOrigin::AutoFix,
+            Default::default(),
         )
     }
 

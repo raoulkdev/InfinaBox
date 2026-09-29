@@ -47,6 +47,8 @@ pub fn run() {
         .manage(TerminalState::default())
         .manage(WatcherState::default())
         .manage(AgentState::default())
+        .manage(commands::credentials::SecretState::default())
+        .manage(commands::generate::GenState::default())
         .manage(AutoFixState::default())
         .manage(GodotState::default())
         .manage(BridgeState::default())
@@ -54,6 +56,7 @@ pub fn run() {
         // The bridge must be listening before any agent turn launches the
         // MCP server that connects to it.
         .setup(|app| {
+            commands::generate::clear_leftovers();
             commands::bridge::start(app.handle())?;
             Ok(())
         })
