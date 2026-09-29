@@ -25,7 +25,10 @@ export const COMPOSER = By.css('textarea[aria-label="Message the AI"]');
 const SEND = By.css('button[aria-label="Send"]');
 // Everything but the chat, which a snapshot always carries along and a
 // restore never rewinds (see crates/core/src/snapshot.rs).
-const NOT_CHAT = [".", ":(exclude).ibproject/chat"];
+// Undo/go back keep the chat and the project's settings as they are now
+// (the settings are the person's preferences, not the game), so both are
+// left out when comparing a restored project with an earlier snapshot.
+const NOT_CHAT = [".", ":(exclude).ibproject/chat", ":(exclude).ibproject/settings.json"];
 
 /** The History title an AI turn's snapshot gets: the message's first
  * non-empty line, cut to about 60 characters on a word boundary. Mirrors
@@ -236,11 +239,17 @@ const FILE_WRITING_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit", "mcp__
  * after its last file edit (the app mustn't restart it again), and at least
  * once otherwise (the app's own restart). */
 function checkTurnRestarts(run, events, pidsBefore, seen) {
-  const uses = events.filter((e) => e.type === "tool_use");
-  const lastEdit = uses.findLastIndex((e) => FILE_WRITING_TOOLS.includes(e.name));
-  const lastRun = uses.findLastIndex((e) => e.name === "mcp__infinabox__run_game");
+  // Same rule as the app (`TurnLog::restart_game`): a run counts as "after
+  // the last edit" only if it began once every edit had finished. When the
+  // AI sends an edit and "run the game" together, the game may have loaded
+  // the old file, so the app restarting it once more is right.
+  const writerIds = new Set(
+    events.filter((e) => e.type === "tool_use" && FILE_WRITING_TOOLS.includes(e.name)).map((e) => e.id),
+  );
+  const lastEditDone = events.findLastIndex((e) => e.type === "tool_result" && writerIds.has(e.id));
+  const lastRun = events.findLastIndex((e) => e.type === "tool_use" && e.name === "mcp__infinabox__run_game");
   const started = seen.filter((pid) => !pidsBefore.includes(pid));
-  const ranAfterEdit = lastRun > lastEdit && lastEdit >= 0;
+  const ranAfterEdit = writerIds.size > 0 && lastRun > lastEditDone;
   run.note(
     `game processes started during and after the turn: ${JSON.stringify(started)} ` +
       `(the AI ${ranAfterEdit ? "ran the game after its last edit" : "didn't run the game after its last edit"})`,
