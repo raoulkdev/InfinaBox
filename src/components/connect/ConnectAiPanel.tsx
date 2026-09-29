@@ -17,7 +17,9 @@ import type {
   ProviderId,
   ProviderInfo,
 } from "@/lib/studio-types";
-import { isUsable } from "./connect-format";
+import { ApiProviderCard } from "./ApiProviderCard";
+import { API_PROVIDERS } from "./api-providers";
+import { isApiStyle, isUsable } from "./connect-format";
 import { ProviderCard, type RunState, type TestState } from "./ProviderCard";
 
 export interface ConnectAiPanelProps {
@@ -52,8 +54,12 @@ export function ConnectAiPanel({ onConnected }: ConnectAiPanelProps) {
   const [choosing, setChoosing] = useState<ProviderId | null>(null);
   const [chooseError, setChooseError] = useState<string | null>(null);
 
+  // Bumps on every check so the key cards ask for their saved-key status again.
+  const [checkToken, setCheckToken] = useState(0);
+
   const detect = useCallback(async () => {
     setDetecting(true);
+    setCheckToken((n) => n + 1);
     const [infos, rec, current] = await Promise.allSettled([
       aiProviders(),
       aiRecommended(),
@@ -197,7 +203,10 @@ export function ConnectAiPanel({ onConnected }: ConnectAiPanelProps) {
   }
 
   const chosen = settings?.ai_provider ?? null;
-  const ready = providers?.filter((p) => p.installed && p.logged_in === true) ?? [];
+  // The API-key and local-model cards are built from a fixed list, so the
+  // detected list only feeds the subscription group.
+  const cliProviders = providers?.filter((p) => !isApiStyle(p.id)) ?? [];
+  const ready = cliProviders.filter((p) => p.installed && p.logged_in === true);
   // Exactly one provider is ready and nothing's chosen yet: don't pick it
   // silently — make "Use this one" the obvious next click.
   const suggested = settings && chosen === null && ready.length === 1 ? ready[0].id : null;
@@ -207,8 +216,9 @@ export function ConnectAiPanel({ onConnected }: ConnectAiPanelProps) {
     <div data-testid="connect-ai-panel" className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          InfinaBox uses the AI you already have — it runs on your own subscription, and
-          InfinaBox never sees your password or charges you for it.
+          InfinaBox uses your own AI: a subscription you already have, your own API key, or a
+          model on this computer. InfinaBox never sees your password and never charges you for
+          AI.
         </p>
         <Button
           type="button"
@@ -263,8 +273,12 @@ export function ConnectAiPanel({ onConnected }: ConnectAiPanelProps) {
         </div>
       ) : (
         providers && (
-          <div className="grid items-start gap-2 md:grid-cols-2">
-            {providers.map((p) => {
+          <section className="flex flex-col gap-2" data-testid="connect-group-subscription">
+            <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              Use an AI subscription you already have
+            </h3>
+            <div className="grid items-start gap-2 md:grid-cols-2">
+            {cliProviders.map((p) => {
               const ownRun = run?.provider === p.id ? run.state : null;
               return (
                 <ProviderCard
@@ -289,9 +303,35 @@ export function ConnectAiPanel({ onConnected }: ConnectAiPanelProps) {
                 />
               );
             })}
-          </div>
+            </div>
+          </section>
         )
       )}
+
+      {/* Always shown: these cards don't depend on detecting CLI tools, and
+          each shows its own errors. */}
+      <section className="flex flex-col gap-2" data-testid="connect-group-api">
+        <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Use an API key or a model on this computer
+        </h3>
+        <div className="grid items-start gap-2 md:grid-cols-2">
+          {API_PROVIDERS.map((def) => (
+            <ApiProviderCard
+              key={def.id}
+              def={def}
+              recommended={recommended === def.id}
+              inUse={chosen === def.id}
+              settings={settings}
+              checkToken={checkToken}
+              test={tests[def.id] ?? null}
+              choosing={choosing === def.id}
+              onSettingsSaved={setSettings}
+              onTest={() => void handleTest(def.id)}
+              onUse={() => void handleUse(def.id)}
+            />
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

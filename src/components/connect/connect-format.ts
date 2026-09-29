@@ -1,4 +1,4 @@
-import type { AgentErrorKind, ConnectAction, ProviderInfo } from "@/lib/studio-types";
+import type { AgentErrorKind, ConnectAction, ProviderId, ProviderInfo } from "@/lib/studio-types";
 
 // Plain wording for the connect panel — no React, so it stays trivially
 // testable if a frontend test runner ever lands (same idea as the Play
@@ -12,9 +12,49 @@ export function signedInLabel(loggedIn: boolean | null): string {
   return loggedIn ? "Yes" : "No";
 }
 
-/** A short, plain heading for a failed "Say hello" test. The real error
- * message from the backend is always shown underneath it. */
-export function testErrorHeading(kind: AgentErrorKind | null): string {
+/** An API key or a local model: cards built from a fixed list rather than
+ * from CLI detection. */
+export function isApiStyle(id: ProviderId): boolean {
+  return id === "anthropic-api" || id === "openai-api" || id === "local-model";
+}
+
+/** A short, plain heading for a failed test. The real error message from
+ * the backend is always shown underneath it. Pass the provider so a key or
+ * a local server gets wording that fits ("That key was refused", not
+ * "You're not signed in"). */
+export function testErrorHeading(kind: AgentErrorKind | null, provider?: ProviderId): string {
+  if (provider === "anthropic-api" || provider === "openai-api") {
+    switch (kind) {
+      case "not_installed":
+        return "No key or model is set up yet";
+      case "not_authenticated":
+        return "That key was refused";
+      case "rate_limited":
+        return "The provider says you've hit a limit or are out of credit";
+      case "process_failed":
+        return "Couldn't reach the provider";
+      case "cancelled":
+        return "The test was stopped";
+      default:
+        return "Something went wrong";
+    }
+  }
+  if (provider === "local-model") {
+    switch (kind) {
+      case "not_installed":
+        return "No model is set up yet";
+      case "not_authenticated":
+        return "The model server refused the request";
+      case "rate_limited":
+        return "The model is busy right now";
+      case "process_failed":
+        return "Couldn't reach the model";
+      case "cancelled":
+        return "The test was stopped";
+      default:
+        return "Something went wrong";
+    }
+  }
   switch (kind) {
     case "not_installed":
       return "It isn't installed on this computer";
