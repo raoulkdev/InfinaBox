@@ -174,12 +174,16 @@ export function ChatPanel({
 
   const busy = view.turnInProgress || (activeThreadId !== null && running.has(activeThreadId));
 
+  // `activeRef`, `loadingRef` and `runningRef` are not synced here: each
+  // is written together with its state wherever that changes. Copying the
+  // state in after a render could put back a value from a render that
+  // committed before the latest change (a turn's `agent-turn-finished`
+  // landing between an event's render and its effects), and a thread
+  // re-read then would be folded as still running — the chat stuck on
+  // "Working…" after its turn had ended.
   useEffect(() => {
     projectRef.current = projectPath;
     threadsRef.current = threads;
-    activeRef.current = activeThreadId;
-    loadingRef.current = loading;
-    runningRef.current = running;
     busyRef.current = busy;
   });
 
