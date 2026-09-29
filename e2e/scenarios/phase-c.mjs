@@ -289,4 +289,28 @@ export async function phaseC(run, app, config, fakes) {
     await clickWhenEnabled(driver, tid("nav-launch"));
     await waitVisible(driver, tid("journey-panel"));
   }, { needs: ["c1"] });
+
+  await run.step("c6", "Home is a list of games with an inspector; Settings has its own pages", async () => {
+    // An empty project doesn't end the first run; the list layout is what Home shows after it.
+    const current = await call("app_settings_get", {});
+    await call("app_settings_set", { settings: { ...current, first_run_done: true } });
+    await clickWhenEnabled(driver, tid("nav-home"));
+    await waitVisible(driver, tid("home-layout"), { timeoutMs: 30_000 });
+    await waitVisible(driver, tid("nav-studio")); // the sidebar is on Home too
+    await waitUntil(async () => (await driver.findElements(tid("project-row"))).length >= 1, { what: "a game in the list" });
+    const facts = await waitVisible(driver, tid("inspector-facts"), { timeoutMs: 30_000 });
+    const text = await driver.executeScript("return arguments[0].innerText", facts);
+    for (const label of ["Last opened", "Stage", "Context cards", "Saved versions"]) {
+      if (!text.includes(label)) throw new Error(`inspector lacks ${label}: ${text}`);
+    }
+    if ((await driver.findElements(tid("status-ai"))).length > 0) throw new Error("the Setup block is still on Home");
+    await run.shot("home-list-and-inspector");
+    await clickWhenEnabled(driver, tid("nav-settings"));
+    await waitVisible(driver, tid("settings-section"));
+    for (const id of ["ai", "godot", "accounts", "about"]) {
+      await clickWhenEnabled(driver, tid(`settings-${id}`));
+      await new Promise((r) => setTimeout(r, 700));
+      await run.shot(`settings-${id}`);
+    }
+  }, { needs: ["c1"] });
 }

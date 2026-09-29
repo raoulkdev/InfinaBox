@@ -30,7 +30,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConnectAiPanel } from "@/components/connect/ConnectAiPanel";
-import { signedInLabel } from "@/components/connect/connect-format";
+import { ProjectInspector } from "./ProjectInspector";
 import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
 import { GodotInstallCard } from "@/components/studio/play/GodotInstallCard";
 import { shortGodotVersion } from "@/components/studio/play/play-format";
@@ -82,8 +82,8 @@ async function load<T>(call: () => Promise<T>): Promise<Loadable<T>> {
 
 /** Home. Until the first game is made (`first_run_done`), a three-step
  * checklist (spec §6.2): connect your AI, set up Godot, make your first game
- * through the onboarding interview. After that: your games, "New game",
- * and a compact AI + Godot status row. Every status comes from the real
+ * through the onboarding interview. After that: your games as a list with an inspector
+ * (see `HomeLayout`); AI and Godot status live on the Settings page. Everything comes from the real
  * backend checks; if one fails, its error is shown instead. */
 export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
   const [projects, setProjects] = useState<RecentProject[]>([]);
@@ -92,7 +92,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
   const [providers, setProviders] = useState<Loadable<ProviderInfo[]>>({ status: "loading" });
   const [godot, setGodot] = useState<Loadable<GodotStatus>>({ status: "loading" });
   const [connectOpen, setConnectOpen] = useState(false);
-  const [godotOpen, setGodotOpen] = useState(false);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
@@ -215,6 +215,8 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
     });
   }
 
+  const selected = projects.find((p) => p.path === selectedPath) ?? projects[0] ?? null;
+
   const chosenId = settings.status === "ready" ? settings.value.ai_provider : null;
   const chosen =
     chosenId && providers.status === "ready"
@@ -240,7 +242,6 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
     <GodotInstallCard
       onInstalled={(status) => {
         setGodot({ status: "ready", value: status });
-        setGodotOpen(false);
       }}
     />
   );
@@ -255,7 +256,7 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
        * drag space of its own — this is the same invisible, real-estate
        * header strip every other block uses (see e.g. TerminalPanel's
        * "Agent" header), just with no label since Home doesn't need one. */}
-      <div data-tauri-drag-region className="h-9 shrink-0" />
+      {mode !== "home" && <div data-tauri-drag-region className="h-9 shrink-0" />}
       <AnimatePresence mode="wait" initial={false}>
         {mode === "onboarding" ? (
           <motion.div
@@ -273,6 +274,19 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
             transition={fadeTransition}
             className="flex min-h-0 flex-1 flex-col"
           >
+            {mode === "home" ? (
+              <HomeLayout
+                projects={projects}
+                selected={selected}
+                onSelect={setSelectedPath}
+                onOpen={handleOpenExisting}
+                onRemove={handleRemove}
+                onOpenFolder={() => void handleOpenExistingFolder()}
+                onEmptyProject={openNewProjectDialog}
+                onNewGame={() => setView("onboarding")}
+                error={openError}
+              />
+            ) : (
             <ScrollArea className="min-h-0 flex-1">
               <div className="mx-auto flex max-w-4xl flex-col gap-6 px-6 py-10">
                 {openError && (
@@ -408,89 +422,9 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
                   </>
                 )}
 
-                {mode === "home" && (
-                  <>
-                    <Card
-                      title={`Your games${projects.length > 0 ? ` · ${projects.length}` : ""}`}
-                      actions={
-                        <>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            data-testid="open-project"
-                            onClick={() => void handleOpenExistingFolder()}
-                          >
-                            <FolderOpen />
-                            Open project
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            data-testid="new-project"
-                            onClick={openNewProjectDialog}
-                          >
-                            <FolderPlus />
-                            Empty project
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            data-testid="new-game"
-                            onClick={() => setView("onboarding")}
-                          >
-                            <Sparkles />
-                            New game
-                          </Button>
-                        </>
-                      }
-                    >
-                      {projects.length === 0 ? (
-                        <p className="py-6 text-center text-sm text-muted-foreground">
-                          No games here yet — make a new one, or open one you already have.
-                        </p>
-                      ) : (
-                        recentProjects
-                      )}
-                    </Card>
-
-                    <Card title="Setup">
-                      <div className="flex flex-col gap-2">
-                        <StatusRow
-                          label="AI"
-                          testId="status-ai"
-                          value={<AiStatus settings={settings} providers={providers} chosen={chosen} />}
-                          actionLabel={connectOpen ? "Close" : chosen ? "Change" : "Connect"}
-                          onAction={() => setConnectOpen((o) => !o)}
-                        />
-                        <Expand open={connectOpen}>{connectPanel}</Expand>
-                        <StatusRow
-                          label="Godot"
-                          testId="status-godot"
-                          value={<GodotStatusText godot={godot} />}
-                          actionLabel={
-                            godot.status === "error"
-                              ? "Check again"
-                              : godot.status === "ready" && !godot.value.installed
-                                ? godotOpen
-                                  ? "Close"
-                                  : "Set up"
-                                : undefined
-                          }
-                          onAction={() =>
-                            godot.status === "error" ? void refreshGodot() : setGodotOpen((o) => !o)
-                          }
-                        />
-                        <Expand open={godotOpen && godot.status === "ready" && !godot.value.installed}>
-                          {godotSetup}
-                        </Expand>
-                      </div>
-                    </Card>
-                  </>
-                )}
               </div>
             </ScrollArea>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -597,27 +531,6 @@ function Card({ title, actions, children }: { title: string; actions?: ReactNode
   );
 }
 
-/** A panel revealed under a status row — a plain fade in and out, with no
- * height animation (see `widthTransition`'s comment on what animating a
- * layout property costs). */
-function Expand({ open, children }: { open: boolean; children: ReactNode }) {
-  return (
-    <AnimatePresence initial={false}>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={fadeTransition}
-          className="rounded-lg border border-border p-3"
-        >
-          {children}
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
-}
-
 interface ChecklistStepProps {
   number: number;
   title: string;
@@ -710,73 +623,6 @@ function GodotStep({
   );
 }
 
-function StatusRow({
-  label,
-  value,
-  actionLabel,
-  onAction,
-  testId,
-}: {
-  label: string;
-  value: ReactNode;
-  actionLabel?: string;
-  onAction: () => void;
-  testId: string;
-}) {
-  return (
-    <div
-      data-testid={testId}
-      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2"
-    >
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="w-12 shrink-0 text-xs text-muted-foreground">{label}</span>
-        <span className="min-w-0 truncate text-sm text-foreground/90">{value}</span>
-      </div>
-      {actionLabel && (
-        <Button type="button" size="xs" variant="ghost" className="shrink-0" onClick={onAction}>
-          {actionLabel}
-        </Button>
-      )}
-    </div>
-  );
-}
-
-function AiStatus({
-  settings,
-  providers,
-  chosen,
-}: {
-  settings: Loadable<AppSettings>;
-  providers: Loadable<ProviderInfo[]>;
-  chosen: ProviderInfo | null;
-}) {
-  if (settings.status === "loading" || providers.status === "loading") {
-    return <Skeleton className="inline-block h-4 w-40 align-middle" />;
-  }
-  if (settings.status === "error") return <>Couldn't read your settings: {settings.message}</>;
-  if (!settings.value.ai_provider) return <>None chosen yet</>;
-  if (providers.status === "error") return <>Couldn't check it: {providers.message}</>;
-  if (!chosen) return <>{settings.value.ai_provider} (not found)</>;
-  if (!chosen.installed) return <>{chosen.name} · not installed</>;
-  return (
-    <>
-      {chosen.name} · Signed in: {signedInLabel(chosen.logged_in)}
-    </>
-  );
-}
-
-function GodotStatusText({ godot }: { godot: Loadable<GodotStatus> }) {
-  if (godot.status === "loading") return <Skeleton className="inline-block h-4 w-24 align-middle" />;
-  if (godot.status === "error") return <>Couldn't check: {godot.message}</>;
-  if (!godot.value.installed) return <>Not set up yet</>;
-  return (
-    <span title={godot.value.version ?? undefined}>
-      {godot.value.version ? `Godot ${shortGodotVersion(godot.value.version)}` : "Installed"}
-      {godot.value.managed ? "" : " · your own copy"}
-    </span>
-  );
-}
-
 function RecentProjectsGrid({
   projects,
   onOpen,
@@ -832,5 +678,104 @@ function RecentProjectsGrid({
         ))}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+/** Home once a first game exists: your games as a vertical list, with the
+ * selected one's details in an inspector on the right (the sidebar is on
+ * the left, from the app shell). */
+function HomeLayout({
+  projects,
+  selected,
+  onSelect,
+  onOpen,
+  onRemove,
+  onOpenFolder,
+  onEmptyProject,
+  onNewGame,
+  error,
+}: {
+  projects: RecentProject[];
+  selected: RecentProject | null;
+  onSelect: (path: string) => void;
+  onOpen: (path: string) => void;
+  onRemove: (path: string) => void;
+  onOpenFolder: () => void;
+  onEmptyProject: () => void;
+  onNewGame: () => void;
+  error: string | null;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 gap-2" data-testid="home-layout">
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-xl border border-border bg-card">
+        <div data-tauri-drag-region className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+          <h1 className="text-sm font-medium tracking-wide text-muted-foreground">
+            Your games{projects.length > 0 ? ` · ${projects.length}` : ""}
+          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" variant="secondary" data-testid="open-project" onClick={onOpenFolder}>
+              <FolderOpen />
+              Open project
+            </Button>
+            <Button type="button" size="sm" variant="secondary" data-testid="new-project" onClick={onEmptyProject}>
+              <FolderPlus />
+              Empty project
+            </Button>
+            <Button type="button" size="sm" data-testid="new-game" onClick={onNewGame}>
+              <Sparkles />
+              New game
+            </Button>
+          </div>
+        </div>
+        {error && (
+          <Alert variant="destructive" className="m-3 w-auto">
+            <AlertCircle />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        {projects.length === 0 ? (
+          <p className="p-10 text-center text-sm text-muted-foreground">
+            No games here yet — make a new one, or open one you already have.
+          </p>
+        ) : (
+          <ScrollArea className="min-h-0 flex-1">
+            <ul className="flex flex-col p-2" data-testid="project-list">
+              {projects.map((project) => {
+                const active = selected?.path === project.path;
+                return (
+                  <li key={project.path}>
+                    <button
+                      type="button"
+                      data-testid="project-row"
+                      aria-pressed={active}
+                      onClick={() => onSelect(project.path)}
+                      onDoubleClick={() => onOpen(project.path)}
+                      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/50 ${
+                        active ? "bg-accent" : ""
+                      }`}
+                    >
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate text-sm font-medium">{projectFolderName(project.path)}</span>
+                        <span className="truncate text-xs text-muted-foreground">{project.path}</span>
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {new Date(project.lastOpened).toLocaleDateString(undefined, { dateStyle: "medium" })}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </ScrollArea>
+        )}
+      </section>
+      {selected && (
+        <ProjectInspector
+          project={selected}
+          onOpen={() => onOpen(selected.path)}
+          onRemove={() => onRemove(selected.path)}
+        />
+      )}
+    </div>
   );
 }

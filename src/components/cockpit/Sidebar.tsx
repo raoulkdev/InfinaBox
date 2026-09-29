@@ -7,6 +7,7 @@ import {
   Images,
   Rocket,
   Wrench,
+  Settings as SettingsIcon,
   FolderOpen,
   PanelLeftClose,
   PanelLeftOpen,
@@ -52,7 +53,7 @@ function FadeLabel({ show, children }: { show: boolean; children: ReactNode }) {
 // per-discipline sections (Documents, Business, Marketing, ...) are gone:
 // their docs now live as Context cards, and their tools arrive as parts of
 // Assets and Playtest & Launch.
-export type Section = "home" | "studio" | "context" | "assets" | "launch" | "advanced";
+export type Section = "home" | "studio" | "context" | "assets" | "launch" | "advanced" | "settings";
 
 interface SectionItem {
   id: Section;
@@ -78,6 +79,10 @@ const PROJECT_SECTIONS: SectionItem[] = [
   { id: "launch", label: "Playtest & Launch", icon: Rocket },
   { id: "advanced", label: "Advanced", icon: Wrench },
 ];
+
+// App settings sit at the foot of the sidebar, apart from the project's
+// screens: they're about InfinaBox, not the open game.
+const SETTINGS_ITEM: SectionItem = { id: "settings", label: "Settings", icon: SettingsIcon };
 
 interface SidebarProps {
   active: Section;
@@ -155,8 +160,7 @@ function SectionRow({
 // Replaces the old top bar's "Open Project" button — now that there's no
 // dedicated header, it lives right under the pinned Home row, heading the
 // open project's own screens, in every section
-// that shows the sidebar (Home itself never renders the sidebar; its own
-// dashboard has its own project picker).
+// that shows the sidebar (Home shows it too).
 function ProjectButtonRow({
   projectPath,
   collapsed,
@@ -289,6 +293,13 @@ export function Sidebar({ active, onSelect, projectPath, onOpenProject }: Sideba
         </ScrollArea>
 
         <Separator className="my-1" />
+
+        <SectionRow
+          item={SETTINGS_ITEM}
+          active={active === "settings"}
+          collapsed={collapsed}
+          onSelect={() => onSelect("settings")}
+        />
 
         <AnimatePresence mode="wait" initial={false}>
           {collapsed ? (

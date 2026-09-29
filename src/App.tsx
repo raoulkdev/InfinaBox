@@ -9,8 +9,9 @@ import { AdvancedSection } from "@/components/advanced/AdvancedSection";
 import { ContextSection } from "@/components/context/ContextSection";
 import { AssetsSection } from "@/components/assets/AssetsSection";
 import { StudioSection } from "@/components/studio/StudioSection";
-import { fadeRise, fadeTransition, springTransition } from "@/lib/motion";
+import { fadeRise, fadeTransition } from "@/lib/motion";
 import { recordProjectOpened } from "@/lib/recent-projects";
+import { SettingsSection } from "@/components/settings/SettingsSection";
 import { JourneyPanel } from "@/components/journey/JourneyPanel";
 import { chatCreateThread } from "@/lib/studio-api";
 import type { PendingTurn } from "@/lib/studio-types";
@@ -106,6 +107,7 @@ function App() {
 
   const simpleSections: Record<SimpleSection, () => ReactNode> = {
     assets: () => <AssetsSection projectPath={projectPath} />,
+    settings: () => <SettingsSection projectPath={projectPath} />,
     launch: () =>
       projectPath ? (
         <JourneyPanel projectPath={projectPath} onAskProducer={handleAskProducer} />
@@ -150,25 +152,12 @@ function App() {
         data-tauri-drag-region
         className="flex h-screen w-screen gap-2 overflow-hidden bg-background p-2 text-foreground"
       >
-        <AnimatePresence initial={false}>
-          {section !== "home" && (
-            <motion.div
-              key="sidebar"
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -8 }}
-              transition={springTransition}
-              className="flex h-full"
-            >
-              <Sidebar
-                active={section}
-                onSelect={setSection}
-                projectPath={projectPath}
-                onOpenProject={handleOpenProject}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <Sidebar
+          active={section}
+          onSelect={setSection}
+          projectPath={projectPath}
+          onOpenProject={handleOpenProject}
+        />
 
         <AnimatePresence mode="wait" initial={false}>
           {section === "home" && (

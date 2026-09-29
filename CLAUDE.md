@@ -35,7 +35,7 @@ Tauri events used by Studio: `agent-event`, `agent-turn-finished`, `godot-instal
 
 ### `src/App.tsx`'s persistent-tab crossfade
 
-Read this file in full before touching navigation — it has a genuinely unusual mechanism. Three sections (**Studio**, **Context**, **Advanced**) must never unmount once opened: Studio holds live chat turns and game state, Advanced owns the live terminal session (respawning it would kill whatever the user is doing in their shell), and Context can hold unsaved card/graph drafts. Opening a project from Home lands on Studio (an onboarding first build is handed over as a `pendingTurn`). Assets and Playtest & Launch mount only while selected (Playtest & Launch shows the producer journey when a project is open; the "Ask the Producer" button hands a `pendingTurn` with `role: "producer"` to Studio).
+Read this file in full before touching navigation — it has a genuinely unusual mechanism. Three sections (**Studio**, **Context**, **Advanced**) must never unmount once opened: Studio holds live chat turns and game state, Advanced owns the live terminal session (respawning it would kill whatever the user is doing in their shell), and Context can hold unsaved card/graph drafts. Opening a project from Home lands on Studio (an onboarding first build is handed over as a `pendingTurn`). Assets, Settings and Playtest & Launch mount only while selected (Playtest & Launch shows the producer journey when a project is open; the "Ask the Producer" button hands a `pendingTurn` with `role: "producer"` to Studio).
 
 Because `AnimatePresence` (Motion's crossfade helper) only animates real mount/unmount, and these panels never unmount, they can't use it directly. Instead all three sit **absolutely stacked in one slot, permanently mounted**, with only `opacity`/`pointer-events` toggling per the active `section`. Each inactive one also carries the HTML `inert` attribute — not just `pointer-events: none` — which additionally pulls it out of the tab order and accessibility tree, specifically because a prior bug in this codebase's history came from a descendant re-adding its own `pointer-events-auto` inside a "hidden" panel.
 
@@ -104,11 +104,12 @@ From `src/App.tsx`'s `simpleSections` map — deliberately honest placeholders, 
 |---|---|---|
 | Studio | real | chat with the user's own Claude Code or Codex (streamed events, threads, stop, plan cards, auto-fix banner, settings), Play panel, History panel |
 | Context | real | `FileBrowser` over `.ibproject/context` (Markdown cards) plus a Graphs tab (ReactFlow, `.graph.json`) |
-| Advanced | real | Build's terminal + code editor, Godot settings (custom path, Open in Godot editor), the Connect-your-AI panel |
+| Advanced | real | Build's terminal + code editor |
+| Settings | real | your AI (CLI, API key, local model), Godot, generation accounts, about & data |
 | Assets | real | project assets + licenses, libraries, generation (providers verified only against local fakes) |
 | Playtest & Launch | partly real | the producer journey (real signals + manual ticks); playtest/launch/accounts are later phases |
 
-Home/Dashboard is real: a first-run checklist (connect your AI, set up Godot, make your first game) until `first_run_done`, then recent projects, New game (the interview), Empty project, Open project, and AI/Godot status. All state shown comes from real detection (`connect::detect_all`, `godot_status`), never invented.
+Home/Dashboard is real: the sidebar is shown on Home too. Until `first_run_done` a checklist (connect your AI, set up Godot, make your first game); then a vertical list of your games with an inspector on the right (stage, cards, saved versions, latest change — read from disk), plus New game (the interview), Empty project and Open project. AI/Godot status lives on the Settings page. All state shown comes from real detection (`connect::detect_all`, `godot_status`), never invented.
 
 ## Orientation for anything not covered here
 

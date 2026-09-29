@@ -1,4 +1,4 @@
-// Advanced → Settings → Godot: which Godot InfinaBox runs the game with,
+// Settings → Godot: which Godot InfinaBox runs the game with,
 // a way to point it at the person's own copy instead of the managed one,
 // and "Open in Godot editor". Everything shown comes from the backend
 // (`godot_status`, `app_settings_get`); when a call fails, its own message

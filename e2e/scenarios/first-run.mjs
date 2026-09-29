@@ -128,9 +128,8 @@ export async function firstRun(run, app, config) {
     // INFINABOX_GODOT is set, so Godot counts as installed.
     await waitAttr(driver, tid("step-godot"), "data-done", "true", { timeoutMs: 30_000 });
     if (steps["step-connect"] === "true") throw new Error("no AI has been chosen yet, but step 1 shows done");
-    // No sidebar on Home.
-    const nav = await driver.findElements(tid("nav-studio"));
-    if (nav.length > 0 && (await nav[0].isDisplayed())) throw new Error("the sidebar shows on Home");
+    // The sidebar is on Home too.
+    await waitVisible(driver, tid("nav-studio"));
   });
 
   await run.step("F2", "Connect your AI: Claude Code is detected installed and signed in; Codex as it really is", async () => {
@@ -511,8 +510,8 @@ export async function firstRun(run, app, config) {
     await run.shot("studio-settings");
   }, { needs: ["F7"] });
 
-  await run.step("F13", "The sidebar has the six sections; Context lists the game's cards", async () => {
-    const ids = ["home", "studio", "context", "assets", "launch", "advanced"];
+  await run.step("F13", "The sidebar has the six sections and Settings; Context lists the game's cards", async () => {
+    const ids = ["home", "studio", "context", "assets", "launch", "advanced", "settings"];
     const labels = [];
     for (const id of ids) {
       const el = await waitVisible(driver, tid(`nav-${id}`));
