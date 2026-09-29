@@ -8,6 +8,7 @@
 
 ## Status
 
+- 2026-09-29: Wave 1 launched: 17 subagents (9 backend, 4 templates, 4 frontend).
 - 2026-09-29: plan written; Wave 0 done (contracts, stubs, template skeletons, dependencies `image`, `base64`, `keyring` 3, `tiny_http`, `three`). Subagent rules: `phase-c-subagent-rules.md` in the session scratchpad.
 
 ## What can and can't be verified here (read this first)

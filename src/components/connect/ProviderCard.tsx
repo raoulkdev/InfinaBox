@@ -18,6 +18,7 @@ import type {
   ConnectAction,
   ConnectExitPayload,
   ConnectionTest,
+  ProviderId,
   ProviderInfo,
 } from "@/lib/studio-types";
 import { ConnectTerminal } from "./ConnectTerminal";
@@ -222,7 +223,7 @@ export function ProviderCard({
       <AnimatePresence initial={false}>
         {test && test.status !== "running" && (
           <motion.div key="test" {...fadeRise} transition={fadeTransition}>
-            <TestResultView test={test} />
+            <TestResultView test={test} provider={p.id} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -339,7 +340,13 @@ function RunView({
   );
 }
 
-function TestResultView({ test }: { test: Exclude<TestState, { status: "running" }> }) {
+export function TestResultView({
+  test,
+  provider,
+}: {
+  test: Exclude<TestState, { status: "running" }>;
+  provider?: ProviderId;
+}) {
   if (test.status === "failed") {
     return (
       <Alert variant="destructive" data-testid="connect-test-result" data-ok="false">
@@ -364,7 +371,7 @@ function TestResultView({ test }: { test: Exclude<TestState, { status: "running"
   return (
     <Alert variant="destructive" data-testid="connect-test-result" data-ok="false">
       <AlertCircle />
-      <AlertTitle>{testErrorHeading(r.error_kind)}</AlertTitle>
+      <AlertTitle>{testErrorHeading(r.error_kind, provider)}</AlertTitle>
       <AlertDescription className="break-words">
         {r.message ?? "The test didn't get a reply."}
       </AlertDescription>
