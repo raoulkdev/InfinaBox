@@ -377,4 +377,22 @@ export async function phaseC(run, app, config, fakes) {
     await waitUntil(async () => (await driver.findElements(tid("message-attachments"))).length > 0, { what: "the attachment shown in the message" });
     await run.shot("message-with-attachment");
   }, { needs: ["c4"] });
+
+  await run.step("c8", "Code page and Settings from inside a game; Board and Map tabs", async () => {
+    await clickWhenEnabled(driver, tid("nav-code"));
+    await new Promise((r) => setTimeout(r, 2500)); // the terminal starts
+    await run.shot("code-page");
+    await clickWhenEnabled(driver, tid("nav-settings"));
+    await waitVisible(driver, tid("settings-section"));
+    if ((await driver.findElements(tid("home-sidebar"))).length > 0) throw new Error("Settings from a game shows the Home sidebar");
+    await waitVisible(driver, tid("nav-studio")); // the game sidebar frames it
+    await run.shot("settings-from-game");
+    await clickWhenEnabled(driver, tid("nav-context"));
+    await clickWhenEnabled(driver, By.xpath("//button[@role='tab'][normalize-space()='Board']"));
+    await waitVisible(driver, tid("board-tab"));
+    await run.shot("context-board");
+    await clickWhenEnabled(driver, By.xpath("//button[@role='tab'][normalize-space()='Map']"));
+    await waitVisible(driver, tid("map-tab"));
+    await run.shot("context-map");
+  }, { needs: ["c7"] });
 }
