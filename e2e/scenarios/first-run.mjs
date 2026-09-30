@@ -243,6 +243,7 @@ export async function firstRun(run, app, config) {
     await run.shot("interview-dimension");
     await next(driver, 1);
     // 3. Games it's like: optional, skipped.
+    await run.shot("interview-references");
     const skip = (await textOf(driver, tid("onboarding-next"))).trim();
     run.note(`references button reads "${skip}"`);
     if (skip !== "Skip") throw new Error(`with no references typed the button should read Skip, reads ${skip}`);
