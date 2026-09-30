@@ -26,6 +26,11 @@ pub struct AppSettings {
     /// Per-provider model settings (Phase C), keyed by the provider's string
     /// id (`anthropic-api`, `openai-api`, `local-model`). Never holds a key.
     pub models: std::collections::BTreeMap<String, ModelConfig>,
+    /// Where the person put things: panel sizes and order, the sidebar's
+    /// collapsed state. Keyed by the screen's own name (`build`,
+    /// `context.documents`, `sidebar.collapsed`); the values are whatever
+    /// that screen saves.
+    pub layouts: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// Which model an API runtime uses, and where a local one lives.

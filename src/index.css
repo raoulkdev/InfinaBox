@@ -132,6 +132,51 @@
   html {
     @apply font-sans;
     }
+
+  /* This is an app, not a page: the window never scrolls or bounces, and
+     nothing is selectable unless it is text a person works with (fields,
+     documents, code, the terminal, chat replies, logs), which opt back in
+     below or with the `select-text` class. Panels that need scrolling
+     scroll inside themselves. */
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    cursor: default;
+  }
+  img,
+  svg,
+  a {
+    -webkit-user-drag: none;
+  }
+  input,
+  textarea,
+  [contenteditable]:not([contenteditable="false"]),
+  .cm-editor,
+  .xterm,
+  .select-text,
+  .select-text * {
+    -webkit-user-select: text;
+    user-select: text;
+    cursor: auto;
+  }
+  button,
+  [role="button"],
+  [role="tab"],
+  label,
+  select {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: default;
+  }
 }
 
 /* xterm.js's own stylesheet hardcodes the scroll-viewport element (a

@@ -18,6 +18,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { fadeTransition, springTransition, widthTransition } from "@/lib/motion";
+import { getLayout, setLayout } from "@/lib/layout-store";
 import { pickAndOpenExistingProject, projectFolderName } from "@/lib/project-picker";
 import { cn } from "@/lib/utils";
 
@@ -93,14 +94,10 @@ interface SidebarProps {
 // Persisted the same lightweight way recent-projects.ts persists its list —
 // per-machine UI state with no reason to round-trip through Tauri, and no
 // reason to lose it every time the app restarts.
-const COLLAPSED_STORAGE_KEY = "infinabox.sidebarCollapsed";
+const COLLAPSED_STORAGE_KEY = "sidebar.collapsed";
 
 function loadCollapsed(): boolean {
-  try {
-    return localStorage.getItem(COLLAPSED_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
+  return getLayout<boolean>(COLLAPSED_STORAGE_KEY) === true;
 }
 
 function SectionRow({
@@ -225,12 +222,7 @@ export function Sidebar({ active, onSelect, projectPath, onOpenProject }: Sideba
   const [collapsed, setCollapsed] = useState(loadCollapsed);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(COLLAPSED_STORAGE_KEY, String(collapsed));
-    } catch {
-      // Losing the preference just means it defaults back to expanded next
-      // launch — not worth surfacing as an error.
-    }
+    setLayout(COLLAPSED_STORAGE_KEY, collapsed);
   }, [collapsed]);
 
   return (
@@ -263,7 +255,10 @@ export function Sidebar({ active, onSelect, projectPath, onOpenProject }: Sideba
        * is purely a data attribute Tauri's JS layer reads on `pointerdown` —
        * it never touches the CSS pointer-events cascade, so there's nothing
        * to opt back into (see App.tsx's top comment). */}
-      <div className="relative z-10 flex h-full min-h-0 flex-col gap-1 px-2 pt-11 pb-2">
+      <div
+        data-tauri-drag-region
+        className="relative z-10 flex h-full min-h-0 flex-col gap-1 px-2 pt-11 pb-2"
+      >
         {PINNED.map((item) => (
           <SectionRow
             key={item.id}

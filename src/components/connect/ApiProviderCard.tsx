@@ -181,7 +181,7 @@ export function ApiProviderCard({
   return (
     <div
       data-testid={`provider-${def.id}`}
-      className={`flex flex-col gap-3 rounded-lg border bg-background p-3 ${
+      className={`flex h-full flex-col gap-3 rounded-lg border bg-background p-3 ${
         inUse ? "border-emerald-500/50" : "border-border"
       }`}
     >

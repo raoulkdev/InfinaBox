@@ -51,8 +51,36 @@ pub fn app_settings_get(app: AppHandle) -> Result<AppSettings, String> {
 
 /// Saves `settings` and returns what was saved.
 #[tauri::command(async)]
-pub fn app_settings_set(app: AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
-    save_to(&settings_dir(&app)?, settings)
+pub fn app_settings_set(app: AppHandle, mut settings: AppSettings) -> Result<AppSettings, String> {
+    let dir = settings_dir(&app)?;
+    // Layouts have their own commands; a settings screen never overwrites them.
+    settings.layouts = load_from(&dir)?.layouts;
+    save_to(&dir, settings)
+}
+
+/// Everything the person has arranged (see `AppSettings::layouts`).
+#[tauri::command(async)]
+pub fn layouts_get(app: AppHandle) -> Result<std::collections::BTreeMap<String, serde_json::Value>, String> {
+    Ok(load(&app)?.layouts)
+}
+
+/// Saves (or, with no value, forgets) one screen's layout.
+#[tauri::command(async)]
+pub fn layout_set(app: AppHandle, key: String, value: Option<serde_json::Value>) -> Result<(), String> {
+    set_layout(&settings_dir(&app)?, &key, value)
+}
+
+pub fn set_layout(dir: &Path, key: &str, value: Option<serde_json::Value>) -> Result<(), String> {
+    if key.is_empty() || key.len() > 100 {
+        return Err("That layout name isn't valid.".into());
+    }
+    let _guard = SAVE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut settings = load_from(dir)?;
+    match value {
+        Some(value) => settings.layouts.insert(key.to_string(), value),
+        None => settings.layouts.remove(key),
+    };
+    app_settings::save(dir, &settings).map_err(|e| format!("Couldn't save InfinaBox's settings: {e:#}"))
 }
 
 #[cfg(test)]
@@ -60,6 +88,22 @@ mod tests {
     use super::*;
     use crate::commands::godot::test_support::TempDir;
     use infinabox_core::connect::ProviderId;
+
+    #[test]
+    fn layouts_are_saved_one_at_a_time_without_touching_other_settings() {
+        let dir = TempDir::new("layouts");
+        save_to(dir.path(), AppSettings { first_run_done: true, ..Default::default() }).unwrap();
+        set_layout(dir.path(), "build", Some(serde_json::json!({"order": ["a", "b"]}))).unwrap();
+        set_layout(dir.path(), "sidebar.collapsed", Some(serde_json::json!(true))).unwrap();
+        set_layout(dir.path(), "build", Some(serde_json::json!({"order": ["b", "a"]}))).unwrap();
+        let loaded = load_from(dir.path()).unwrap();
+        assert!(loaded.first_run_done);
+        assert_eq!(loaded.layouts["build"], serde_json::json!({"order": ["b", "a"]}));
+        assert_eq!(loaded.layouts["sidebar.collapsed"], serde_json::json!(true));
+        set_layout(dir.path(), "build", None).unwrap();
+        assert!(!load_from(dir.path()).unwrap().layouts.contains_key("build"));
+        assert!(set_layout(dir.path(), "", Some(serde_json::json!(1))).is_err());
+    }
 
     #[test]
     fn saves_tidies_and_loads_back() {

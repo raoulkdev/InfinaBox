@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { debounce } from "@/lib/debounce";
+import { getLayout, setLayout } from "@/lib/layout-store";
 import { cn } from "@/lib/utils";
 
 // Same settle window TerminalPanel's own resize handler uses, and for the
@@ -32,8 +33,8 @@ export interface PanelSpec {
 }
 
 interface ResizablePanelGroupProps {
-  /** Persists this group's sizes and order to `localStorage` under
-   * `infinabox.layout.<storageKey>` — unique per call site (e.g. "build",
+  /** Saves this group's sizes and order in the app's settings
+   * (`lib/layout-store.ts`) under `<storageKey>` — unique per call site (e.g. "build",
    * "filebrowser.documents") so unrelated panel groups never collide. */
   storageKey: string;
   panels: PanelSpec[];
@@ -58,15 +59,11 @@ const GAP = 8;
 const SWAP_THRESHOLD_RATIO = 0.5;
 // Height of the reorder grip, in pixels — see where it's rendered for why
 // it has to stay within a header's top 4px.
-const GRIP_HEIGHT = 4;
+const GRIP_HEIGHT = 6;
 
 interface LayoutState {
   order: string[];
   sizes: Record<string, number>;
-}
-
-function storageFullKey(storageKey: string): string {
-  return `infinabox.layout.${storageKey}`;
 }
 
 function defaultLayout(panels: PanelSpec[]): LayoutState {
@@ -86,9 +83,8 @@ function defaultLayout(panels: PanelSpec[]): LayoutState {
 function loadLayout(storageKey: string, panels: PanelSpec[]): LayoutState {
   const fallback = defaultLayout(panels);
   try {
-    const raw = localStorage.getItem(storageFullKey(storageKey));
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw) as Partial<LayoutState> | null;
+    const parsed = getLayout<Partial<LayoutState>>(storageKey);
+    if (!parsed) return fallback;
     const ids = panels.map((p) => p.id);
     const order = parsed?.order;
     const sizes = parsed?.sizes;
@@ -109,12 +105,7 @@ function loadLayout(storageKey: string, panels: PanelSpec[]): LayoutState {
 }
 
 function saveLayout(storageKey: string, layout: LayoutState): void {
-  try {
-    localStorage.setItem(storageFullKey(storageKey), JSON.stringify(layout));
-  } catch {
-    // Losing a saved layout just means it resets to the default split next
-    // launch — not worth surfacing as an error.
-  }
+  setLayout(storageKey, layout);
 }
 
 /** The one system every multi-block row in the app uses to let its blocks
@@ -123,12 +114,16 @@ function saveLayout(storageKey: string, layout: LayoutState): void {
  * own (unrelated) collapse behavior. A single call site with N panels: N-1
  * drag handles for resizing, and a small grip strip on each panel for
  * reordering. Both the sizes and the order persist per `storageKey`, the
- * same `localStorage`-backed pattern the Sidebar's collapsed state uses. */
+ * same settings-backed store the Sidebar's collapsed state uses. */
 export function ResizablePanelGroup({ storageKey, panels, className }: ResizablePanelGroupProps) {
   const byId = useMemo(() => Object.fromEntries(panels.map((p) => [p.id, p])), [panels]);
   const idsKey = panels.map((p) => p.id).join("\u0000");
 
   const [layout, setLayout] = useState<LayoutState>(() => loadLayout(storageKey, panels));
+  // The latest layout for pointer handlers, which must compute the next one
+  // outside a state updater (updaters run twice in development and must be pure).
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
 
   useEffect(() => {
     setLayout((prev) => {
@@ -268,10 +263,11 @@ export function ResizablePanelGroup({ storageKey, panels, className }: Resizable
         onReorderPointerUp();
         return;
       }
-      setLayout((prev) => {
+      {
+        const prev = layoutRef.current;
         let order = prev.order;
         let index = order.indexOf(drag.id);
-        if (index === -1) return prev;
+        if (index === -1) return;
         // Consume the full pointer delta in one pass rather than a single
         // swap, so a large, fast motion that crosses more than one
         // neighbor's threshold in a single pointermove event (dragging a
@@ -303,10 +299,12 @@ export function ResizablePanelGroup({ storageKey, panels, className }: Resizable
           remaining += neighborWidthPx;
           swapped = true;
         }
-        if (!swapped) return prev;
+        if (!swapped) return;
         reorderDragRef.current = { id: drag.id, startX: e.clientX };
-        return { ...prev, order };
-      });
+        const next = { ...prev, order };
+        layoutRef.current = next;
+        setLayout(next);
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [availableWidth],
@@ -397,7 +395,7 @@ export function ResizablePanelGroup({ storageKey, panels, className }: Resizable
                   title="Drag to move this panel"
                   onPointerDown={startReorder(id)}
                   style={{ height: GRIP_HEIGHT }}
-                  className="pointer-events-none w-16 cursor-grab rounded-b-full bg-muted-foreground/50 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 hover:bg-muted-foreground active:cursor-grabbing"
+                  className="pointer-events-none w-24 cursor-grab touch-none rounded-b-full bg-muted-foreground/50 opacity-25 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 hover:bg-muted-foreground active:cursor-grabbing"
                 />
               </div>
               {!isLast && <ResizeHandle onPointerDown={startResize(id, layout.order[i + 1])} />}

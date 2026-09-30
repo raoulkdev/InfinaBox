@@ -83,7 +83,7 @@ export function GameOutputLog() {
         const el = e.currentTarget;
         stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
       }}
-      className="min-h-0 flex-1 overflow-auto border-t border-border bg-background px-3 py-2 font-mono text-xs leading-relaxed"
+      className="min-h-0 flex-1 select-text overflow-auto border-t border-border bg-background px-3 py-2 font-mono text-xs leading-relaxed"
     >
       {lines.length === 0 ? (
         <p className="font-sans text-muted-foreground">

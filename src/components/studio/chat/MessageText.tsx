@@ -131,7 +131,7 @@ function renderLines(text: string): ReactNode {
 export function MessageText({ text }: { text: string }) {
   const blocks = parseBlocks(text);
   return (
-    <div className="flex flex-col gap-2 text-sm leading-relaxed break-words">
+    <div className="flex select-text flex-col gap-2 text-sm leading-relaxed break-words">
       {blocks.map((block, i) => {
         switch (block.kind) {
           case "paragraph":

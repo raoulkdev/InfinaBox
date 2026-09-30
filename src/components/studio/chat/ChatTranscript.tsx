@@ -219,7 +219,7 @@ function UserMessage({
       // (light) than whatever surface it's on, in either theme.
       return (
         <div className="flex justify-end">
-          <div className="max-w-[85%] rounded-2xl rounded-br-md border border-foreground/10 bg-foreground/[0.08] px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-foreground">
+          <div className="max-w-[85%] select-text rounded-2xl rounded-br-md border border-foreground/10 bg-foreground/[0.08] px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-foreground">
             {sent.text}
             {sent.paths.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-2" data-testid="message-attachments">

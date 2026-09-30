@@ -79,7 +79,7 @@ export function SettingsSection({ projectPath }: SettingsSectionProps) {
           <h1 className="text-base font-semibold tracking-tight">{current.label}</h1>
         </div>
         <ScrollArea className="min-h-0 flex-1">
-          <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-5 py-5">
+          <div className="flex w-full flex-col gap-4 px-5 py-5">
             {category === "ai" && <AiPage />}
             {category === "godot" && <GodotSettings projectPath={projectPath} refreshToken={godotShown} />}
             {category === "accounts" && <AccountsPage />}

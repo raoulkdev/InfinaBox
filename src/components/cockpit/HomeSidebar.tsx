@@ -21,7 +21,10 @@ export function HomeSidebar({ active, onSelect }: { active: HomePage; onSelect: 
       {/* Same shell as the game sidebar: a full-height card whose empty
        * strip behind the macOS traffic lights is real drag space. */}
       <div data-tauri-drag-region className="absolute inset-0 rounded-xl border border-border bg-card" />
-      <div className="relative z-10 flex h-full min-h-0 flex-col gap-1 px-2 pt-11 pb-2">
+      <div
+        data-tauri-drag-region
+        className="relative z-10 flex h-full min-h-0 flex-col gap-1 px-2 pt-11 pb-2"
+      >
         {ITEMS.map((item) => {
           const Icon = item.icon;
           const isActive = active === item.id;

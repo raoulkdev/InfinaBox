@@ -80,13 +80,23 @@ export function ChatComposer({
   const textareaRef = inputRef ?? ownRef;
   const canSend = !busy && !disabled && !uploading && (value.trim().length > 0 || attachments.length > 0);
 
-  // Auto-grow: reset to one row, then fit the content (capped).
+  // Auto-grow: one row when empty, else fit the content (capped). Measured
+  // again whenever the box changes width (it starts hidden or narrow in
+  // Studio's stacked layout, which made the empty placeholder count as many
+  // wrapped lines).
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
-  }, [value]);
+    const fit = () => {
+      el.style.height = "auto";
+      const wanted = el.value === "" ? 0 : el.scrollHeight;
+      el.style.height = wanted === 0 ? "" : `${Math.min(wanted, MAX_HEIGHT)}px`;
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [value, textareaRef]);
 
   function handleDrop(e: DragEvent) {
     e.preventDefault();

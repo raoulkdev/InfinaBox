@@ -272,7 +272,7 @@ export function ConnectAiPanel({ onConnected }: ConnectAiPanelProps) {
             <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
               Use an AI subscription you already have
             </h3>
-            <div className="grid items-start gap-2 md:grid-cols-2">
+            <div className="grid items-stretch gap-2 md:grid-cols-2">
             {cliProviders.map((p) => {
               const ownRun = run?.provider === p.id ? run.state : null;
               return (
@@ -309,7 +309,7 @@ export function ConnectAiPanel({ onConnected }: ConnectAiPanelProps) {
         <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
           Use an API key or a model on this computer
         </h3>
-        <div className="grid items-start gap-2 md:grid-cols-2">
+        <div className="grid items-stretch gap-2 md:grid-cols-2">
           {API_PROVIDERS.map((def) => (
             <ApiProviderCard
               key={def.id}

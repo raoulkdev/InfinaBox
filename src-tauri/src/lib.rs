@@ -34,7 +34,7 @@ use commands::onboarding::{onboarding_create, onboarding_preview, onboarding_tem
 use commands::project::{ask_question, refresh_project_graph};
 use commands::project_settings::{project_settings_get, project_settings_set};
 use commands::scaffold::project_create;
-use commands::settings::{app_settings_get, app_settings_set};
+use commands::settings::{app_settings_get, app_settings_set, layout_set, layouts_get};
 use commands::snapshot::{snapshot_create, snapshot_list, snapshot_restore, snapshot_undo_last};
 use commands::terminal::{resize_terminal, spawn_terminal, write_to_terminal, TerminalState};
 use commands::watcher::{watch_project_path, WatcherState};
@@ -104,6 +104,8 @@ pub fn run() {
             connect_cancel,
             app_settings_get,
             app_settings_set,
+            layouts_get,
+            layout_set,
             godot_open_editor,
             project_settings_get,
             project_settings_set,

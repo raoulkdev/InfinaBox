@@ -99,7 +99,7 @@ export function ProviderCard({
       data-testid={`provider-${p.id}`}
       data-installed={p.installed}
       data-signed-in={p.logged_in === null ? "unknown" : String(p.logged_in)}
-      className={`flex flex-col gap-3 rounded-lg border bg-background p-3 ${
+      className={`flex h-full flex-col gap-3 rounded-lg border bg-background p-3 ${
         inUse ? "border-emerald-500/50" : "border-border"
       } ${run && run.stage !== "confirm" ? "md:col-span-2" : ""}`}
     >
@@ -137,7 +137,7 @@ export function ProviderCard({
         </Alert>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="mt-auto flex flex-wrap items-center gap-2">
         {!p.installed && p.install_command && !p.install_blocker && (
           <Button
             type="button"
