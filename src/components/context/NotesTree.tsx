@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { NoteIcon } from "./note-icons";
 import { baseName, parentOf, type TreeNode } from "./notes-tree";
 import { DOC_TEMPLATES } from "./templates";
 
@@ -244,7 +245,7 @@ function Row(props: RowProps) {
           <>
             {open ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
             {node.icon ? (
-              <span className="w-4 shrink-0 text-center text-sm leading-none" data-testid="row-icon">{node.icon}</span>
+              <span className="flex w-4 shrink-0 justify-center text-sm" data-testid="row-icon"><NoteIcon value={node.icon} className="size-4 text-sm text-muted-foreground" /></span>
             ) : open ? (
               <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
             ) : (
@@ -253,7 +254,7 @@ function Row(props: RowProps) {
           </>
         ) : (
           node.icon ? (
-            <span className="ml-[18px] w-4 shrink-0 text-center text-sm leading-none" data-testid="row-icon">{node.icon}</span>
+            <span className="ml-[18px] flex w-4 shrink-0 justify-center text-sm" data-testid="row-icon"><NoteIcon value={node.icon} className="size-4 text-sm text-muted-foreground" /></span>
           ) : (
             <FileText className="ml-[18px] size-4 shrink-0 text-muted-foreground" />
           )

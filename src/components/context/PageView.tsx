@@ -9,6 +9,7 @@ import { contextRead, contextWrite } from "@/lib/studio-api";
 import type { Card, CardMeta, CardSummary, CardType } from "@/lib/studio-types";
 import { DOC_ACTIONS, questionAbout, type AskAi } from "./aiActions";
 import { IconPicker } from "./IconPicker";
+import { NoteIcon } from "./note-icons";
 import { CARD_TYPES, STATUS_SUGGESTIONS, errorText } from "./cardTypes";
 
 // One page of the notes: a big title and a body you just type in. It saves
@@ -221,7 +222,7 @@ export function PageView({ projectPath, path, cards, refreshTick, onAsk, onTitle
               title={icon ? "Change icon" : "Add icon"}
               className={`flex size-10 shrink-0 items-center justify-center rounded-lg text-3xl leading-none hover:bg-accent ${icon ? "" : "text-muted-foreground/40 hover:text-muted-foreground"}`}
             >
-              {icon ?? <SmilePlus className="size-5" />}
+              {icon ? <NoteIcon value={icon} className="size-7 text-3xl" /> : <SmilePlus className="size-5" />}
             </button>
           <input
             ref={titleInput}

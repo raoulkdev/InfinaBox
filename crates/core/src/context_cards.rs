@@ -1048,8 +1048,8 @@ pub fn set_folder_icon(project: &Path, folder: &str, icon: Option<&str>) -> Resu
     let mut icons = folder_icons(project)?;
     match icon.map(str::trim).filter(|i| !i.is_empty()) {
         Some(icon) => {
-            if icon.chars().count() > 16 || icon.contains(['\n', '\r']) {
-                bail!("an icon is a single emoji");
+            if icon.chars().count() > 40 || icon.contains(['\n', '\r']) {
+                bail!("an icon is one emoji or an icon name");
             }
             icons.insert(rel, icon.to_string());
         }
@@ -1559,11 +1559,11 @@ implemented_in: [scripts/player.gd, scenes/player.tscn]\n---\n\n# Jumping\n\nSpa
         write_card(p, "map.md", &m, "x\n").unwrap();
         assert_eq!(list_cards(p).unwrap().iter().find(|c| c.path == "map.md").unwrap().icon.as_deref(), Some("🗺️"));
         assert_eq!(read_card(p, "map.md").unwrap().meta.extra["icon"], ["🗺️"]);
-        set_folder_icon(p, "world/places", Some("🏰")).unwrap();
+        set_folder_icon(p, "world/places", Some("lucide:castle")).unwrap();
         move_entry(p, "world/places", "world/cities").unwrap();
-        assert_eq!(folder_icons(p).unwrap()["world/cities"], "🏰");
+        assert_eq!(folder_icons(p).unwrap()["world/cities"], "lucide:castle");
         assert!(set_folder_icon(p, "story.md", Some("x")).is_err());
-        assert!(set_folder_icon(p, "world", Some("way too long to be an icon")).is_err());
+        assert!(set_folder_icon(p, "world", Some(&"x".repeat(41))).is_err());
         set_folder_icon(p, "world/cities", None).unwrap();
         assert!(folder_icons(p).unwrap().is_empty());
         set_folder_icon(p, "world", Some("🌍")).unwrap();

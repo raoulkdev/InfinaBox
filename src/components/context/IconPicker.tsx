@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MONO_PREFIX, NOTE_ICONS, NoteIcon, isMono } from "./note-icons";
 
 // A page's or folder's icon is an emoji. A plain grid of the ones a game
 // project is likely to want, plus a box to paste any other.
@@ -25,6 +26,7 @@ interface IconPickerProps {
 
 export function IconPicker({ open, onOpenChange, current, onPick }: IconPickerProps) {
   const [custom, setCustom] = useState("");
+  const [tab, setTab] = useState<"emoji" | "mono">(isMono(current) ? "mono" : "emoji");
   const pick = (icon: string | null) => {
     onPick(icon);
     onOpenChange(false);
@@ -36,31 +38,65 @@ export function IconPicker({ open, onOpenChange, current, onPick }: IconPickerPr
         <DialogHeader>
           <DialogTitle>Icon</DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-12 gap-0.5">
-          {EMOJIS.map((e) => (
+        <div role="tablist" className="flex gap-1">
+          {(["emoji", "mono"] as const).map((t) => (
             <button
-              key={e}
+              key={t}
               type="button"
-              data-testid="icon-choice"
-              onClick={() => pick(e)}
-              className={`flex size-7 items-center justify-center rounded-md text-lg hover:bg-accent ${current === e ? "bg-accent ring-1 ring-ring" : ""}`}
+              role="tab"
+              aria-selected={tab === t}
+              data-testid={`icon-tab-${t}`}
+              onClick={() => setTab(t)}
+              className={`rounded-md px-2.5 py-1 text-sm ${tab === t ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}
             >
-              {e}
+              {t === "emoji" ? "Emoji" : "Black & white"}
             </button>
           ))}
         </div>
-        <form
-          className="flex gap-2"
-          onSubmit={(ev) => {
-            ev.preventDefault();
-            if (custom.trim()) pick(custom.trim());
-          }}
-        >
-          <Input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="Or paste any emoji" maxLength={16} data-testid="icon-custom" className="h-8" />
-          <Button type="submit" size="sm" disabled={!custom.trim()}>
-            Use
-          </Button>
-        </form>
+        {tab === "emoji" ? (
+          <>
+            <div className="grid grid-cols-12 gap-0.5">
+              {EMOJIS.map((e) => (
+                <button
+                  key={e}
+                  type="button"
+                  data-testid="icon-choice"
+                  onClick={() => pick(e)}
+                  className={`flex size-7 items-center justify-center rounded-md text-lg hover:bg-accent ${current === e ? "bg-accent ring-1 ring-ring" : ""}`}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+            <form
+              className="flex gap-2"
+              onSubmit={(ev) => {
+                ev.preventDefault();
+                if (custom.trim()) pick(custom.trim());
+              }}
+            >
+              <Input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="Or paste any emoji" maxLength={16} data-testid="icon-custom" className="h-8" />
+              <Button type="submit" size="sm" disabled={!custom.trim()}>
+                Use
+              </Button>
+            </form>
+          </>
+        ) : (
+          <div className="grid grid-cols-10 gap-0.5">
+            {Object.keys(NOTE_ICONS).map((name) => (
+              <button
+                key={name}
+                type="button"
+                title={name}
+                data-testid="icon-choice-mono"
+                onClick={() => pick(`${MONO_PREFIX}${name}`)}
+                className={`flex size-8 items-center justify-center rounded-md text-foreground/85 hover:bg-accent ${current === `${MONO_PREFIX}${name}` ? "bg-accent ring-1 ring-ring" : ""}`}
+              >
+                <NoteIcon value={`${MONO_PREFIX}${name}`} className="size-4" />
+              </button>
+            ))}
+          </div>
+        )}
         {current && (
           <Button variant="ghost" size="sm" className="self-start" data-testid="icon-remove" onClick={() => pick(null)}>
             Remove icon

@@ -359,10 +359,11 @@ export async function phaseC(run, app, config, fakes) {
 
     // A page icon, saved in the page's header and shown in the tree.
     await clickWhenEnabled(driver, tid("page-icon"));
-    const choices = await driver.findElements(tid("icon-choice"));
     await run.shot("icon-picker");
-    await choices[5].click();
-    await waitUntil(async () => /icon:/.test(fs.readFileSync(ctx("captain-bolt.md"), "utf8")), { what: "the page icon to be saved" });
+    await clickWhenEnabled(driver, tid("icon-tab-mono"));
+    await run.shot("icon-picker-mono");
+    await (await driver.findElements(tid("icon-choice-mono")))[26].click();
+    await waitUntil(async () => /icon: "?lucide:/.test(fs.readFileSync(ctx("captain-bolt.md"), "utf8")), { what: "the page's black-and-white icon to be saved" });
     await waitVisible(driver, By.css('[data-testid="tree-page"][data-path="captain-bolt.md"] [data-testid="row-icon"]'));
     if (!fs.readFileSync(ctx("captain-bolt.md"), "utf8").includes("Loves the sea.")) throw new Error("choosing an icon lost the page text");
 
@@ -463,11 +464,21 @@ export async function phaseC(run, app, config, fakes) {
     await waitVisible(driver, tid("nav-studio")); // the game sidebar frames it
     await run.shot("settings-from-game");
     await clickWhenEnabled(driver, tid("nav-context"));
-    await clickWhenEnabled(driver, By.xpath("//button[@role='tab'][normalize-space()='Board']"));
-    await waitVisible(driver, tid("board-tab"));
+    await waitUntil(
+      async () => {
+        await clickWhenEnabled(driver, By.xpath("//button[@role='tab'][normalize-space()='Board']"));
+        return (await driver.findElements(tid("board-tab"))).length > 0;
+      },
+      { what: "the Board tab to open" },
+    );
     await run.shot("context-board");
-    await clickWhenEnabled(driver, By.xpath("//button[@role='tab'][normalize-space()='Map']"));
-    await waitVisible(driver, tid("map-tab"));
+    await waitUntil(
+      async () => {
+        await clickWhenEnabled(driver, By.xpath("//button[@role='tab'][normalize-space()='Map']"));
+        return (await driver.findElements(tid("map-tab"))).length > 0;
+      },
+      { what: "the Map tab to open" },
+    );
     await run.shot("context-map");
   }, { needs: ["c7"] });
 }
