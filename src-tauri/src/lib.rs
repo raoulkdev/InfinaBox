@@ -10,7 +10,8 @@ use commands::assets::{
 };
 use commands::bridge::BridgeState;
 use commands::context::{
-    context_board, context_graph, context_list, context_read, context_set_status, context_write,
+    context_board, context_create_folder, context_delete, context_folders, context_graph, context_list,
+    context_move, context_read, context_set_status, context_write,
 };
 use commands::credentials::{credential_clear, credential_set, credential_status};
 use commands::generate::{generate_accept, generate_discard, generate_providers, generate_run};
@@ -118,6 +119,10 @@ pub fn run() {
             context_set_status,
             context_board,
             context_graph,
+            context_folders,
+            context_create_folder,
+            context_move,
+            context_delete,
             journey_get,
             journey_set_manual,
             assets_scan,

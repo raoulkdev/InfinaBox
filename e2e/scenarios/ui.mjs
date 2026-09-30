@@ -50,8 +50,8 @@ export async function uiChecks(run, app) {
   await run.step("u3", "Dragging a panel reorders it, and the layout is saved in the app's settings", async () => {
     await clickWhenEnabled(driver, tid("nav-context"));
     await waitVisible(driver, tid("context-section"));
-    await waitUntil(async () => (await driver.findElements(tid("panel-reorder-grip"))).length >= 3, { what: "the panels' grips" });
-    const before = (await invokeCommand(driver, "layouts_get", {}))["context.documents"];
+    await waitUntil(async () => (await driver.findElements(By.css('[data-testid="context-section"] [data-testid="panel-reorder-grip"]'))).length >= 2, { what: "the panels' grips" });
+    const before = (await invokeCommand(driver, "layouts_get", {}))["context.notes"];
     const grips = await driver.findElements(By.css('[data-testid="context-section"] [data-testid="panel-reorder-grip"]'));
     // The first visible panel's grip: hover its panel so the grip accepts the pointer.
     let moved = false;
@@ -73,7 +73,7 @@ export async function uiChecks(run, app) {
     }
     if (!moved) throw new Error("no grip to drag");
     await new Promise((r) => setTimeout(r, 1200));
-    const mid = (await invokeCommand(driver, "layouts_get", {}))["context.documents"];
+    const mid = (await invokeCommand(driver, "layouts_get", {}))["context.notes"];
     if (before && JSON.stringify(mid?.order) === JSON.stringify(before.order)) {
       // Pointer actions through the driver didn't move it: try the same gesture as synthetic events, to tell the app's logic from the driver.
       const synthetic = await driver.executeScript(`
@@ -88,7 +88,7 @@ export async function uiChecks(run, app) {
       run.note(`driver drag did nothing; synthetic events sent: ${synthetic}`);
       await new Promise((r) => setTimeout(r, 1000));
     }
-    const after = (await invokeCommand(driver, "layouts_get", {}))["context.documents"];
+    const after = (await invokeCommand(driver, "layouts_get", {}))["context.notes"];
     run.note(`before ${JSON.stringify(before?.order)}, after ${JSON.stringify(after?.order)}`);
     if (!after) throw new Error("no layout was saved in the app's settings");
     if (before && JSON.stringify(before.order) === JSON.stringify(after.order)) throw new Error("dragging the grip didn't reorder the panels");

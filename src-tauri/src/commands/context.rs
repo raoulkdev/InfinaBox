@@ -43,3 +43,24 @@ pub fn context_board(project_path: String, types: Vec<CardType>) -> Result<Board
 pub fn context_graph(project_path: String) -> Result<LinkGraph, String> {
     context_cards::graph(Path::new(&project_path)).map_err(err)
 }
+
+#[tauri::command(async)]
+pub fn context_folders(project_path: String) -> Result<Vec<String>, String> {
+    context_cards::list_folders(Path::new(&project_path)).map_err(err)
+}
+
+#[tauri::command(async)]
+pub fn context_create_folder(project_path: String, path: String) -> Result<(), String> {
+    context_cards::create_folder(Path::new(&project_path), &path).map_err(err)
+}
+
+/// Moves or renames a note or folder; returns the new path.
+#[tauri::command(async)]
+pub fn context_move(project_path: String, from: String, to: String) -> Result<String, String> {
+    context_cards::move_entry(Path::new(&project_path), &from, &to).map_err(err)
+}
+
+#[tauri::command(async)]
+pub fn context_delete(project_path: String, path: String) -> Result<(), String> {
+    context_cards::delete_entry(Path::new(&project_path), &path).map_err(err)
+}

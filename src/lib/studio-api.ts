@@ -203,6 +203,14 @@ export const contextSetStatus = (projectPath: string, path: string, status: stri
 export const contextBoard = (projectPath: string, types: CardType[]) =>
   invoke<Board>("context_board", { projectPath, types });
 
+export const contextFolders = (projectPath: string) => invoke<string[]>("context_folders", { projectPath });
+export const contextCreateFolder = (projectPath: string, path: string) =>
+  invoke<void>("context_create_folder", { projectPath, path });
+/** Moves or renames a note or folder; resolves to its new path. */
+export const contextMove = (projectPath: string, from: string, to: string) =>
+  invoke<string>("context_move", { projectPath, from, to });
+export const contextDelete = (projectPath: string, path: string) =>
+  invoke<void>("context_delete", { projectPath, path });
 export const contextGraph = (projectPath: string) =>
   invoke<LinkGraph>("context_graph", { projectPath });
 

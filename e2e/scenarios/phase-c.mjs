@@ -8,7 +8,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import zlib from "node:zlib";
-import { By } from "selenium-webdriver";
+import { By, Key } from "selenium-webdriver";
 import { clickWhenEnabled, invokeCommand, tid, waitUntil, waitVisible } from "../lib/ui.mjs";
 import { createProjectFromHome, git, snapshotSubjects, tempParent } from "./common.mjs";
 
@@ -156,7 +156,7 @@ export async function phaseC(run, app, config, fakes) {
     run.note(`${cards.length} cards; board, backlinks, broken link and graph all reported by the real commands`);
     await clickWhenEnabled(driver, tid("nav-context"));
     await waitVisible(driver, tid("context-section"));
-    await waitUntil(async () => (await driver.findElements(tid("card-list-item"))).length >= 2, { what: "the card list to show cards" });
+    await waitUntil(async () => (await driver.findElements(tid("tree-page"))).length >= 2, { what: "the notes tree to show pages" });
     await run.shot("context-cards");
   });
 
@@ -316,33 +316,91 @@ export async function phaseC(run, app, config, fakes) {
     }
   }, { needs: ["c1"] });
 
-  await run.step("c7", "Documents studio: templates, grouped list, outline; model choice and attachments reach the AI", async () => {
+  await run.step("c7", "Notes: pages, folders, templates, autosave, drag to move, delete; model choice and attachments reach the AI", async () => {
     // Back to the game from Settings (Home → Open).
     await clickWhenEnabled(driver, tid("home-nav-home"));
     await clickWhenEnabled(driver, tid("inspector-open"), { timeoutMs: 30_000 });
     await clickWhenEnabled(driver, tid("nav-context"));
-    await waitVisible(driver, tid("context-section"));
-    // New document from a template.
-    await waitVisible(driver, tid("new-card-button"));
-    await clickWhenEnabled(driver, tid("new-card-button"));
+    await waitVisible(driver, tid("notes-tree"));
+    const ctx = (rel) => path.join(state.project, ".ibproject/context", rel);
+
+    // A page from a template; its title is its name, and the file follows.
+    await clickWhenEnabled(driver, tid("new-menu"));
+    await run.shot("new-menu");
     await clickWhenEnabled(driver, tid("template-character"));
-    const dialog = await waitVisible(driver, tid("new-card-dialog"));
-    await (await driver.findElement(By.css("#new-card-title"))).sendKeys("Captain Bolt");
-    await run.shot("new-document-templates");
-    await clickWhenEnabled(driver, By.xpath("//button[normalize-space()='Create']"));
-    await waitUntil(async () => fs.existsSync(path.join(state.project, ".ibproject/context/characters/captain-bolt.md")), { what: "the character document" });
-    const body = fs.readFileSync(path.join(state.project, ".ibproject/context/characters/captain-bolt.md"), "utf8");
-    if (!body.includes("type: character") || !body.includes("## Behaviour")) throw new Error(`template not written: ${body.slice(0, 300)}`);
-    const aside = await waitVisible(driver, tid("document-aside"));
-    await waitUntil(async () => (await driver.findElements(tid("doc-outline"))).length > 0, { what: "the outline" });
-    const outline = await driver.executeScript("return arguments[0].innerText", await driver.findElement(tid("doc-outline")));
-    if (!outline.includes("Behaviour")) throw new Error(`outline lacks a heading: ${outline}`);
-    await run.shot("documents-studio");
-    const overview = await call("context_list", { projectPath: state.project });
-    if (!overview.some((c) => c.path === "characters/captain-bolt.md" && c.card_type === "character")) throw new Error("new document not typed as a character");
-    await clickWhenEnabled(driver, By.xpath("//button[@role='tab'][normalize-space()='Overview']"));
-    await waitVisible(driver, tid("shelves"));
-    await run.shot("documents-overview");
+    await waitUntil(async () => fs.existsSync(ctx("character-sheet.md")), { what: "the templated page" });
+    const first = fs.readFileSync(ctx("character-sheet.md"), "utf8");
+    if (!first.includes("type: character") || !first.includes("## Behaviour")) throw new Error(`template not written: ${first.slice(0, 300)}`);
+    const title = await waitVisible(driver, tid("page-title"));
+    await driver.executeScript("arguments[0].focus(); arguments[0].select();", title);
+    await title.sendKeys("Captain Bolt");
+    run.note(`title now reads: ${await title.getAttribute("value")}`);
+    await title.sendKeys(Key.ENTER);
+    await waitUntil(async () => fs.existsSync(ctx("captain-bolt.md")) && !fs.existsSync(ctx("character-sheet.md")), { what: "the file to be renamed after its title" });
+    if (!fs.readFileSync(ctx("captain-bolt.md"), "utf8").includes("title: Captain Bolt")) throw new Error("title not saved in the page");
+
+    // Typing in the body saves by itself.
+    // The page reopens under its new name; find the body again until it holds still.
+    await waitUntil(
+      async () => {
+        try {
+          const editable = await driver.findElement(By.css('[data-testid="page-body"] .mdx-editor-content'));
+          await editable.click();
+          await editable.sendKeys("Loves the sea.");
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { what: "the page body to take typing" },
+    );
+    await waitUntil(async () => fs.readFileSync(ctx("captain-bolt.md"), "utf8").includes("Loves the sea."), { timeoutMs: 8000, what: "autosave" });
+    await run.shot("notes-page");
+
+    // The AI menu.
+    await clickWhenEnabled(driver, tid("ask-ai"));
+    await waitVisible(driver, tid("doc-action-draft"));
+    await run.shot("ask-ai-menu");
+    await driver.actions().sendKeys(Key.ESCAPE).perform();
+
+    // A folder of the person's own; dragging the page into it moves the file.
+    await clickWhenEnabled(driver, tid("new-menu"));
+    await clickWhenEnabled(driver, tid("new-folder"));
+    await waitUntil(
+      async () => {
+        try {
+          const rename = await driver.findElement(tid("rename-input"));
+          await driver.executeScript("arguments[0].focus(); arguments[0].select();", rename);
+          await rename.sendKeys("Crew");
+          await rename.sendKeys(Key.ENTER);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { what: "the new folder's name box to take typing" },
+    );
+    await waitUntil(async () => fs.existsSync(ctx("crew")), { what: "the Crew folder" });
+    await waitVisible(driver, By.css('[data-testid="tree-folder"][data-path="crew"]'));
+    await driver.executeScript(`
+      const page = document.querySelector('[data-testid="tree-page"][data-path="captain-bolt.md"]');
+      const folder = document.querySelector('[data-testid="tree-folder"][data-path="crew"]');
+      const dt = new DataTransfer();
+      page.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
+      folder.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt }));
+      folder.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));`);
+    await waitUntil(async () => fs.existsSync(ctx("crew/captain-bolt.md")), { what: "the page to move into the folder" });
+    await run.shot("notes-tree-folder");
+    const listed = await call("context_list", { projectPath: state.project });
+    if (!listed.some((c) => c.path === "crew/captain-bolt.md" && c.card_type === "character")) throw new Error("moved page isn't listed as a character");
+
+    // Delete asks first.
+    const row = await driver.findElement(By.css('[data-testid="tree-page"][data-path="crew/captain-bolt.md"]'));
+    await driver.actions().move({ origin: row }).perform();
+    await clickWhenEnabled(driver, By.css('[data-path="crew/captain-bolt.md"] [data-testid="row-menu"]'));
+    await clickWhenEnabled(driver, tid("delete"));
+    await clickWhenEnabled(driver, tid("confirm-delete"));
+    await waitUntil(async () => !fs.existsSync(ctx("crew/captain-bolt.md")), { what: "the page to be deleted" });
 
     // Model choice and an attached picture reach the AI (fake local model).
     await clickWhenEnabled(driver, tid("nav-studio"));

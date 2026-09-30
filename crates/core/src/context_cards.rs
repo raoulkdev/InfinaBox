@@ -862,6 +862,168 @@ fn load_cards(project: &Path) -> Result<Vec<Card>> {
 }
 
 // ---------------------------------------------------------------------------
+// Folders, moving and deleting (the notes tree)
+// ---------------------------------------------------------------------------
+
+/// Validates a path to a file or folder inside the context folder (no
+/// extension rule). Same restrictions as `checked_card_path`.
+fn checked_entry_path(rel: &str) -> Result<PathBuf> {
+    let trimmed = rel.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        bail!("path is empty");
+    }
+    let mut out = PathBuf::new();
+    for comp in Path::new(trimmed).components() {
+        match comp {
+            Component::Normal(part) => out.push(part),
+            Component::CurDir => {}
+            _ => bail!("refusing {rel}: paths must stay inside the context folder"),
+        }
+    }
+    for comp in out.components() {
+        let part = comp
+            .as_os_str()
+            .to_str()
+            .ok_or_else(|| anyhow!("refusing {rel}: not valid UTF-8"))?;
+        if part.starts_with('.') || part.contains('\\') || part.contains(':') {
+            bail!("refusing {rel}: names can't start with '.' or contain ':' or '\\'");
+        }
+    }
+    if out.as_os_str().is_empty() {
+        bail!("refusing {rel}: not a path");
+    }
+    Ok(out)
+}
+
+/// The existing entry for `rel` under the canonical root: never a symlink,
+/// always inside the root.
+fn existing_entry(root: &Path, rel: &Path) -> Result<PathBuf> {
+    let full = root.join(rel);
+    let meta = fs::symlink_metadata(&full).with_context(|| format!("no such note or folder: {}", to_slash(rel)))?;
+    if meta.file_type().is_symlink() {
+        bail!("refusing {}: it's a symlink", to_slash(rel));
+    }
+    let real = full.canonicalize()?;
+    if !real.starts_with(root) {
+        bail!("refusing {}: it resolves outside the context folder", to_slash(rel));
+    }
+    Ok(real)
+}
+
+/// Every folder under the context folder (empty ones too), `/`-separated and
+/// sorted. Hidden folders are skipped.
+pub fn list_folders(project: &Path) -> Result<Vec<String>> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<()> {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            if entry.file_name().to_string_lossy().starts_with('.') || !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let path = entry.path();
+            out.push(to_slash(path.strip_prefix(root).unwrap_or(&path)));
+            walk(root, &path, out)?;
+        }
+        Ok(())
+    }
+    let Some(root) = canonical_root(project)? else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    walk(&root, &root, &mut out)?;
+    out.sort();
+    Ok(out)
+}
+
+/// Makes a folder (and any missing parents) inside the context folder.
+pub fn create_folder(project: &Path, path: &str) -> Result<()> {
+    let rel = checked_entry_path(path)?;
+    let root = canonical_root(project)?.ok_or_else(|| anyhow!("this project has no Context folder yet"))?;
+    let parts: Vec<&OsStr> = rel.components().map(|c| c.as_os_str()).collect();
+    resolve_dir(&root, &parts, true, path)?;
+    Ok(())
+}
+
+/// Moves or renames a note (`.md` file) or a folder. Refuses to overwrite,
+/// and to move a folder into itself. Links in other notes' headers that
+/// pointed at the moved note (or at notes inside the moved folder) are
+/// updated to the new place. Returns the new normalised path.
+pub fn move_entry(project: &Path, from: &str, to: &str) -> Result<String> {
+    let from_rel = checked_entry_path(from)?;
+    let to_rel = checked_entry_path(to)?;
+    let root = canonical_root(project)?.ok_or_else(|| anyhow!("this project has no Context folder yet"))?;
+    let source = existing_entry(&root, &from_rel)?;
+    let is_dir = fs::metadata(&source)?.is_dir();
+    if !is_dir && (from_rel.extension().and_then(|e| e.to_str()) != Some(CARD_EXTENSION) || to_rel.extension().and_then(|e| e.to_str()) != Some(CARD_EXTENSION)) {
+        bail!("notes are markdown files; keep the .{CARD_EXTENSION} ending");
+    }
+    if to_rel.starts_with(&from_rel) && to_rel != from_rel {
+        bail!("a folder can't be moved into itself");
+    }
+    if to_rel == from_rel {
+        return Ok(to_slash(&to_rel));
+    }
+    let to_parts: Vec<&OsStr> = to_rel.components().map(|c| c.as_os_str()).collect();
+    let (dirs, name) = to_parts.split_at(to_parts.len() - 1);
+    let parent = resolve_dir(&root, dirs, true, to)?;
+    let dest = parent.join(name[0]);
+    if fs::symlink_metadata(&dest).is_ok() {
+        bail!("there's already something called {} there", name[0].to_string_lossy());
+    }
+
+    // Which notes' paths change, for fixing links afterwards.
+    let renames: Vec<(String, String)> = if is_dir {
+        let mut inside = Vec::new();
+        collect_paths(&root, &source, &mut inside)?;
+        inside
+            .into_iter()
+            .map(|p| {
+                let old = to_slash(Path::new(&p));
+                let tail = old.strip_prefix(&format!("{}/", to_slash(&from_rel))).unwrap_or(&old).to_string();
+                (old, format!("{}/{}", to_slash(&to_rel), tail))
+            })
+            .collect()
+    } else {
+        vec![(to_slash(&from_rel), to_slash(&to_rel))]
+    };
+
+    fs::rename(&source, &dest).with_context(|| format!("couldn't move {from}"))?;
+
+    // Fix header links in every note (including moved ones, whose relative
+    // targets may name each other by old path).
+    let map: std::collections::HashMap<String, String> = renames.into_iter().collect();
+    for card in load_cards(project)? {
+        if card.header_error.is_some() || !card.meta.links.iter().any(|l| map.contains_key(l)) {
+            continue;
+        }
+        let mut meta = card.meta.clone();
+        for link in &mut meta.links {
+            if let Some(new) = map.get(link) {
+                *link = new.clone();
+            }
+        }
+        write_card(project, &card.path, &meta, &card.body)?;
+    }
+    Ok(to_slash(&to_rel))
+}
+
+/// Deletes a note or a folder with everything in it. The context folder
+/// itself can't be deleted.
+pub fn delete_entry(project: &Path, path: &str) -> Result<()> {
+    let rel = checked_entry_path(path)?;
+    let root = canonical_root(project)?.ok_or_else(|| anyhow!("this project has no Context folder yet"))?;
+    let target = existing_entry(&root, &rel)?;
+    if target == root {
+        bail!("the Context folder itself can't be deleted");
+    }
+    if fs::metadata(&target)?.is_dir() {
+        fs::remove_dir_all(&target)
+    } else {
+        fs::remove_file(&target)
+    }
+    .with_context(|| format!("couldn't delete {path}"))
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -1286,6 +1448,36 @@ implemented_in: [scripts/player.gd, scenes/player.tscn]\n---\n\n# Jumping\n\nSpa
             get(p.path(), "mechanics/jumping.md"),
             original.replace("title: Jumping", "title: Jump and hop")
         );
+    }
+
+    #[test]
+    fn folders_move_delete_and_links_follow_moves() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        let meta = |links: &[&str]| CardMeta { links: links.iter().map(|s| s.to_string()).collect(), ..Default::default() };
+        write_card(p, "world/city.md", &meta(&[]), "City\n").unwrap();
+        write_card(p, "story.md", &meta(&["world/city.md"]), "Plot\n").unwrap();
+        create_folder(p, "empty/inner").unwrap();
+        assert_eq!(list_folders(p).unwrap(), ["empty", "empty/inner", "world"]);
+
+        // A note moves; links to it follow.
+        assert_eq!(move_entry(p, "world/city.md", "places/capital.md").unwrap(), "places/capital.md");
+        assert_eq!(read_card(p, "story.md").unwrap().meta.links, ["places/capital.md"]);
+        // A folder moves with its notes; links follow.
+        move_entry(p, "places", "world/places").unwrap();
+        assert_eq!(read_card(p, "story.md").unwrap().meta.links, ["world/places/capital.md"]);
+        assert!(read_card(p, "world/places/capital.md").is_ok());
+
+        // Refusals.
+        assert!(move_entry(p, "world", "world/places/deeper").is_err());
+        assert!(move_entry(p, "story.md", "world/places/capital.md").is_err());
+        assert!(move_entry(p, "story.md", "story.txt").is_err());
+        assert!(move_entry(p, "../x.md", "y.md").is_err());
+        assert!(delete_entry(p, "..").is_err());
+
+        delete_entry(p, "world").unwrap();
+        assert!(read_card(p, "world/places/capital.md").is_err());
+        assert_eq!(list_cards(p).unwrap().len(), 1);
     }
 
     #[test]

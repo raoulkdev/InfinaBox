@@ -8,8 +8,7 @@ import { fadeTransition } from "@/lib/motion";
 import { contextList } from "@/lib/studio-api";
 import type { CardSummary } from "@/lib/studio-types";
 import { BoardTab } from "./BoardTab";
-import { CardsTab, type NewRequest, type OpenRequest } from "./CardsTab";
-import { OverviewTab } from "./OverviewTab";
+import { NotesTab, type OpenRequest } from "./NotesTab";
 import type { AskAi } from "./aiActions";
 import { MapTab } from "./MapTab";
 import { errorText } from "./cardTypes";
@@ -28,18 +27,17 @@ export interface ContextSectionProps {
   onAskAi: AskAi;
 }
 
-type ContextTab = "overview" | "cards" | "board" | "map" | "graphs";
+type ContextTab = "notes" | "board" | "map" | "graphs";
 
 const TABS: { id: ContextTab; label: string }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "cards", label: "Documents" },
+  { id: "notes", label: "Notes" },
   { id: "board", label: "Board" },
   { id: "map", label: "Map" },
   { id: "graphs", label: "Graphs" },
 ];
 
 export function ContextSection({ projectPath, onAskAi }: ContextSectionProps) {
-  const [tab, setTab] = useState<ContextTab>("cards");
+  const [tab, setTab] = useState<ContextTab>("notes");
 
   return (
     <Tabs
@@ -53,7 +51,7 @@ export function ContextSection({ projectPath, onAskAi }: ContextSectionProps) {
         className="flex shrink-0 items-center gap-3 rounded-xl border border-border bg-card px-3 py-2"
       >
         <div data-tauri-drag-region className="flex min-w-0 flex-1 flex-col">
-          <span className="text-xs font-medium tracking-wide text-muted-foreground">Context</span>
+          <span className="text-xs font-medium tracking-wide text-muted-foreground">Notes</span>
         </div>
         {projectPath && (
           <TabsList>
@@ -99,7 +97,6 @@ function ContextViews({
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [openRequest, setOpenRequest] = useState<OpenRequest | null>(null);
-  const [newRequest, setNewRequest] = useState<NewRequest | null>(null);
 
   const bump = useCallback(() => setTick((n) => n + 1), []);
 
@@ -127,15 +124,7 @@ function ContextViews({
   const openCard = useCallback(
     (path: string) => {
       setOpenRequest((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
-      setTab("cards");
-    },
-    [setTab],
-  );
-
-  const newFromTemplate = useCallback(
-    (template: string) => {
-      setNewRequest((prev) => ({ template, nonce: (prev?.nonce ?? 0) + 1 }));
-      setTab("cards");
+      setTab("notes");
     },
     [setTab],
   );
@@ -161,28 +150,16 @@ function ContextViews({
   return (
     <div className="relative min-h-0 flex-1">
       {pane(
-        "overview",
-        <OverviewTab
+        "notes",
+        <NotesTab
           projectPath={projectPath}
           cards={cards}
-          onOpen={openCard}
-          onNew={newFromTemplate}
-          onAskAi={onAskAi}
-        />,
-      )}
-      {pane(
-        "cards",
-        <CardsTab
-          projectPath={projectPath}
-          cards={cards}
-          loading={cards === null && error === null}
-          error={error}
+          cardsError={error}
           refreshTick={tick}
           openRequest={openRequest}
           onReload={bump}
           onChanged={bump}
           onAskAi={onAskAi}
-          newRequest={newRequest}
         />,
       )}
       {pane(
