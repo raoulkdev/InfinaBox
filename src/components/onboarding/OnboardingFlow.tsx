@@ -10,19 +10,16 @@ import { onboardingTemplates } from "@/lib/studio-api";
 import type { CreatedProject, InterviewAnswers } from "@/lib/studio-types";
 import { EMPTY_ANSWERS, OTHER_GENRE, projectNameProblem, suggestProjectName } from "./answers";
 import {
-  FeelScreen,
   GenreScreen,
   IdeaScreen,
-  LookScreen,
   NameScreen,
   ReferencesScreen,
-  SessionScreen,
   type ParentDirState,
   type TemplatesState,
 } from "./QuestionScreens";
 import { ReviewScreen } from "./ReviewScreen";
 
-// The first-run interview (spec §6.2, Phase B plan Task FO): seven short
+// The first-run interview (spec §6.2, Phase B plan Task FO): four short
 // questions, one per screen, then a review of what `onboarding_preview`
 // says will be created, then "Create my game". The questions are a fixed
 // flow in the UI rather than an AI conversation — fast, free, and it works
@@ -34,8 +31,9 @@ export interface OnboardingFlowProps {
   onCancel: () => void;
 }
 
-const QUESTION_COUNT = 7;
-const NAME_STEP = 6;
+const QUESTION_COUNT = 4;
+const REFERENCES_STEP = 2;
+const NAME_STEP = 3;
 const REVIEW_STEP = QUESTION_COUNT;
 
 function errorText(err: unknown): string {
@@ -118,10 +116,7 @@ export function OnboardingFlow({ onCreated, onCancel }: OnboardingFlowProps) {
   const canContinue = [
     answers.idea.trim() !== "",
     answers.genre !== "",
-    answers.feel.length > 0,
-    answers.look.trim() !== "",
     true, // "Any games it's like?" is optional.
-    answers.session_length !== "",
     !nameProblem && parent !== null,
   ][step] ?? false;
 
@@ -170,11 +165,8 @@ export function OnboardingFlow({ onCreated, onCancel }: OnboardingFlowProps) {
 
   const screens: ReactNode[] = [
     <IdeaScreen answers={answers} update={update} />,
-    <GenreScreen answers={answers} update={update} templates={templates} onRetryTemplates={loadTemplates} />,
-    <FeelScreen answers={answers} update={update} />,
-    <LookScreen answers={answers} update={update} />,
+    <GenreScreen answers={answers} update={update} />,
     <ReferencesScreen answers={answers} update={update} />,
-    <SessionScreen answers={answers} update={update} />,
     <NameScreen
       answers={answers}
       update={update}
@@ -187,7 +179,7 @@ export function OnboardingFlow({ onCreated, onCancel }: OnboardingFlowProps) {
 
   const isReview = step === REVIEW_STEP;
   const nextLabel =
-    step === 4 && answers.references.trim() === "" ? "Skip" : step === NAME_STEP ? "Review the plan" : "Next";
+    step === REFERENCES_STEP && answers.references.trim() === "" ? "Skip" : step === NAME_STEP ? "Review the plan" : "Next";
 
   return (
     <div ref={rootRef} data-testid="onboarding-flow" className="flex h-full min-h-0 w-full flex-col">
@@ -290,7 +282,7 @@ const slide = {
   exit: (dir: number) => ({ opacity: 0, x: dir * -28 }),
 };
 
-/** One dot per screen (the seven questions and the review); the current
+/** One dot per screen (the four questions and the review); the current
  * one stretches into a pill. Earlier dots jump back to that question. */
 function ProgressDots({
   count,

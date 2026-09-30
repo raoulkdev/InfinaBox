@@ -45,9 +45,6 @@ import {
 const GAME_NAME = "Sky Hopper";
 const ANSWERS = {
   idea: "A little robot who hops between floating islands to collect lost stars",
-  feel: ["Fast", "Cute"],
-  look: "Simple shapes",
-  session: "5–15 minutes",
 };
 const PLAN_REQUEST = "add a double jump";
 const READY_LINE = "[infinabox] ready 1";
@@ -238,36 +235,19 @@ export async function firstRun(run, app, config) {
     await idea.sendKeys(ANSWERS.idea);
     await run.shot("interview-idea");
     await next(driver, 0);
-    // 2. The kind of game: the Platformer card (from the real templates).
-    await clickWhenEnabled(driver, tid("onboarding-genre-platformer-2d"), { timeoutMs: 30_000 });
-    const cards = await driver.executeScript(
-      `return [...document.querySelectorAll('[data-testid^="onboarding-genre-"]')].map((e) => e.dataset.testid)`,
-    );
-    run.note(`kinds of game offered: ${JSON.stringify(cards)}`);
-    await waitAttr(driver, tid("onboarding-genre-platformer-2d"), "aria-pressed", "true");
-    await run.shot("interview-genre");
+    // 2. 2D or 3D: both are offered and pickable; 2D is picked.
+    await clickWhenEnabled(driver, tid("onboarding-dimension-3d"), { timeoutMs: 30_000 });
+    await waitAttr(driver, tid("onboarding-dimension-3d"), "aria-pressed", "true");
+    await clickWhenEnabled(driver, tid("onboarding-dimension-2d"));
+    await waitAttr(driver, tid("onboarding-dimension-2d"), "aria-pressed", "true");
+    await run.shot("interview-dimension");
     await next(driver, 1);
-    // 3. The feel: a couple of chips.
-    for (const word of ANSWERS.feel) {
-      await clickWhenEnabled(driver, chip(word));
-      await waitAttr(driver, chipStartingWith(word), "aria-pressed", "true").catch(async () => {
-        // Some chips report selection only through their look; the Next
-        // button being enabled below is the real check.
-      });
-    }
-    await next(driver, 2);
-    // 4. The look.
-    await clickWhenEnabled(driver, chip(ANSWERS.look));
-    await next(driver, 3);
-    // 5. Games it's like: optional, skipped.
+    // 3. Games it's like: optional, skipped.
     const skip = (await textOf(driver, tid("onboarding-next"))).trim();
     run.note(`references button reads "${skip}"`);
     if (skip !== "Skip") throw new Error(`with no references typed the button should read Skip, reads ${skip}`);
-    await next(driver, 4);
-    // 6. Session length.
-    await clickWhenEnabled(driver, chipStartingWith(ANSWERS.session));
-    await next(driver, 5);
-    // 7. Name and folder.
+    await next(driver, 2);
+    // 4. Name and folder.
     const name = await waitVisible(driver, tid("onboarding-name"));
     run.note(`suggested name: "${await name.getAttribute("value")}"`);
     run.note(`default folder: "${(await textOf(driver, tid("onboarding-parent-dir"))).trim()}"`);
@@ -340,8 +320,6 @@ export async function firstRun(run, app, config) {
     if (missing.length > 0) throw new Error(`not committed in the new game: ${JSON.stringify(missing)}`);
     const concept = fs.readFileSync(path.join(p(), ".ibproject/context/concept.md"), "utf8");
     if (!concept.includes(ANSWERS.idea)) throw new Error("concept.md doesn't carry the idea");
-    const style = fs.readFileSync(path.join(p(), ".ibproject/context/style-guide.md"), "utf8");
-    if (!style.includes(ANSWERS.look)) throw new Error("style-guide.md doesn't carry the look");
     const godotCfg = fs.readFileSync(path.join(p(), "project.godot"), "utf8");
     run.note(`project.godot ${godotCfg.match(/config\/name=.*/)?.[0]}`);
     if (!godotCfg.includes(`config/name="${GAME_NAME}"`)) throw new Error("project.godot isn't named after the game");

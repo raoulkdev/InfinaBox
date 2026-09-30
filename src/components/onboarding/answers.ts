@@ -16,29 +16,14 @@ export const EMPTY_ANSWERS: InterviewAnswers = {
   name: "",
 };
 
-/** Filled into the idea field when clicked — a nudge for people staring at
- * an empty box, not a default. */
-export const IDEA_EXAMPLES = [
-  "A cozy farm where you raise little slime pets",
-  "A cat who jumps across rooftops to catch the moon",
-  "A tiny spaceship fighting off waves of space bugs",
-];
-
 /** The `genre` for "Start from scratch": the blank template's id. */
 export const BLANK_TEMPLATE_ID = "blank-2d";
+/** The `genre` answers of the "2D or 3D" question. */
+export const DIMENSION_2D = "2d";
+export const DIMENSION_3D = "3d";
 /** The `genre` for "Something else": the backend picks a template from the
  * words in the idea. */
 export const OTHER_GENRE = "other";
-
-export const FEEL_OPTIONS = ["Cozy", "Fast", "Spooky", "Funny", "Challenging", "Relaxing", "Epic", "Cute"];
-
-export const LOOK_OPTIONS = ["Pixel art", "Cartoon", "Simple shapes", "Hand-drawn", "Neon"];
-
-export const SESSION_OPTIONS = [
-  { value: "A couple of minutes", hint: "Quick rounds, easy to pick up" },
-  { value: "5–15 minutes", hint: "A level or a run at a time" },
-  { value: "Half an hour or more", hint: "Settle in and play for a while" },
-];
 
 // Words that end the "what it is" part of an idea: in "a cozy farm where
 // you raise slimes", the name stops before "where".

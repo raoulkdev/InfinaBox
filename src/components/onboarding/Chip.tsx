@@ -44,6 +44,7 @@ export function ChoiceCard({
   children,
   icon,
   testId,
+  disabled = false,
 }: {
   selected: boolean;
   onSelect: () => void;
@@ -51,10 +52,13 @@ export function ChoiceCard({
   children?: ReactNode;
   icon?: ReactNode;
   testId?: string;
+  /** Shown, but can't be picked. */
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
+      disabled={disabled}
       data-chip
       data-testid={testId}
       aria-pressed={selected}
@@ -62,9 +66,10 @@ export function ChoiceCard({
       className={cn(
         "relative flex flex-col gap-1.5 rounded-xl border p-3.5 text-left transition-colors outline-none",
         "focus-visible:ring-3 focus-visible:ring-ring/50",
+        disabled && "cursor-not-allowed opacity-55",
         selected
           ? "border-foreground/60 bg-foreground/[0.07]"
-          : "border-border bg-background hover:border-muted-foreground",
+          : cn("border-border bg-background", !disabled && "hover:border-muted-foreground"),
       )}
     >
       <span className="flex items-center gap-2 pr-6 text-sm font-medium text-foreground">

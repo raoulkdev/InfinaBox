@@ -76,6 +76,14 @@ const FALLBACK_TEMPLATE_ID: &str = "platformer-2d";
 /// The `genre` answer for "Something else".
 pub const GENRE_OTHER: &str = "other";
 
+/// The `genre` answers of the "2D or 3D" question: keyword matching then
+/// only considers templates of that dimension.
+pub const GENRE_2D: &str = "2d";
+pub const GENRE_3D: &str = "3d";
+
+/// The template picked in 3D when nothing in the idea points anywhere.
+const FALLBACK_TEMPLATE_ID_3D: &str = "explorer-3d";
+
 /// Title of the chat thread the first build runs in.
 pub const FIRST_BUILD_THREAD_TITLE: &str = "First build";
 
@@ -98,13 +106,22 @@ pub fn choose_template(answers: &InterviewAnswers, templates: &[TemplateInfo]) -
         };
     }
 
+    // "2D" / "3D": only templates of that dimension are candidates.
+    let dimension = match genre {
+        GENRE_2D | GENRE_3D => Some(genre),
+        _ => None,
+    };
+    let candidates = |t: &&TemplateInfo| {
+        t.id != BLANK_TEMPLATE_ID && dimension.is_none_or(|d| t.dimension.eq_ignore_ascii_case(d))
+    };
+
     let text = format!(
         "{}\n{}",
         answers.idea,
         answers.genre_other.as_deref().unwrap_or_default()
     );
     let mut best: Option<(&TemplateInfo, Vec<String>)> = None;
-    for template in templates.iter().filter(|t| t.id != BLANK_TEMPLATE_ID) {
+    for template in templates.iter().filter(candidates) {
         let matched = matched_keywords(&text, &template.keywords);
         // Most distinct matches wins; a tie goes to the template offered
         // first.
@@ -124,10 +141,11 @@ pub fn choose_template(answers: &InterviewAnswers, templates: &[TemplateInfo]) -
         };
     }
 
+    let fallback_id = if genre == GENRE_3D { FALLBACK_TEMPLATE_ID_3D } else { FALLBACK_TEMPLATE_ID };
     let fallback = templates
         .iter()
-        .find(|t| t.id == FALLBACK_TEMPLATE_ID)
-        .or_else(|| templates.iter().find(|t| t.id != BLANK_TEMPLATE_ID));
+        .find(|t| t.id == fallback_id)
+        .or_else(|| templates.iter().find(candidates));
     match fallback {
         Some(template) => TemplateChoice {
             template_id: template.id.clone(),
@@ -500,6 +518,29 @@ mod tests {
             features: vec!["f".into()],
             keywords: keywords.iter().map(|k| k.to_string()).collect(),
         }
+    }
+
+    #[test]
+    fn a_two_d_or_three_d_pick_only_considers_that_dimension() {
+        let mut templates = fake_templates();
+        let mut explorer = template("explorer-3d", &["explore", "island", "jump"]);
+        explorer.dimension = "3d".into();
+        templates.push(explorer);
+        let mut a = answers("Game");
+        a.idea = "explore an island and jump around".into();
+
+        a.genre = "3d".into();
+        assert_eq!(choose_template(&a, &templates).template_id, "explorer-3d");
+        a.genre = "2d".into();
+        let pick = choose_template(&a, &templates).template_id;
+        assert!(pick == "platformer-2d" || pick == "topdown-2d", "{pick}");
+
+        // Nothing in the idea points anywhere: each dimension has its own fallback.
+        a.idea = "hmm".into();
+        a.genre = "3d".into();
+        assert_eq!(choose_template(&a, &templates).template_id, "explorer-3d");
+        a.genre = "2d".into();
+        assert_eq!(choose_template(&a, &templates).template_id, "platformer-2d");
     }
 
     fn fake_templates() -> Vec<TemplateInfo> {
