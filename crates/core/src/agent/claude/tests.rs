@@ -100,6 +100,8 @@ fn a_resumed_turn_carries_its_own_instructions_in_the_message() {
         plan_policy: PlanPolicy::AlwaysPlan,
         teach: true,
         origin: MessageOrigin::User,
+        model: None,
+        effort: None,
     };
     let args = build_args(&req, Path::new("/tmp/mcp.json"), "PROMPT");
     let message = args.last().unwrap().to_str().unwrap();
@@ -129,6 +131,8 @@ fn system_prompt_follows_the_turn_options_and_appends_the_projects_agents_md() {
         plan_policy: PlanPolicy::SmallChangesDirect,
         teach: true,
         origin: MessageOrigin::AutoFix,
+        model: None,
+        effort: None,
     };
     let prompt = turn_system_prompt(&req);
     assert_eq!(
@@ -793,4 +797,24 @@ fn real_turn_can_be_cancelled() {
             },
         ]
     );
+}
+
+#[test]
+fn a_chosen_model_and_effort_reach_the_cli_and_a_bad_model_name_does_not() {
+    use crate::agent::Effort;
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path(), "hi");
+    let plain = build_args(&req, Path::new("/tmp/mcp.json"), "P");
+    assert!(!plain.iter().any(|a| a == "--model" || a == "--effort"));
+
+    req.options.model = Some("sonnet".into());
+    req.options.effort = Some(Effort::High);
+    let args = build_args(&req, Path::new("/tmp/mcp.json"), "P");
+    let at = |flag: &str| args.iter().position(|a| a == flag).unwrap();
+    assert_eq!(args[at("--model") + 1], "sonnet");
+    assert_eq!(args[at("--effort") + 1], "high");
+
+    req.options.model = Some("--dangerous x".into());
+    let args = build_args(&req, Path::new("/tmp/mcp.json"), "P");
+    assert!(!args.iter().any(|a| a == "--model"));
 }

@@ -153,7 +153,7 @@ export interface ProviderInfo {
 
 export interface AppSettings {
   ai_provider: ProviderId | null;
-  /** A Godot binary chosen in Advanced settings instead of the managed one. */
+  /** A Godot binary chosen in Settings instead of the managed one. */
   godot_path: string | null;
   first_run_done: boolean;
   /** Per-provider model settings, keyed by provider id. Never holds a key. */
@@ -265,6 +265,9 @@ export interface AutoFixStatePayload {
 }
 
 // --- Phase C: roles (crates/core/src/agent/types.rs) ---
+
+/** How hard the AI thinks about a message. Not every AI offers every level. */
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
 export type Role =
   | "director"

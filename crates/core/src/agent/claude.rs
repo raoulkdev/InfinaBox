@@ -64,7 +64,7 @@ use super::claude_stream::{ClaudeStream, StreamEnd};
 use super::path::{find_on_path, login_shell_path};
 use super::prompt;
 use super::types::{
-    AgentErrorKind, AgentEvent, AgentRuntime, McpLaunch, RuntimeStatus, TurnRequest,
+    AgentErrorKind, AgentEvent, AgentRuntime, McpLaunch, RuntimeStatus, TurnRequest, clean_model,
 };
 
 /// The name the InfinaBox MCP server is registered under, which makes its
@@ -419,6 +419,14 @@ pub(crate) fn build_args(
     if let Some(id) = &req.resume_provider_session_id {
         args.push("--resume".into());
         args.push(id.into());
+    }
+    if let Some(model) = req.options.model.as_deref().and_then(clean_model) {
+        args.push("--model".into());
+        args.push(model.into());
+    }
+    if let Some(effort) = req.options.effort {
+        args.push("--effort".into());
+        args.push(effort.as_str().into());
     }
     args.push("--mcp-config".into());
     args.push(mcp_config.into());

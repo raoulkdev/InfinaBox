@@ -8,7 +8,9 @@ import { fadeTransition } from "@/lib/motion";
 import { contextList } from "@/lib/studio-api";
 import type { CardSummary } from "@/lib/studio-types";
 import { BoardTab } from "./BoardTab";
-import { CardsTab, type OpenRequest } from "./CardsTab";
+import { CardsTab, type NewRequest, type OpenRequest } from "./CardsTab";
+import { OverviewTab } from "./OverviewTab";
+import type { AskAi } from "./aiActions";
 import { MapTab } from "./MapTab";
 import { errorText } from "./cardTypes";
 
@@ -22,18 +24,21 @@ import { errorText } from "./cardTypes";
 
 export interface ContextSectionProps {
   projectPath: string | null;
+  /** Sends a request to the AI in Studio's chat (with a role). */
+  onAskAi: AskAi;
 }
 
-type ContextTab = "cards" | "board" | "map" | "graphs";
+type ContextTab = "overview" | "cards" | "board" | "map" | "graphs";
 
 const TABS: { id: ContextTab; label: string }[] = [
-  { id: "cards", label: "Cards" },
+  { id: "overview", label: "Overview" },
+  { id: "cards", label: "Documents" },
   { id: "board", label: "Board" },
   { id: "map", label: "Map" },
   { id: "graphs", label: "Graphs" },
 ];
 
-export function ContextSection({ projectPath }: ContextSectionProps) {
+export function ContextSection({ projectPath, onAskAi }: ContextSectionProps) {
   const [tab, setTab] = useState<ContextTab>("cards");
 
   return (
@@ -48,9 +53,9 @@ export function ContextSection({ projectPath }: ContextSectionProps) {
         className="flex shrink-0 items-center gap-3 rounded-xl border border-border bg-card px-3 py-2"
       >
         <div data-tauri-drag-region className="flex min-w-0 flex-1 flex-col">
-          <span className="text-xs font-medium tracking-wide text-muted-foreground">Context</span>
+          <span className="text-xs font-medium tracking-wide text-muted-foreground">Context studio</span>
           <p className="truncate text-sm">
-            What InfinaBox and your AI know about your game: its idea, style, mechanics and plans.
+            Your game's documents: write, organise and plan it here, with your AI's help.
           </p>
         </div>
         {projectPath && (
@@ -65,7 +70,7 @@ export function ContextSection({ projectPath }: ContextSectionProps) {
       </div>
 
       {projectPath ? (
-        <ContextViews projectPath={projectPath} tab={tab} setTab={setTab} />
+        <ContextViews projectPath={projectPath} tab={tab} setTab={setTab} onAskAi={onAskAi} />
       ) : (
         // Honest empty state, like Studio's: Context belongs to a project.
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-border bg-card text-center">
@@ -89,15 +94,18 @@ function ContextViews({
   projectPath,
   tab,
   setTab,
+  onAskAi,
 }: {
   projectPath: string;
   tab: ContextTab;
   setTab: (tab: ContextTab) => void;
+  onAskAi: AskAi;
 }) {
   const [cards, setCards] = useState<CardSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [openRequest, setOpenRequest] = useState<OpenRequest | null>(null);
+  const [newRequest, setNewRequest] = useState<NewRequest | null>(null);
 
   const bump = useCallback(() => setTick((n) => n + 1), []);
 
@@ -130,6 +138,14 @@ function ContextViews({
     [setTab],
   );
 
+  const newFromTemplate = useCallback(
+    (template: string) => {
+      setNewRequest((prev) => ({ template, nonce: (prev?.nonce ?? 0) + 1 }));
+      setTab("cards");
+    },
+    [setTab],
+  );
+
   // Every tab stays mounted, stacked in one slot — the same opacity +
   // `inert` treatment App.tsx gives its persistent sections (see the
   // comment there), so a half-edited card survives a look at the board and
@@ -151,6 +167,16 @@ function ContextViews({
   return (
     <div className="relative min-h-0 flex-1">
       {pane(
+        "overview",
+        <OverviewTab
+          projectPath={projectPath}
+          cards={cards}
+          onOpen={openCard}
+          onNew={newFromTemplate}
+          onAskAi={onAskAi}
+        />,
+      )}
+      {pane(
         "cards",
         <CardsTab
           projectPath={projectPath}
@@ -161,6 +187,8 @@ function ContextViews({
           openRequest={openRequest}
           onReload={bump}
           onChanged={bump}
+          onAskAi={onAskAi}
+          newRequest={newRequest}
         />,
       )}
       {pane(

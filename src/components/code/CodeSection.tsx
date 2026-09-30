@@ -1,17 +1,17 @@
 import { BuildRow } from "@/components/cockpit/BuildRow";
 
-// The Advanced section (product spec §7.8): everything under the hood, for
-// people who grow into it — the project's code and a real terminal (the
-// pre-Studio Build workspace, unchanged). App settings (which AI, which
-// Godot, accounts) live on the Settings page. It's one of App.tsx's
+// The Code page: the project's code and a real terminal on one page (the
+// pre-Studio Build workspace, unchanged), for people who want to look under
+// the hood. App settings (which AI, which Godot, accounts) live on the
+// Settings page. It's one of App.tsx's
 // permanently mounted sections: the terminal's shell session must survive
 // navigating away and back.
 
-export interface AdvancedSectionProps {
+export interface CodeSectionProps {
   projectPath: string | null;
 }
 
-export function AdvancedSection({ projectPath }: AdvancedSectionProps) {
+export function CodeSection({ projectPath }: CodeSectionProps) {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2">
       <div
@@ -19,8 +19,8 @@ export function AdvancedSection({ projectPath }: AdvancedSectionProps) {
         className="flex shrink-0 items-center gap-3 rounded-xl border border-border bg-card px-3 py-2"
       >
         <div data-tauri-drag-region className="flex min-w-0 flex-1 flex-col">
-          <span className="text-xs font-medium tracking-wide text-muted-foreground">Advanced</span>
-          <p className="truncate text-sm">Your game's code and a terminal, for when you want to look under the hood.</p>
+          <span className="text-xs font-medium tracking-wide text-muted-foreground">Code</span>
+          <p className="truncate text-sm">Your game's files and a terminal, for when you want to look under the hood.</p>
         </div>
       </div>
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">

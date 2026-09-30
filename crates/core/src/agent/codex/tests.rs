@@ -728,3 +728,16 @@ exec '{codex}' exec -c model_provider=mock \
         std::panic::resume_unwind(panic);
     }
 }
+
+#[test]
+fn a_chosen_model_and_effort_reach_codex() {
+    use crate::agent::Effort;
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path(), "hi");
+    req.options.model = Some("some-model".into());
+    req.options.effort = Some(Effort::Max);
+    let args: Vec<String> = build_args(&req, "I").iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    let m = args.iter().position(|a| a == "-m").unwrap();
+    assert_eq!(args[m + 1], "some-model");
+    assert!(args.iter().any(|a| a == "model_reasoning_effort=\"xhigh\""), "{args:?}");
+}

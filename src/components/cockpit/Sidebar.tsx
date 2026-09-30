@@ -7,6 +7,7 @@ import {
   Images,
   Rocket,
   Wrench,
+  Settings as SettingsIcon,
   FolderOpen,
   PanelLeftClose,
   PanelLeftOpen,
@@ -52,7 +53,7 @@ function FadeLabel({ show, children }: { show: boolean; children: ReactNode }) {
 // per-discipline sections (Documents, Business, Marketing, ...) are gone:
 // their docs now live as Context cards, and their tools arrive as parts of
 // Assets and Playtest & Launch.
-export type Section = "home" | "studio" | "context" | "assets" | "launch" | "advanced" | "settings";
+export type Section = "home" | "studio" | "context" | "assets" | "launch" | "code" | "settings";
 
 interface SectionItem {
   id: Section;
@@ -68,16 +69,19 @@ const PINNED: SectionItem[] = [{ id: "home", label: "Home", icon: Home }];
 // Everything under the project button is a screen of the open project, in
 // the order a game gets made: Studio (chat + the running game) is where
 // it happens, Context is what InfinaBox and the AI know about the game,
-// then Assets and Playtest & Launch, and Advanced (terminal, code,
-// settings) last, for people who grow into it. A flat list — six entries
+// then Assets and Playtest & Launch, and Code (files and a terminal) last, for people who grow into it. A flat list — six entries
 // don't need the discipline groups the old 13-entry sidebar did.
 const PROJECT_SECTIONS: SectionItem[] = [
   { id: "studio", label: "Studio", icon: Sparkles },
   { id: "context", label: "Context", icon: BookOpen },
   { id: "assets", label: "Assets", icon: Images },
   { id: "launch", label: "Playtest & Launch", icon: Rocket },
-  { id: "advanced", label: "Advanced", icon: Wrench },
+  { id: "code", label: "Code", icon: Wrench },
 ];
+
+// App settings, at the foot of the game sidebar: the same Settings page the
+// Home sidebar opens.
+const SETTINGS_ITEM: SectionItem = { id: "settings", label: "Settings", icon: SettingsIcon };
 
 interface SidebarProps {
   active: Section;
@@ -288,6 +292,13 @@ export function Sidebar({ active, onSelect, projectPath, onOpenProject }: Sideba
         </ScrollArea>
 
         <Separator className="my-1" />
+
+        <SectionRow
+          item={SETTINGS_ITEM}
+          active={active === "settings"}
+          collapsed={collapsed}
+          onSelect={() => onSelect("settings")}
+        />
 
         <AnimatePresence mode="wait" initial={false}>
           {collapsed ? (

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AlertCircle, Bot, CheckCircle2, Cpu, Info, KeyRound, Loader2, Plug, RotateCcw, Unplug, type LucideIcon } from "lucide-react";
-import { GodotSettings } from "@/components/advanced/GodotSettings";
+import { GodotSettings } from "./GodotSettings";
 import { ConnectDialog } from "@/components/assets/ConnectDialog";
 import { ConnectAiPanel } from "@/components/connect/ConnectAiPanel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -12,7 +12,7 @@ import type { AppSettings, GenProviderInfo } from "@/lib/studio-types";
 import { cn } from "@/lib/utils";
 
 // The app's settings, all in one place (they used to be split between
-// Advanced → Settings and Home's Setup block). Everything shown comes from
+// the old Advanced tab and Home's Setup block). Everything shown comes from
 // the backend; a failed read shows its own message.
 
 type Category = "ai" | "godot" | "accounts" | "about";

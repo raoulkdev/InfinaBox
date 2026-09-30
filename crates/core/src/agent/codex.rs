@@ -80,7 +80,9 @@ use anyhow::Context as _;
 use super::codex_stream::{CodexStream, MCP_SERVER_NAME, StreamEnd};
 use super::path::{find_on_path, login_shell_path};
 use super::prompt::{self, system_prompt};
-use super::types::{AgentErrorKind, AgentEvent, AgentRuntime, RuntimeStatus, TurnRequest};
+use super::types::{
+    AgentErrorKind, AgentEvent, AgentRuntime, Effort, RuntimeStatus, TurnRequest, clean_model,
+};
 
 /// The CLI's program name, looked up on the login-shell PATH.
 pub const PROGRAM: &str = "codex";
@@ -354,6 +356,16 @@ pub(crate) fn build_args(req: &TurnRequest, instructions: &str) -> Vec<OsString>
     for value in overrides {
         args.push("-c".into());
         args.push(value.into());
+    }
+    if let Some(model) = req.options.model.as_deref().and_then(clean_model) {
+        args.push("-m".into());
+        args.push(model.into());
+    }
+    if let Some(effort) = req.options.effort {
+        // Codex names it reasoning effort; it has no "max", so that maps to xhigh.
+        let level = if effort == Effort::Max { "xhigh" } else { effort.as_str() };
+        args.push("-c".into());
+        args.push(format!("model_reasoning_effort={}", toml_string(level)).into());
     }
     if let Some(id) = &req.resume_provider_session_id {
         args.push("resume".into());

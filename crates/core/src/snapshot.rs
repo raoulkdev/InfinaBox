@@ -87,6 +87,7 @@ const DEFAULT_IGNORES: &str = "\
 .env
 .env.*
 .ibproject/journey.json
+.ibproject/chat/attachments/
 *.tmp
 .DS_Store
 Thumbs.db

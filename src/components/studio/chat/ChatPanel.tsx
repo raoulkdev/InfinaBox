@@ -1,9 +1,12 @@
+import { attachmentLabel, fileToBase64, nameFor, withAttachments } from "@/lib/attachments";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Loader2, MessageSquare, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   agentCancel,
   agentSend,
+  appSettingsGet,
+  chatAttach,
   chatCreateThread,
   chatListThreads,
   chatLoadThread,
@@ -15,13 +18,15 @@ import type {
   AgentEvent,
   AutoFixStatePayload,
   MessageOrigin,
+  ProviderId,
   Role,
   PendingTurn,
   ThreadSummary,
 } from "@/lib/studio-types";
 import { AgentStatusBanner } from "./AgentStatusBanner";
 import { AutoFixBanner } from "./AutoFixBanner";
-import { ChatComposer } from "./ChatComposer";
+import { ChatComposer, type AttachedFile } from "./ChatComposer";
+import { loadChoice, saveChoice, type ModelChoice } from "./ModelPicker";
 import { ChatTranscript } from "./ChatTranscript";
 import { StudioSettingsPopover } from "./StudioSettingsPopover";
 import { ThreadPicker } from "./ThreadPicker";
@@ -123,6 +128,14 @@ export function ChatPanel({
   const [draft, setDraft] = useState("");
   const [composerHint, setComposerHint] = useState<string | null>(null);
   const [role, setRole] = useState<Role>("director");
+  // The AI chosen in Settings (what the model/effort choice applies to).
+  const [aiProvider, setAiProvider] = useState<ProviderId | null>(null);
+  const [modelChoice, setModelChoice] = useState<ModelChoice>({ model: null, effort: null });
+  const modelRef = useRef(modelChoice);
+  modelRef.current = modelChoice;
+  const [attachments, setAttachments] = useState<AttachedFile[]>([]);
+  const [uploading, setUploading] = useState(0);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const roleRef = useRef<Role>("director");
   roleRef.current = role;
   const [stopping, setStopping] = useState(false);
@@ -436,7 +449,15 @@ export function ChatPanel({
       markRunning(threadId, true);
       // A send that fails from here on still went to the chat: its error
       // shows in the transcript, right under the message.
-      agentSend(projectPath, threadId, message, origin, roleOverride ?? roleRef.current).catch((err) => {
+      agentSend(
+        projectPath,
+        threadId,
+        message,
+        origin,
+        roleOverride ?? roleRef.current,
+        origin === "auto_fix" ? null : modelRef.current.model,
+        origin === "auto_fix" ? null : modelRef.current.effort,
+      ).catch((err) => {
         markRunning(threadId, false);
         syncedTurns.current.delete(threadId);
         if (activeRef.current === threadId) setView((v) => applyLocalError(v, String(err)));
@@ -491,10 +512,65 @@ export function ChatPanel({
     })();
   }, [pendingTurn, chatOpen, projectPath, openThread]);
 
+  // Which AI is chosen decides what the model picker offers; read on
+  // start and again whenever a turn ends (Settings may have changed it).
+  useEffect(() => {
+    let cancelled = false;
+    appSettingsGet().then(
+      (settings) => {
+        if (cancelled) return;
+        setAiProvider(settings.ai_provider);
+        if (settings.ai_provider) setModelChoice(loadChoice(settings.ai_provider));
+      },
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [busy]);
+
+  function handleModelChange(next: ModelChoice) {
+    setModelChoice(next);
+    if (aiProvider) saveChoice(aiProvider, next);
+  }
+
+  async function handleAttach(files: File[]) {
+    setAttachError(null);
+    setUploading((n) => n + files.length);
+    for (const file of files) {
+      try {
+        const name = nameFor(file);
+        const path = await chatAttach(projectPath, name, await fileToBase64(file));
+        const preview = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+        setAttachments((prev) => [...prev, { path, label: attachmentLabel(path), preview }]);
+      } catch (err) {
+        setAttachError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setUploading((n) => n - 1);
+      }
+    }
+  }
+
+  function handleRemoveAttachment(path: string) {
+    setAttachments((prev) => {
+      const gone = prev.find((a) => a.path === path);
+      if (gone?.preview) URL.revokeObjectURL(gone.preview);
+      return prev.filter((a) => a.path !== path);
+    });
+  }
+
   function handleComposerSend() {
-    const text = draft;
-    setDraft("");
-    send(text);
+    const paths = attachments.map((a) => a.path);
+    const outcome = send(withAttachments(draft, paths));
+    // Kept as a draft when the chat can't take it now (the AI is busy).
+    if (outcome === "drafted") {
+      // Not taken (the chat isn't ready): the text stays as typed, files stay attached.
+      setDraft(draft);
+    } else {
+      setDraft("");
+      for (const a of attachments) if (a.preview) URL.revokeObjectURL(a.preview);
+      setAttachments([]);
+    }
   }
 
   const handleApprovePlan = useCallback(() => {
@@ -633,6 +709,7 @@ export function ChatPanel({
             </div>
           ) : (
             <ChatTranscript
+              projectPath={projectPath}
               items={view.items}
               turnInProgress={busy}
               provider={provider}
@@ -655,6 +732,14 @@ export function ChatPanel({
             inputRef={composerRef}
             role={role}
             onRoleChange={setRole}
+            provider={aiProvider}
+            modelChoice={modelChoice}
+            onModelChange={handleModelChange}
+            attachments={attachments}
+            uploading={uploading > 0}
+            onAttach={(files) => void handleAttach(files)}
+            onRemoveAttachment={handleRemoveAttachment}
+            attachError={attachError}
           />
         </div>
       </div>

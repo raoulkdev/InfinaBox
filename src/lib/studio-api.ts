@@ -34,6 +34,7 @@ import type {
   OnboardingPreview,
   ProjectSettings,
   ProviderId,
+  Effort,
   ProviderInfo,
   TemplateInfo,
   GameError,
@@ -69,7 +70,22 @@ export const agentSend = (
   message: string,
   origin?: MessageOrigin,
   role?: Role,
-) => invoke<void>("agent_send", { projectPath, threadId, message, origin: origin ?? null, role: role ?? null });
+  model?: string | null,
+  effort?: Effort | null,
+) =>
+  invoke<void>("agent_send", {
+    projectPath,
+    threadId,
+    message,
+    origin: origin ?? null,
+    role: role ?? null,
+    model: model ?? null,
+    effort: effort ?? null,
+  });
+
+/** Saves a file attached to a message; returns its project-relative path. */
+export const chatAttach = (projectPath: string, name: string, dataBase64: string) =>
+  invoke<string>("chat_attach", { projectPath, name, dataBase64 });
 
 export const agentCancel = (threadId: string) => invoke<void>("agent_cancel", { threadId });
 

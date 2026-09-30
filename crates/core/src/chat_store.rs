@@ -274,6 +274,59 @@ fn remove_stale_temp_files(thread_file: &Path) {
     }
 }
 
+/// Where files attached to chat messages are kept, inside the chat folder
+/// (so history never rewinds them and they never count as a change to the
+/// game). Project-relative, `/`-separated.
+pub const ATTACHMENTS_DIR: &str = ".ibproject/chat/attachments";
+
+/// The biggest file that can be attached.
+pub const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
+
+/// Saves a file the person attached to a message, under a name of its own
+/// (never overwriting), and returns its project-relative path — what the AI
+/// is told to open. Only the file's base name is used; anything that isn't a
+/// letter, digit, `.`, `-`, `_` or space becomes `_`.
+pub fn save_attachment(project: &Path, name: &str, bytes: &[u8]) -> Result<String> {
+    anyhow::ensure!(!bytes.is_empty(), "That file is empty.");
+    anyhow::ensure!(
+        bytes.len() <= MAX_ATTACHMENT_BYTES,
+        "That file is too big to attach (the limit is {} MB).",
+        MAX_ATTACHMENT_BYTES / (1024 * 1024)
+    );
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let mut clean: String = base
+        .chars()
+        .map(|c| if c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') { c } else { '_' })
+        .collect();
+    clean = clean.trim_matches(|c: char| c == '.' || c == ' ').to_string();
+    if clean.is_empty() {
+        clean = "file".into();
+    }
+    if clean.chars().count() > 80 {
+        let ext = Path::new(&clean).extension().and_then(|e| e.to_str()).unwrap_or("").to_string();
+        let stem: String = clean.chars().take(60).collect();
+        clean = if ext.is_empty() || ext.len() > 10 { stem } else { format!("{stem}.{ext}") };
+    }
+    let dir = project.join(ATTACHMENTS_DIR);
+    fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    for n in 0u32.. {
+        let file = if n == 0 { format!("{stamp}-{clean}") } else { format!("{stamp}-{n}-{clean}") };
+        let path = dir.join(&file);
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut f) => {
+                f.write_all(bytes).with_context(|| format!("writing {}", path.display()))?;
+                return Ok(format!("{ATTACHMENTS_DIR}/{file}"));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e).with_context(|| format!("creating {}", path.display())),
+        }
+    }
+    unreachable!()
+}
+
 /// Newest first. Files whose header can't be read are skipped rather than
 /// failing the whole list (one damaged thread shouldn't hide the others).
 pub fn list_threads(project: &Path) -> Result<Vec<ThreadSummary>> {
@@ -826,6 +879,21 @@ mod tests {
             at,
             origin: None,
         }
+    }
+
+    #[test]
+    fn attachments_are_saved_under_the_chat_folder_with_safe_unique_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = save_attachment(dir.path(), "../../etc/pass wd?.png", b"one").unwrap();
+        let b = save_attachment(dir.path(), "../../etc/pass wd?.png", b"two").unwrap();
+        assert_ne!(a, b);
+        assert!(a.starts_with(".ibproject/chat/attachments/"), "{a}");
+        assert!(a.ends_with("pass wd_.png"), "{a}");
+        assert_eq!(fs::read(dir.path().join(&a)).unwrap(), b"one");
+        assert!(save_attachment(dir.path(), "x.png", b"").is_err());
+        assert!(save_attachment(dir.path(), "x.png", &vec![0; MAX_ATTACHMENT_BYTES + 1]).is_err());
+        // The chat list ignores the folder.
+        assert!(list_threads(dir.path()).unwrap().is_empty());
     }
 
     #[test]

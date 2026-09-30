@@ -231,13 +231,13 @@ pub fn backend_for(
     provider: crate::connect::ProviderId,
     config: &crate::app_settings::ModelConfig,
     secrets: &dyn crate::secrets::SecretStore,
+    model_override: Option<&str>,
 ) -> std::result::Result<Arc<dyn ChatBackend>, String> {
     use crate::connect::ProviderId;
     use crate::secrets::SecretName;
 
-    let model = config
-        .model
-        .as_deref()
+    let model = model_override
+        .or(config.model.as_deref())
         .map(str::trim)
         .filter(|m| !m.is_empty())
         .ok_or("Choose which model to use first (Advanced → Connect your AI).")?

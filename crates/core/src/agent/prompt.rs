@@ -226,6 +226,8 @@ mod tests {
             plan_policy,
             teach,
             origin,
+            model: None,
+            effort: None,
         }
     }
 

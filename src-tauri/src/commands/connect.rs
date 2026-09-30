@@ -610,7 +610,7 @@ pub fn ai_test_connection(app: AppHandle, provider: ProviderId) -> Result<Connec
             let config = settings.models.get(api.as_str()).cloned().unwrap_or_default();
             let secrets = app.state::<super::credentials::SecretState>();
             let backend =
-                match infinabox_core::agent::api::backend_for(api, &config, secrets.0.as_ref()) {
+                match infinabox_core::agent::api::backend_for(api, &config, secrets.0.as_ref(), None) {
                     Ok(backend) => backend,
                     // Not set up yet: reported as the test's result, not a crash.
                     Err(message) => {

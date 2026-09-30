@@ -12,7 +12,8 @@ import { Input } from "@/components/ui/input";
 import { contextWrite } from "@/lib/studio-api";
 import type { CardType } from "@/lib/studio-types";
 import { cn } from "@/lib/utils";
-import { CARD_TYPES, errorText, newCardContent, newCardPath, typeInfo } from "./cardTypes";
+import { errorText, typeInfo } from "./cardTypes";
+import { DOC_TEMPLATES, templateById, templatedCard } from "./templates";
 
 export interface NewCardDialogProps {
   open: boolean;
@@ -20,8 +21,8 @@ export interface NewCardDialogProps {
   projectPath: string;
   /** Paths of the cards that exist now, so a new file never collides. */
   existingPaths: string[];
-  /** Pre-selected type. */
-  initialType?: CardType;
+  /** Pre-selected template (see `templates.ts`). */
+  initialTemplate?: string;
   /** When set the type can't be changed (New task, New bug). */
   fixedType?: CardType;
   /** Tags the new card starts with (a bug is a task tagged `bug`). */
@@ -38,13 +39,13 @@ export function NewCardDialog({
   onOpenChange,
   projectPath,
   existingPaths,
-  initialType = "mechanic",
+  initialTemplate = "note",
   fixedType,
   tags = [],
-  heading = "New card",
+  heading = "New document",
   onCreated,
 }: NewCardDialogProps) {
-  const [type, setType] = useState<CardType>(fixedType ?? initialType);
+  const [templateId, setTemplateId] = useState<string>(initialTemplate);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,12 +53,12 @@ export function NewCardDialog({
   // Start fresh every time the dialog opens.
   useEffect(() => {
     if (open) {
-      setType(fixedType ?? initialType);
+      setTemplateId(initialTemplate);
       setTitle("");
       setError(null);
       setBusy(false);
     }
-  }, [open, fixedType, initialType]);
+  }, [open, fixedType, initialTemplate]);
 
   const trimmed = title.trim();
 
@@ -65,8 +66,10 @@ export function NewCardDialog({
     if (!trimmed || busy) return;
     setBusy(true);
     setError(null);
-    const path = newCardPath(type, trimmed, existingPaths);
-    const { meta, body } = newCardContent(type, trimmed, tags);
+    const template = fixedType
+      ? (DOC_TEMPLATES.find((t) => t.type === fixedType && (tags.length === 0) === !t.tags?.length) ?? templateById("task"))
+      : templateById(templateId);
+    const { path, meta, body } = templatedCard(template, trimmed, existingPaths, tags);
     try {
       await contextWrite(projectPath, path, meta, body);
       onOpenChange(false);
@@ -86,25 +89,26 @@ export function NewCardDialog({
           <DialogDescription>
             {fixedType
               ? "Give it a short, clear name."
-              : "Pick what kind of card this is, then give it a name. Your AI reads these cards to understand your game."}
+              : "Start from a template, then give it a name. Your AI reads these documents to understand your game."}
           </DialogDescription>
         </DialogHeader>
 
         {!fixedType && (
-          <div className="grid max-h-64 gap-1 overflow-y-auto pr-1" role="radiogroup" aria-label="Card type">
-            {CARD_TYPES.map((t) => (
+          <div className="grid max-h-72 grid-cols-1 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-2" role="radiogroup" aria-label="Template">
+            {DOC_TEMPLATES.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 role="radio"
-                aria-checked={type === t.id}
-                onClick={() => setType(t.id)}
+                aria-checked={templateId === t.id}
+                data-testid={`template-${t.id}`}
+                onClick={() => setTemplateId(t.id)}
                 className={cn(
                   "flex items-start gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors",
-                  type === t.id ? "border-ring bg-muted" : "border-transparent hover:bg-muted/60",
+                  templateId === t.id ? "border-ring bg-muted" : "border-border hover:bg-muted/60",
                 )}
               >
-                <span className="mt-1 size-2.5 shrink-0 rounded-full" style={{ backgroundColor: t.color }} />
+                <span className="mt-1 size-2.5 shrink-0 rounded-full" style={{ backgroundColor: typeInfo(t.type).color }} />
                 <span className="min-w-0">
                   <span className="block text-sm font-medium">{t.label}</span>
                   <span className="block text-xs text-muted-foreground">{t.blurb}</span>
@@ -122,7 +126,7 @@ export function NewCardDialog({
             id="new-card-title"
             autoFocus
             value={title}
-            placeholder={`Name this ${typeInfo(type).label.toLowerCase()}`}
+            placeholder={`Name this ${(fixedType ? typeInfo(fixedType).label : templateById(templateId).label).toLowerCase()}`}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") void create();

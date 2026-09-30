@@ -491,8 +491,8 @@ export async function firstRun(run, app, config) {
     await run.shot("studio-settings");
   }, { needs: ["F7"] });
 
-  await run.step("F13", "The sidebar has the six sections; Context lists the game's cards", async () => {
-    const ids = ["home", "studio", "context", "assets", "launch", "advanced"];
+  await run.step("F13", "The sidebar has the six sections and Settings; Context lists the game's cards", async () => {
+    const ids = ["home", "studio", "context", "assets", "launch", "code", "settings"];
     const labels = [];
     for (const id of ids) {
       const el = await waitVisible(driver, tid(`nav-${id}`));
@@ -507,13 +507,13 @@ export async function firstRun(run, app, config) {
     const text = await waitUntil(
       async () => {
         const t = await driver.executeScript("return arguments[0].innerText", section);
-        return [GAME_NAME, "Style guide", "First playable", "Mechanic", "Task"].every((n) => t.includes(n)) ? t : null;
+        return [GAME_NAME, "Style guide", "First playable", "mechanic", "task"].every((n) => t.toLowerCase().includes(n.toLowerCase())) ? t : null;
       },
       { timeoutMs: 20_000, what: "the Context cards to be listed" },
     );
     run.note(`Context lists: ${JSON.stringify(text.split("\n").filter((l) => /^Cards|^(Concept|Mechanic|Style guide|Task)$/.test(l.trim())))}`);
     await run.shot("context-cards");
-    for (const id of ["assets", "launch", "advanced"]) {
+    for (const id of ["assets", "launch", "code", "settings"]) {
       await clickWhenEnabled(driver, tid(`nav-${id}`));
       await new Promise((r) => setTimeout(r, 600));
       await run.shot(`section-${id}`);

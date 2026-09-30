@@ -5,7 +5,7 @@ import { Rocket } from "lucide-react";
 import { Sidebar, type Section } from "@/components/cockpit/Sidebar";
 import { DashboardSection } from "@/components/cockpit/DashboardSection";
 import { NotBuiltYetSection } from "@/components/cockpit/NotBuiltYetSection";
-import { AdvancedSection } from "@/components/advanced/AdvancedSection";
+import { CodeSection } from "@/components/code/CodeSection";
 import { ContextSection } from "@/components/context/ContextSection";
 import { AssetsSection } from "@/components/assets/AssetsSection";
 import { StudioSection } from "@/components/studio/StudioSection";
@@ -15,31 +15,26 @@ import { HomeSidebar } from "@/components/cockpit/HomeSidebar";
 import { SettingsSection } from "@/components/settings/SettingsSection";
 import { JourneyPanel } from "@/components/journey/JourneyPanel";
 import { chatCreateThread } from "@/lib/studio-api";
-import type { PendingTurn } from "@/lib/studio-types";
+import type { PendingTurn, Role } from "@/lib/studio-types";
 import { cn } from "@/lib/utils";
 
-// Every section besides Home/Studio/Context/Advanced mounts only when
+// Every section besides Home/Studio/Context/Code mounts only when
 // selected — none of them own state worth preserving across a tab switch.
 // Studio's live AI turn stream and game tracking, Context's unsaved card
-// and graph edits, and Advanced's live terminal are the real exceptions,
+// and graph edits, and the Code page's live terminal are the real exceptions,
 // handled separately below by staying permanently mounted. The rest (today
 // Assets, and Playtest & Launch, an honest "not built yet" placeholder)
 // share this one render map so adding a real one later doesn't mean
 // copy-pasting another `{section === "x" && (...)}` block into an
 // ever-growing if-chain.
-/** Home and Settings are the app-level pages, outside any game. */
-function isHomeArea(section: Section): section is "home" | "settings" {
-  return section === "home" || section === "settings";
-}
-
-type SimpleSection = Exclude<Section, "home" | "studio" | "context" | "advanced">;
+type SimpleSection = Exclude<Section, "home" | "studio" | "context" | "code">;
 
 // The three panels that stay permanently mounted (see the comment further
 // down) crossfade between each other via opacity instead of the instant
 // `hidden` swap every other section uses — the one place in this file
 // where a real DOM mount/unmount (what AnimatePresence needs) would lose
 // state, so the animation has to be opacity-driven instead.
-const PERSISTENT_SECTIONS = ["studio", "context", "advanced"] as const;
+const PERSISTENT_SECTIONS = ["studio", "context", "code"] as const;
 type PersistentSection = (typeof PERSISTENT_SECTIONS)[number];
 
 function isPersistentSection(section: Section): section is PersistentSection {
@@ -53,7 +48,7 @@ function App() {
   // Studio.
   const [section, setSection] = useState<Section>("home");
   // The currently open project folder — shared by Studio, Context, and
-  // Advanced's code browser and terminal starting directory.
+  // the Code page's browser and terminal starting directory.
   // Starts `null` on every launch — no project is auto-restored, even if
   // one was open last time — so Home always lands with nothing selected;
   // it only becomes real, user-driven state once the user opens a project
@@ -95,21 +90,31 @@ function App() {
     setSection("studio");
   }
 
-  // "Ask the Producer" on the journey: a new chat in Studio, sent as the
-  // Producer. A failure to make the chat leaves the person where they are.
-  function handleAskProducer(message: string) {
+  // "Ask the Producer" on the journey and the Context studio's "Ask the AI":
+  // a new chat in Studio, sent in the given role. A failure to make the chat
+  // leaves the person where they are.
+  function handleAskAi(ask: { message: string; role: Role }, title = "Context") {
     if (!projectPath) return;
     const path = projectPath;
-    chatCreateThread(path, "Producer")
+    chatCreateThread(path, title)
       .then((thread) => {
         setPendingTurn({
           projectPath: path,
-          turn: { threadId: thread.id, message, origin: "user", role: "producer" },
+          turn: { threadId: thread.id, message: ask.message, origin: "user", role: ask.role },
         });
         setSection("studio");
       })
       .catch(() => {});
   }
+
+  function handleAskProducer(message: string) {
+    handleAskAi({ message, role: "producer" }, "Producer");
+  }
+
+  // The Settings page is the same page from both sidebars; which sidebar
+  // frames it depends on where it was opened from.
+  const [settingsArea, setSettingsArea] = useState<"home" | "project">("home");
+  const inHomeArea = section === "home" || (section === "settings" && settingsArea === "home");
 
   const simpleSections: Record<SimpleSection, () => ReactNode> = {
     assets: () => <AssetsSection projectPath={projectPath} />,
@@ -160,12 +165,21 @@ function App() {
       >
         {/* Home (your games, settings) is its own place with its own
             sidebar; a game's screens have the game sidebar. */}
-        {isHomeArea(section) ? (
-          <HomeSidebar active={section} onSelect={setSection} />
+        {inHomeArea ? (
+          <HomeSidebar
+            active={section === "settings" ? "settings" : "home"}
+            onSelect={(page) => {
+              if (page === "settings") setSettingsArea("home");
+              setSection(page);
+            }}
+          />
         ) : (
           <Sidebar
             active={section}
-            onSelect={setSection}
+            onSelect={(next) => {
+              if (next === "settings") setSettingsArea("project");
+              setSection(next);
+            }}
             projectPath={projectPath}
             onOpenProject={handleOpenProject}
           />
@@ -184,11 +198,11 @@ function App() {
           )}
         </AnimatePresence>
 
-        {/* Studio, Context, and Advanced stay mounted even when hidden —
+        {/* Studio, Context, and Code stay mounted even when hidden —
             Studio holds a live AI turn stream (events arrive only once; a
             remounted chat would miss the rest of a turn) and the Play
             panel's view of a running game, Context can hold an unsaved
-            card or graph edit, and Advanced owns the live terminal session
+            card or graph edit, and Code owns the live terminal session
             (never respawn/re-cwd it, see TerminalPanel's own comment).
             Because none of the three ever actually unmounts, AnimatePresence
             (which animates mount/unmount) can't crossfade between them —
@@ -200,8 +214,8 @@ function App() {
             space from Home or a simple section. (With no project open,
             Studio and Context just render their own "No project open"
             card, so there's nothing to defer mounting for — unlike
-            Advanced's terminal, which AdvancedSection holds back itself.)
-            Context and Advanced each stack their own two tabs the same way
+            the Code page's terminal, which CodeSection holds back itself.)
+            Context stacks its own tabs the same way
             inside, for the same reasons.
 
             Each inactive wrapper also carries the `inert` HTML attribute,
@@ -243,16 +257,16 @@ function App() {
             transition={fadeTransition}
             inert={section !== "context"}
           >
-            <ContextSection projectPath={projectPath} />
+            <ContextSection projectPath={projectPath} onAskAi={handleAskAi} />
           </motion.div>
           <motion.div
             className="absolute inset-0 flex min-h-0 min-w-0 overflow-hidden"
-            animate={{ opacity: section === "advanced" ? 1 : 0 }}
-            style={{ pointerEvents: section === "advanced" ? "auto" : "none" }}
+            animate={{ opacity: section === "code" ? 1 : 0 }}
+            style={{ pointerEvents: section === "code" ? "auto" : "none" }}
             transition={fadeTransition}
-            inert={section !== "advanced"}
+            inert={section !== "code"}
           >
-            <AdvancedSection projectPath={projectPath} />
+            <CodeSection projectPath={projectPath} />
           </motion.div>
         </div>
 

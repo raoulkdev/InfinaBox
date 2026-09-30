@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { motion } from "motion/react";
 import {
   AlertCircle,
@@ -17,7 +17,9 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { attachmentLabel, isImagePath, splitAttachments } from "@/lib/attachments";
 import { fadeTransition, springTransition } from "@/lib/motion";
+import { assetsReadBase64 } from "@/lib/studio-api";
 import type { AgentErrorKind } from "@/lib/studio-types";
 import { aiDisplayName } from "./ai-name";
 import { ConnectHint } from "./ConnectHint";
@@ -36,6 +38,8 @@ import { MessageText } from "./MessageText";
 // the thread's saved records or the live agent event stream.
 
 interface ChatTranscriptProps {
+  /** For showing the pictures attached to messages. */
+  projectPath?: string;
   items: ChatItem[];
   turnInProgress: boolean;
   /** The thread's provider (`ThreadSummary.provider`), for error copy. */
@@ -46,7 +50,7 @@ interface ChatTranscriptProps {
   onChangePlan: () => void;
 }
 
-export function ChatTranscript({ items, turnInProgress, provider, onApprovePlan, onChangePlan }: ChatTranscriptProps) {
+export function ChatTranscript({ projectPath, items, turnInProgress, provider, onApprovePlan, onChangePlan }: ChatTranscriptProps) {
   const last = items[items.length - 1];
   // While a turn runs but nothing new has streamed in since the user's
   // message (or the last reply), show that the AI is on it rather than
@@ -73,6 +77,7 @@ export function ChatTranscript({ items, turnInProgress, provider, onApprovePlan,
         >
           <ChatItemView
             item={item}
+            projectPath={projectPath}
             planStatus={plans.get(item.key) ?? null}
             // The plan's buttons wait for the turn to end: the backend
             // refuses a new message until then.
@@ -101,6 +106,7 @@ export function ChatTranscript({ items, turnInProgress, provider, onApprovePlan,
 
 interface ChatItemViewProps {
   item: ChatItem;
+  projectPath?: string;
   planStatus: PlanStatus | null;
   planActionable: boolean;
   changedFiles: string[] | null;
@@ -114,6 +120,7 @@ interface ChatItemViewProps {
 // not every earlier reply's markdown on each event.
 const ChatItemView = memo(function ChatItemView({
   item,
+  projectPath,
   planStatus,
   planActionable,
   changedFiles,
@@ -123,7 +130,7 @@ const ChatItemView = memo(function ChatItemView({
 }: ChatItemViewProps) {
   switch (item.kind) {
     case "user":
-      return <UserMessage text={item.text} origin={item.origin} />;
+      return <UserMessage text={item.text} origin={item.origin} projectPath={projectPath} />;
     case "assistant":
       return changedFiles ? (
         <WhatChangedCard text={item.text} files={changedFiles} />
@@ -160,7 +167,16 @@ const ChatItemView = memo(function ChatItemView({
 
 // --- Messages sent to the AI ---
 
-function UserMessage({ text, origin }: { text: string; origin: Extract<ChatItem, { kind: "user" }>["origin"] }) {
+function UserMessage({
+  text,
+  origin,
+  projectPath,
+}: {
+  text: string;
+  origin: Extract<ChatItem, { kind: "user" }>["origin"];
+  projectPath?: string;
+}) {
+  const sent = splitAttachments(text);
   switch (origin) {
     case "plan_approval":
       // The approval text itself is boilerplate the app sent for them; what
@@ -204,11 +220,47 @@ function UserMessage({ text, origin }: { text: string; origin: Extract<ChatItem,
       return (
         <div className="flex justify-end">
           <div className="max-w-[85%] rounded-2xl rounded-br-md border border-foreground/10 bg-foreground/[0.08] px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-foreground">
-            {text}
+            {sent.text}
+            {sent.paths.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2" data-testid="message-attachments">
+                {sent.paths.map((path) => (
+                  <AttachedFileView key={path} path={path} projectPath={projectPath} />
+                ))}
+              </div>
+            )}
           </div>
         </div>
       );
   }
+}
+
+/** One file attached to a sent message: a picture shows as a thumbnail,
+ * anything else as its name. */
+function AttachedFileView({ path, projectPath }: { path: string; projectPath?: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const image = isImagePath(path);
+  useEffect(() => {
+    if (!image || !projectPath) return;
+    let cancelled = false;
+    assetsReadBase64(projectPath, path).then(
+      (file) => {
+        if (!cancelled && !file.truncated) setSrc(`data:${file.mime};base64,${file.base64}`);
+      },
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [image, projectPath, path]);
+  if (image && src) {
+    return <img src={src} alt={attachmentLabel(path)} title={attachmentLabel(path)} className="max-h-40 max-w-full rounded-lg border border-foreground/10" />;
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-lg border border-foreground/10 bg-background/40 px-2 py-1 text-xs">
+      <FileText className="size-3.5" />
+      {attachmentLabel(path)}
+    </span>
+  );
 }
 
 /** A message InfinaBox sent on the person's behalf: a neutral one-line note,

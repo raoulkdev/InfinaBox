@@ -112,6 +112,49 @@ pub struct TurnOptions {
     /// "Teach me" mode: explanations grow into short lessons.
     pub teach: bool,
     pub origin: MessageOrigin,
+    /// A model to use for this message instead of the AI's default (a
+    /// CLI alias like `sonnet`, or a full model name). Already checked by
+    /// `clean_model`.
+    pub model: Option<String>,
+    /// How hard the AI should think. Ignored by runtimes that can't set it.
+    pub effort: Option<Effort>,
+}
+
+/// How much thinking effort a turn gets (what the AI's CLI calls effort or
+/// reasoning effort). Not every AI offers every level.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum Effort {
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl Effort {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Effort::Low => "low",
+            Effort::Medium => "medium",
+            Effort::High => "high",
+            Effort::Xhigh => "xhigh",
+            Effort::Max => "max",
+        }
+    }
+}
+
+/// A model name safe to pass on a command line: letters, digits and
+/// `. _ - : /` only, at most 100 characters. Blank means "the default".
+pub fn clean_model(model: &str) -> Option<String> {
+    let model = model.trim();
+    let ok = !model.is_empty()
+        && model.len() <= 100
+        && model
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '/'))
+        && !model.starts_with('-');
+    ok.then(|| model.to_string())
 }
 
 /// A specialist the Director hands work to (spec §7.1). A role changes the

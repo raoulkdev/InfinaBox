@@ -8,6 +8,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import zlib from "node:zlib";
+import { By } from "selenium-webdriver";
 import { clickWhenEnabled, invokeCommand, tid, waitUntil, waitVisible } from "../lib/ui.mjs";
 import { createProjectFromHome, git, snapshotSubjects, tempParent } from "./common.mjs";
 
@@ -314,4 +315,66 @@ export async function phaseC(run, app, config, fakes) {
       await run.shot(`settings-${id}`);
     }
   }, { needs: ["c1"] });
+
+  await run.step("c7", "Documents studio: templates, grouped list, outline; model choice and attachments reach the AI", async () => {
+    // Back to the game from Settings (Home → Open).
+    await clickWhenEnabled(driver, tid("home-nav-home"));
+    await clickWhenEnabled(driver, tid("inspector-open"), { timeoutMs: 30_000 });
+    await clickWhenEnabled(driver, tid("nav-context"));
+    await waitVisible(driver, tid("context-section"));
+    // New document from a template.
+    await waitVisible(driver, tid("new-card-button"));
+    await clickWhenEnabled(driver, tid("new-card-button"));
+    await clickWhenEnabled(driver, tid("template-character"));
+    const dialog = await waitVisible(driver, tid("new-card-dialog"));
+    await (await driver.findElement(By.css("#new-card-title"))).sendKeys("Captain Bolt");
+    await run.shot("new-document-templates");
+    await clickWhenEnabled(driver, By.xpath("//button[normalize-space()='Create']"));
+    await waitUntil(async () => fs.existsSync(path.join(state.project, ".ibproject/context/characters/captain-bolt.md")), { what: "the character document" });
+    const body = fs.readFileSync(path.join(state.project, ".ibproject/context/characters/captain-bolt.md"), "utf8");
+    if (!body.includes("type: character") || !body.includes("## Behaviour")) throw new Error(`template not written: ${body.slice(0, 300)}`);
+    const aside = await waitVisible(driver, tid("document-aside"));
+    await waitUntil(async () => (await driver.findElements(tid("doc-outline"))).length > 0, { what: "the outline" });
+    const outline = await driver.executeScript("return arguments[0].innerText", await driver.findElement(tid("doc-outline")));
+    if (!outline.includes("Behaviour")) throw new Error(`outline lacks a heading: ${outline}`);
+    await run.shot("documents-studio");
+    const overview = await call("context_list", { projectPath: state.project });
+    if (!overview.some((c) => c.path === "characters/captain-bolt.md" && c.card_type === "character")) throw new Error("new document not typed as a character");
+    await clickWhenEnabled(driver, By.xpath("//button[@role='tab'][normalize-space()='Overview']"));
+    await waitVisible(driver, tid("shelves"));
+    await run.shot("documents-overview");
+
+    // Model choice and an attached picture reach the AI (fake local model).
+    await clickWhenEnabled(driver, tid("nav-studio"));
+    await waitVisible(driver, tid("chat-composer"));
+    await clickWhenEnabled(driver, tid("model-picker"));
+    const custom = await waitVisible(driver, tid("model-custom"));
+    await custom.sendKeys("fake-model-2");
+    await run.shot("model-picker");
+    await driver.actions().sendKeys("\uE00C").perform(); // Escape closes the picker
+    const png = makePng(16, 16, [9, 200, 60]).toString("base64");
+    await driver.executeScript(
+      `const input = document.querySelector('[data-testid="attach-input"]');
+       const bytes = Uint8Array.from(atob(arguments[0]), (c) => c.charCodeAt(0));
+       const dt = new DataTransfer();
+       dt.items.add(new File([bytes], "my sketch.png", { type: "image/png" }));
+       input.files = dt.files;
+       input.dispatchEvent(new Event("change", { bubbles: true }));`,
+      png,
+    );
+    await waitVisible(driver, tid("attachment-chip"));
+    await run.shot("attachment-chip");
+    const box = await waitVisible(driver, By.css('[data-testid="chat-composer"] textarea'));
+    await box.sendKeys("Please save a note about the attached sketch");
+    await driver.actions().sendKeys("\uE007").perform();
+    await waitUntil(async () => fakes.seen.chat.some((c) => JSON.stringify(c.parsed).includes("my sketch")), { timeoutMs: 60_000, what: "the model call carrying the attachment" });
+    const call2 = fakes.seen.chat.find((c) => JSON.stringify(c.parsed).includes("my sketch"));
+    if (call2.parsed.model !== "fake-model-2") throw new Error(`model was ${call2.parsed.model}, not the one chosen`);
+    const saved = fs.readdirSync(path.join(state.project, ".ibproject/chat/attachments"));
+    if (!saved.some((f) => f.endsWith("my sketch.png"))) throw new Error(`attachment not saved: ${saved}`);
+    const tracked = git(state.project, "ls-files").split("\n");
+    if (tracked.some((f) => f.includes("chat/attachments"))) throw new Error("attachments were committed");
+    await waitUntil(async () => (await driver.findElements(tid("message-attachments"))).length > 0, { what: "the attachment shown in the message" });
+    await run.shot("message-with-attachment");
+  }, { needs: ["c4"] });
 }

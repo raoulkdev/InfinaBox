@@ -44,6 +44,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
 use infinabox_core::agent::api::{self, ApiRuntime};
+use infinabox_core::agent::{clean_model, Effort};
 use infinabox_core::agent::claude::ClaudeCodeRuntime;
 use infinabox_core::agent::claude_stream::STOPPED_MESSAGE;
 use infinabox_core::agent::codex::CodexRuntime;
@@ -175,19 +176,25 @@ impl Runtimes {
         app: &AppHandle,
         provider: ProviderId,
         thread_id: &str,
+        model: Option<&str>,
     ) -> Result<Arc<dyn TurnRunner>, String> {
         match provider {
             ProviderId::ClaudeCode => Ok(self.claude.clone()),
             ProviderId::Codex => Ok(self.codex.clone()),
             api => {
-                let runtime = Arc::new(self.api_runtime(app, api)?);
+                let runtime = Arc::new(self.api_runtime(app, api, model)?);
                 lock(&self.api).insert(thread_id.to_string(), runtime.clone());
                 Ok(runtime)
             }
         }
     }
 
-    fn api_runtime(&self, app: &AppHandle, provider: ProviderId) -> Result<ApiRuntime, String> {
+    fn api_runtime(
+        &self,
+        app: &AppHandle,
+        provider: ProviderId,
+        model: Option<&str>,
+    ) -> Result<ApiRuntime, String> {
         let dir = app
             .path()
             .app_data_dir()
@@ -196,7 +203,7 @@ impl Runtimes {
             .map_err(|e| format!("InfinaBox couldn't read its settings: {e:#}"))?;
         let config = settings.models.get(provider.as_str()).cloned().unwrap_or_default();
         let secrets = app.state::<super::credentials::SecretState>();
-        let backend = api::backend_for(provider, &config, secrets.0.as_ref())?;
+        let backend = api::backend_for(provider, &config, secrets.0.as_ref(), model)?;
         Ok(ApiRuntime::new(backend))
     }
 
@@ -218,7 +225,7 @@ impl Runtimes {
         match provider {
             ProviderId::ClaudeCode => self.claude.detect(),
             ProviderId::Codex => self.codex.detect(),
-            api => match self.api_runtime(app, api) {
+            api => match self.api_runtime(app, api, None) {
                 Ok(runtime) => runtime.detect(),
                 // Not set up yet: say so, with the reason the person can act on.
                 Err(_) => RuntimeStatus {
@@ -330,6 +337,9 @@ pub(crate) struct TurnSlot {
     origin: MessageOrigin,
     /// The specialist the person asked for (prompt sections only).
     role: infinabox_core::agent::Role,
+    /// A model chosen for this message (already cleaned), and the effort.
+    model: Option<String>,
+    effort: Option<Effort>,
 }
 
 impl Drop for TurnSlot {
@@ -389,6 +399,8 @@ pub(crate) fn start_turn(
         provider,
         origin,
         role: Default::default(),
+        model: None,
+        effort: None,
     };
     let record = ChatRecord::User {
         text: message.to_string(),
@@ -654,6 +666,8 @@ fn turn_options(
     project: &Path,
     origin: MessageOrigin,
     role: infinabox_core::agent::Role,
+    model: Option<String>,
+    effort: Option<Effort>,
     log: &mut TurnLog,
 ) -> TurnOptions {
     let settings = project_settings::load(project).unwrap_or_else(|e| {
@@ -668,6 +682,8 @@ fn turn_options(
     });
     TurnOptions {
         role,
+        model,
+        effort,
         plan_policy: settings.plan_policy,
         teach: settings.teach,
         origin,
@@ -739,7 +755,7 @@ fn drive(
             log.note_store_error(e);
         }
     }
-    let options = turn_options(project, slot.origin, slot.role, log);
+    let options = turn_options(project, slot.origin, slot.role, slot.model.clone(), slot.effort, log);
 
     let mut retried = false;
     loop {
@@ -1088,13 +1104,16 @@ pub(crate) fn send_turn(
     message: String,
     origin: MessageOrigin,
     role: infinabox_core::agent::Role,
+    model: Option<String>,
+    effort: Option<Effort>,
 ) -> Result<(), String> {
     let provider = selected_provider(app)?;
+    let model = model.as_deref().and_then(clean_model);
     let state = app.state::<AgentState>();
     let project = PathBuf::from(&project_path);
     // Before anything is saved: an API provider that isn't set up yet fails
     // here with what to finish, and the chat stays untouched.
-    let runner = state.runtimes.runner(app, provider, &thread_id)?;
+    let runner = state.runtimes.runner(app, provider, &thread_id, model.as_deref())?;
     let mut slot = start_turn(
         &state.active_turns,
         &project,
@@ -1104,6 +1123,8 @@ pub(crate) fn send_turn(
         provider,
     )?;
     slot.role = role;
+    slot.model = model;
+    slot.effort = effort;
     autofix::note_turn_started(app, &project_path, &thread_id, origin);
     let project_key = project_path.clone();
     let worker_app = app.clone();
@@ -1144,6 +1165,8 @@ pub fn agent_send(
     message: String,
     origin: Option<MessageOrigin>,
     role: Option<infinabox_core::agent::Role>,
+    model: Option<String>,
+    effort: Option<Effort>,
 ) -> Result<(), String> {
     send_turn(
         &app,
@@ -1152,6 +1175,8 @@ pub fn agent_send(
         message,
         origin.unwrap_or_default(),
         role.unwrap_or_default(),
+        model,
+        effort,
     )
 }
 
@@ -1172,6 +1197,21 @@ pub fn agent_cancel(app: AppHandle, thread_id: String) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Saves a file attached to a message (base64 from the webview) and returns
+/// its project-relative path, which the message then tells the AI to open.
+#[tauri::command(async)]
+pub fn chat_attach(project_path: String, name: String, data_base64: String) -> Result<String, String> {
+    use base64::Engine;
+    let project = Path::new(&project_path);
+    if !project.is_absolute() || !project.is_dir() {
+        return Err(format!("The project folder {} doesn't exist.", project.display()));
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_base64.as_bytes())
+        .map_err(|_| "That file couldn't be read.".to_string())?;
+    chat_store::save_attachment(project, &name, &bytes).map_err(user_error)
 }
 
 /// New threads are written with the chosen AI's name.
@@ -2302,6 +2342,8 @@ mod tests {
             plan_policy: PlanPolicy::SmallChangesDirect,
             teach: true,
             origin,
+            model: None,
+            effort: None,
         };
         assert_eq!(
             options,

@@ -1,7 +1,7 @@
 mod commands;
 
 use commands::agent::{
-    agent_cancel, agent_send, agent_status, chat_create_thread, chat_list_threads,
+    agent_cancel, agent_send, agent_status, chat_attach, chat_create_thread, chat_list_threads,
     chat_load_thread, AgentState,
 };
 use commands::autofix::AutoFixState;
@@ -79,6 +79,7 @@ pub fn run() {
             watch_project_path,
             agent_status,
             agent_send,
+            chat_attach,
             agent_cancel,
             chat_create_thread,
             chat_list_threads,

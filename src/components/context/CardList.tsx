@@ -1,11 +1,26 @@
-import { useMemo, useState } from "react";
-import { Plus, Search } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Plus, Search, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CardSummary, CardType } from "@/lib/studio-types";
 import { cn } from "@/lib/utils";
 import { StatusPill, TypeBadge } from "./CardBadges";
-import { CARD_TYPES, statusLabel } from "./cardTypes";
+import { CARD_TYPES, statusLabel, typeInfo } from "./cardTypes";
+
+/** The order documents are grouped in, and what each group is called. */
+const GROUP_ORDER: CardType[] = ["concept", "style-guide", "mechanic", "character", "level", "story", "task", "playtest", "asset", "other"];
+const GROUP_LABEL: Partial<Record<CardType, string>> = {
+  concept: "Idea",
+  "style-guide": "Style",
+  mechanic: "Mechanics",
+  character: "Characters",
+  level: "Levels",
+  story: "Story",
+  task: "Tasks",
+  playtest: "Playtests",
+  asset: "Assets",
+  other: "Notes",
+};
 
 interface CardListProps {
   cards: CardSummary[] | null;
@@ -14,13 +29,17 @@ interface CardListProps {
   selectedPath: string | null;
   onSelect: (path: string) => void;
   onNew: () => void;
+  /** Text files chosen to be brought in as documents. */
+  onImport: (files: File[]) => void;
   onRetry: () => void;
 }
 
 /** The left pane of the Cards tab: search, type chips, a status filter and
  * the list of cards. Filtering is local; the list itself comes from
  * `context_list` (see ContextSection). */
-export function CardList({ cards, loading, error, selectedPath, onSelect, onNew, onRetry }: CardListProps) {
+export function CardList({ cards, loading, error, selectedPath, onSelect, onNew, onImport, onRetry }: CardListProps) {
+  const importInput = useRef<HTMLInputElement | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<CardType>>(new Set());
   const [query, setQuery] = useState("");
   const [types, setTypes] = useState<Set<CardType>>(new Set());
   const [status, setStatus] = useState("");
@@ -61,11 +80,35 @@ export function CardList({ cards, loading, error, selectedPath, onSelect, onNew,
     <div className="flex h-full min-h-0 flex-col rounded-xl border border-border bg-card" data-testid="card-list">
       <div data-tauri-drag-region className="flex h-9 shrink-0 items-center justify-between gap-2 px-3">
         <span data-tauri-drag-region className="text-xs font-medium tracking-wide text-muted-foreground">
-          Cards{cards ? ` · ${cards.length}` : ""}
+          Documents{cards ? ` · ${cards.length}` : ""}
         </span>
-        <Button size="xs" onClick={onNew} data-testid="new-card-button">
-          <Plus /> New card
-        </Button>
+        <div className="flex items-center gap-1">
+          <input
+            ref={importInput}
+            type="file"
+            multiple
+            hidden
+            accept=".md,.markdown,.txt,text/markdown,text/plain"
+            data-testid="import-input"
+            onChange={(e) => {
+              const files = [...(e.target.files ?? [])];
+              e.target.value = "";
+              if (files.length > 0) onImport(files);
+            }}
+          />
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            title="Bring in a Markdown or text file"
+            aria-label="Import a file"
+            onClick={() => importInput.current?.click()}
+          >
+            <Upload />
+          </Button>
+          <Button size="xs" onClick={onNew} data-testid="new-card-button">
+            <Plus /> New document
+          </Button>
+        </div>
       </div>
 
       <div className="flex shrink-0 flex-col gap-2 px-3 pb-2">
@@ -74,8 +117,8 @@ export function CardList({ cards, loading, error, selectedPath, onSelect, onNew,
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search cards"
-            aria-label="Search cards"
+            placeholder="Search documents"
+            aria-label="Search documents"
             className="h-8 pl-7"
           />
         </div>
@@ -126,25 +169,53 @@ export function CardList({ cards, loading, error, selectedPath, onSelect, onNew,
             </Button>
           </div>
         ) : loading && !cards ? (
-          <p className="p-4 text-center text-xs text-muted-foreground">Loading cards…</p>
+          <p className="p-4 text-center text-xs text-muted-foreground">Loading documents…</p>
         ) : cards && cards.length === 0 ? (
           <div className="flex flex-col items-center gap-2 p-6 text-center">
-            <p className="text-sm font-medium">No cards yet</p>
+            <p className="text-sm font-medium">No documents yet</p>
             <p className="max-w-56 text-xs text-muted-foreground">
-              Cards are notes about your game that your AI reads. Start with the big idea.
+              Documents are notes about your game that your AI reads. Start with the big idea.
             </p>
             <Button size="sm" onClick={onNew}>
-              <Plus /> New card
+              <Plus /> New document
             </Button>
           </div>
         ) : visible.length === 0 ? (
           <p className="p-4 text-center text-xs text-muted-foreground">
-            {filtering ? "No cards match these filters." : "Nothing to show."}
+            {filtering ? "No documents match these filters." : "Nothing to show."}
           </p>
         ) : (
-          <ul className="flex flex-col p-1.5">
-            {visible.map((c) => (
-              <li key={c.path}>
+          <div className="flex flex-col p-1.5">
+            {(filtering ? [null] : GROUP_ORDER).map((group) => {
+              const rows = group === null ? visible : visible.filter((c) => c.card_type === group);
+              if (rows.length === 0) return null;
+              const open = group === null || !collapsed.has(group);
+              return (
+                <section key={group ?? "all"} className="flex flex-col">
+                  {group !== null && (
+                    <button
+                      type="button"
+                      aria-expanded={open}
+                      onClick={() =>
+                        setCollapsed((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(group)) next.delete(group);
+                          else next.add(group);
+                          return next;
+                        })
+                      }
+                      className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase hover:text-foreground"
+                    >
+                      {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+                      <span className="size-1.5 rounded-full" style={{ backgroundColor: typeInfo(group).color }} />
+                      {GROUP_LABEL[group] ?? typeInfo(group).label}
+                      <span className="tabular-nums opacity-70">{rows.length}</span>
+                    </button>
+                  )}
+                  {open && (
+                    <ul className="flex flex-col">
+                      {rows.map((c) => (
+                        <li key={c.path}>
                 <button
                   type="button"
                   onClick={() => onSelect(c.path)}
@@ -162,9 +233,14 @@ export function CardList({ cards, loading, error, selectedPath, onSelect, onNew,
                     <LinkHint card={c} />
                   </span>
                 </button>
-              </li>
-            ))}
-          </ul>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>

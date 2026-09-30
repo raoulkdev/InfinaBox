@@ -261,7 +261,7 @@ function HeaderProblem({ raw }: { raw: string }) {
       <p className="mt-1 text-xs text-muted-foreground">
         The block at the top of this file (title, type, status, links) isn't written in a form InfinaBox understands, so
         it can't be edited here and it won't be touched. You can still edit the card text below. To fix the header, edit
-        the file in Advanced or ask your AI to repair it.
+        the file in Code or ask your AI to repair it.
       </p>
       <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-background/60 p-2 font-mono text-[11px] whitespace-pre-wrap break-all">
         {raw}
