@@ -4,10 +4,10 @@ import type { CardSummary } from "@/lib/studio-types";
 // order a person expects (folders first, then pages, each A to Z).
 
 export type TreeNode =
-  | { kind: "folder"; name: string; path: string; children: TreeNode[] }
-  | { kind: "page"; name: string; path: string; title: string };
+  | { kind: "folder"; name: string; path: string; icon: string | null; children: TreeNode[] }
+  | { kind: "page"; name: string; path: string; title: string; icon: string | null };
 
-export function buildTree(cards: CardSummary[], folders: string[]): TreeNode[] {
+export function buildTree(cards: CardSummary[], folders: string[], folderIcons: Record<string, string> = {}): TreeNode[] {
   const root: TreeNode[] = [];
   const folderAt = new Map<string, Extract<TreeNode, { kind: "folder" }>>();
 
@@ -21,6 +21,7 @@ export function buildTree(cards: CardSummary[], folders: string[]): TreeNode[] {
       kind: "folder",
       name: path.slice(slash + 1),
       path,
+      icon: folderIcons[path] ?? null,
       children: [],
     };
     parent.push(node);
@@ -36,6 +37,7 @@ export function buildTree(cards: CardSummary[], folders: string[]): TreeNode[] {
       name: card.path.slice(slash + 1),
       path: card.path,
       title: card.title,
+      icon: card.icon ?? null,
     });
   }
 

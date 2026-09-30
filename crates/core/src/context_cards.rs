@@ -83,6 +83,8 @@ pub struct CardSummary {
     pub broken_links: Vec<String>,
     /// Cards that link here.
     pub backlinks: Vec<String>,
+    /// The page's icon (an emoji), from the `icon` header key.
+    pub icon: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -629,6 +631,7 @@ fn summarize(cards: &[Card]) -> (Vec<CardSummary>, Vec<LinkEdge>) {
             links,
             broken_links: broken,
             backlinks: Vec::new(),
+            icon: card.meta.extra.get("icon").and_then(|v| v.first()).cloned().filter(|i| !i.is_empty()),
         });
     }
     for s in &mut summaries {
@@ -987,6 +990,9 @@ pub fn move_entry(project: &Path, from: &str, to: &str) -> Result<String> {
     };
 
     fs::rename(&source, &dest).with_context(|| format!("couldn't move {from}"))?;
+    if is_dir {
+        follow_folder_icons(project, &root, &to_slash(&from_rel), Some(&to_slash(&to_rel)))?;
+    }
 
     // Fix header links in every note (including moved ones, whose relative
     // targets may name each other by old path).
@@ -1006,6 +1012,77 @@ pub fn move_entry(project: &Path, from: &str, to: &str) -> Result<String> {
     Ok(to_slash(&to_rel))
 }
 
+const FOLDER_ICONS_FILE: &str = ".icons.json";
+
+/// Folder icons, `folder path -> icon`. Kept in a hidden file inside the
+/// context folder; a missing or damaged file is no icons.
+pub fn folder_icons(project: &Path) -> Result<std::collections::BTreeMap<String, String>> {
+    let Some(root) = canonical_root(project)? else {
+        return Ok(Default::default());
+    };
+    Ok(fs::read_to_string(root.join(FOLDER_ICONS_FILE))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default())
+}
+
+fn save_folder_icons(root: &Path, icons: &std::collections::BTreeMap<String, String>) -> Result<()> {
+    let path = root.join(FOLDER_ICONS_FILE);
+    if icons.is_empty() {
+        let _ = fs::remove_file(&path);
+        return Ok(());
+    }
+    let tmp = root.join(format!("{FOLDER_ICONS_FILE}.tmp"));
+    fs::write(&tmp, serde_json::to_string_pretty(icons)? + "\n")?;
+    fs::rename(&tmp, &path).context("couldn't save folder icons")
+}
+
+/// Sets (or, with `None`, removes) a folder's icon. An icon is a short piece
+/// of text, normally one emoji.
+pub fn set_folder_icon(project: &Path, folder: &str, icon: Option<&str>) -> Result<()> {
+    let rel = to_slash(&checked_entry_path(folder)?);
+    let root = canonical_root(project)?.ok_or_else(|| anyhow!("this project has no Context folder yet"))?;
+    if !existing_entry(&root, Path::new(&rel))?.is_dir() {
+        bail!("{folder} isn't a folder");
+    }
+    let mut icons = folder_icons(project)?;
+    match icon.map(str::trim).filter(|i| !i.is_empty()) {
+        Some(icon) => {
+            if icon.chars().count() > 16 || icon.contains(['\n', '\r']) {
+                bail!("an icon is a single emoji");
+            }
+            icons.insert(rel, icon.to_string());
+        }
+        None => {
+            icons.remove(&rel);
+        }
+    }
+    save_folder_icons(&root, &icons)
+}
+
+/// Moves icons with a folder that was renamed or moved (`from` -> `to`), or
+/// drops them when `to` is `None` (the folder was deleted).
+fn follow_folder_icons(project: &Path, root: &Path, from: &str, to: Option<&str>) -> Result<()> {
+    let icons = folder_icons(project)?;
+    let prefix = format!("{from}/");
+    let mut next = std::collections::BTreeMap::new();
+    let mut changed = false;
+    for (path, icon) in icons {
+        if path == from || path.starts_with(&prefix) {
+            changed = true;
+            if let Some(to) = to {
+                next.insert(format!("{to}{}", &path[from.len()..]), icon);
+            }
+        } else {
+            next.insert(path, icon);
+        }
+    }
+    if changed {
+        save_folder_icons(root, &next)?;
+    }
+    Ok(())
+}
+
 /// Deletes a note or a folder with everything in it. The context folder
 /// itself can't be deleted.
 pub fn delete_entry(project: &Path, path: &str) -> Result<()> {
@@ -1016,6 +1093,7 @@ pub fn delete_entry(project: &Path, path: &str) -> Result<()> {
         bail!("the Context folder itself can't be deleted");
     }
     if fs::metadata(&target)?.is_dir() {
+        follow_folder_icons(project, &root, &to_slash(&rel), None)?;
         fs::remove_dir_all(&target)
     } else {
         fs::remove_file(&target)
@@ -1475,9 +1553,25 @@ implemented_in: [scripts/player.gd, scenes/player.tscn]\n---\n\n# Jumping\n\nSpa
         assert!(move_entry(p, "../x.md", "y.md").is_err());
         assert!(delete_entry(p, "..").is_err());
 
+        // Icons: on a page (in its header) and on a folder (they follow moves).
+        let mut m = meta(&[]);
+        m.extra.insert("icon".into(), vec!["🗺️".into()]);
+        write_card(p, "map.md", &m, "x\n").unwrap();
+        assert_eq!(list_cards(p).unwrap().iter().find(|c| c.path == "map.md").unwrap().icon.as_deref(), Some("🗺️"));
+        assert_eq!(read_card(p, "map.md").unwrap().meta.extra["icon"], ["🗺️"]);
+        set_folder_icon(p, "world/places", Some("🏰")).unwrap();
+        move_entry(p, "world/places", "world/cities").unwrap();
+        assert_eq!(folder_icons(p).unwrap()["world/cities"], "🏰");
+        assert!(set_folder_icon(p, "story.md", Some("x")).is_err());
+        assert!(set_folder_icon(p, "world", Some("way too long to be an icon")).is_err());
+        set_folder_icon(p, "world/cities", None).unwrap();
+        assert!(folder_icons(p).unwrap().is_empty());
+        set_folder_icon(p, "world", Some("🌍")).unwrap();
+
         delete_entry(p, "world").unwrap();
+        assert!(folder_icons(p).unwrap().is_empty());
         assert!(read_card(p, "world/places/capital.md").is_err());
-        assert_eq!(list_cards(p).unwrap().len(), 1);
+        assert_eq!(list_cards(p).unwrap().len(), 2);
     }
 
     #[test]

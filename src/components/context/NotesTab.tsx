@@ -10,8 +10,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { contextCreateFolder, contextDelete, contextFolders, contextMove, contextRead, contextWrite } from "@/lib/studio-api";
+import { contextCreateFolder, contextDelete, contextFolderIcons, contextFolders, contextMove, contextRead, contextSetFolderIcon, contextWrite } from "@/lib/studio-api";
 import type { CardSummary } from "@/lib/studio-types";
+import { IconPicker } from "./IconPicker";
 import { NotesTree } from "./NotesTree";
 import { PageView } from "./PageView";
 import type { AskAi } from "./aiActions";
@@ -40,6 +41,8 @@ interface NotesTabProps {
 /** The notes: your own folders and pages, in a tree on the left and the open page on the right. */
 export function NotesTab({ projectPath, cards, cardsError, refreshTick, openRequest, onReload, onChanged, onAskAi }: NotesTabProps) {
   const [folders, setFolders] = useState<string[]>([]);
+  const [folderIcons, setFolderIcons] = useState<Record<string, string>>({});
+  const [iconFor, setIconFor] = useState<TreeNode | null>(null);
   const [selected, setSelectedState] = useState<string | null>(null);
   // The list as it was when the page was picked: a page just created isn't in
   // it yet, and mustn't be closed as "gone" before the list has been re-read.
@@ -62,12 +65,16 @@ export function NotesTab({ projectPath, cards, cardsError, refreshTick, openRequ
       (list) => !cancelled && setFolders(list),
       () => {},
     );
+    contextFolderIcons(projectPath).then(
+      (icons) => !cancelled && setFolderIcons(icons),
+      () => {},
+    );
     return () => {
       cancelled = true;
     };
   }, [projectPath, refreshTick]);
 
-  const tree = useMemo(() => buildTree(cards ?? [], folders), [cards, folders]);
+  const tree = useMemo(() => buildTree(cards ?? [], folders, folderIcons), [cards, folders, folderIcons]);
   const taken = useMemo(() => new Set([...(cards ?? []).map((c) => c.path), ...folders]), [cards, folders]);
 
   // The Board and Map ask for a page to be opened here.
@@ -188,6 +195,27 @@ export function NotesTab({ projectPath, cards, cardsError, refreshTick, openRequ
       setSelected(copy);
     });
 
+  const changeIcon = (node: TreeNode, icon: string | null) =>
+    run(async () => {
+      if (node.kind === "folder") {
+        await contextSetFolderIcon(projectPath, node.path, icon);
+        setFolderIcons((prev) => {
+          const next = { ...prev };
+          if (icon) next[node.path] = icon;
+          else delete next[node.path];
+          return next;
+        });
+      } else {
+        const card = await contextRead(projectPath, node.path);
+        if (card.header_error) throw new Error("This page's header can't be read, so its icon can't be changed.");
+        const extra = { ...card.meta.extra };
+        if (icon) extra.icon = [icon];
+        else delete extra.icon;
+        await contextWrite(projectPath, node.path, { ...card.meta, extra }, card.body);
+      }
+      onChanged();
+    });
+
   const confirmDelete = () =>
     run(async () => {
       if (!deleting) return;
@@ -223,6 +251,7 @@ export function NotesTab({ projectPath, cards, cardsError, refreshTick, openRequ
                 onMove={(from, to) => void move(from, to)}
                 onRename={(node, name) => void rename(node, name)}
                 onDuplicate={(path) => void duplicate(path)}
+                onChangeIcon={setIconFor}
                 onDelete={setDeleting}
                 renameRequest={renameRequest}
                 onRetry={onReload}
@@ -242,7 +271,7 @@ export function NotesTab({ projectPath, cards, cardsError, refreshTick, openRequ
                 refreshTick={refreshTick}
                 onAsk={onAskAi}
                 onTitleCommitted={(path, title) => run(async () => { await retitle(path, title); onChanged(); })}
-                onDelete={() => setDeleting({ kind: "page", name: baseName(selected), path: selected, title: "" })}
+                onDelete={() => setDeleting({ kind: "page", name: baseName(selected), path: selected, title: "", icon: null })}
                 onDuplicate={() => void duplicate(selected)}
                 onSaved={onChanged}
                 onOpen={setSelected}
@@ -259,6 +288,12 @@ export function NotesTab({ projectPath, cards, cardsError, refreshTick, openRequ
           {problem}
         </p>
       )}
+      <IconPicker
+        open={iconFor !== null}
+        onOpenChange={(open) => !open && setIconFor(null)}
+        current={iconFor?.icon ?? null}
+        onPick={(icon) => iconFor && void changeIcon(iconFor, icon)}
+      />
       <AlertDialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>

@@ -204,6 +204,10 @@ export const contextBoard = (projectPath: string, types: CardType[]) =>
   invoke<Board>("context_board", { projectPath, types });
 
 export const contextFolders = (projectPath: string) => invoke<string[]>("context_folders", { projectPath });
+export const contextFolderIcons = (projectPath: string) =>
+  invoke<Record<string, string>>("context_folder_icons", { projectPath });
+export const contextSetFolderIcon = (projectPath: string, path: string, icon: string | null) =>
+  invoke<void>("context_set_folder_icon", { projectPath, path, icon });
 export const contextCreateFolder = (projectPath: string, path: string) =>
   invoke<void>("context_create_folder", { projectPath, path });
 /** Moves or renames a note or folder; resolves to its new path. */

@@ -32,6 +32,7 @@ interface NotesTreeProps {
   onMove: (from: string, toFolder: string) => void;
   onRename: (node: TreeNode, name: string) => void;
   onDuplicate: (path: string) => void;
+  onChangeIcon: (node: TreeNode) => void;
   onDelete: (node: TreeNode) => void;
   /** A folder to start renaming right away (just created). */
   renameRequest: string | null;
@@ -186,7 +187,7 @@ interface RowProps extends NotesTreeProps {
 }
 
 function Row(props: RowProps) {
-  const { node, depth, collapsed, toggle, selected, targetFolder, onTargetFolder, onOpen, onNewPage, onNewFolder, onDuplicate, onDelete, onRename, dropTarget, dragOver, dropOn, renameRequest } = props;
+  const { node, depth, collapsed, toggle, selected, targetFolder, onTargetFolder, onOpen, onNewPage, onNewFolder, onDuplicate, onChangeIcon, onDelete, onRename, dropTarget, dragOver, dropOn, renameRequest } = props;
   const isFolder = node.kind === "folder";
   const open = isFolder && !collapsed.has(node.path);
   const active = !isFolder && node.path === selected;
@@ -242,10 +243,20 @@ function Row(props: RowProps) {
         {isFolder ? (
           <>
             {open ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
-            {open ? <FolderOpen className="size-4 shrink-0 text-muted-foreground" /> : <Folder className="size-4 shrink-0 text-muted-foreground" />}
+            {node.icon ? (
+              <span className="w-4 shrink-0 text-center text-sm leading-none" data-testid="row-icon">{node.icon}</span>
+            ) : open ? (
+              <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+            ) : (
+              <Folder className="size-4 shrink-0 text-muted-foreground" />
+            )}
           </>
         ) : (
-          <FileText className="ml-[18px] size-4 shrink-0 text-muted-foreground" />
+          node.icon ? (
+            <span className="ml-[18px] w-4 shrink-0 text-center text-sm leading-none" data-testid="row-icon">{node.icon}</span>
+          ) : (
+            <FileText className="ml-[18px] size-4 shrink-0 text-muted-foreground" />
+          )
         )}
         {renaming ? (
           <input
@@ -290,6 +301,9 @@ function Row(props: RowProps) {
                 }}
               >
                 Rename
+              </DropdownMenuItem>
+              <DropdownMenuItem data-testid="change-icon" onSelect={() => onChangeIcon(node)}>
+                {node.icon ? "Change icon" : "Add icon"}
               </DropdownMenuItem>
               {!isFolder && <DropdownMenuItem onSelect={() => onDuplicate(node.path)}>Duplicate</DropdownMenuItem>}
               <DropdownMenuItem variant="destructive" data-testid="delete" onSelect={() => onDelete(node)}>

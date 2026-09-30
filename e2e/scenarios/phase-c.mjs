@@ -357,6 +357,15 @@ export async function phaseC(run, app, config, fakes) {
     await waitUntil(async () => fs.readFileSync(ctx("captain-bolt.md"), "utf8").includes("Loves the sea."), { timeoutMs: 8000, what: "autosave" });
     await run.shot("notes-page");
 
+    // A page icon, saved in the page's header and shown in the tree.
+    await clickWhenEnabled(driver, tid("page-icon"));
+    const choices = await driver.findElements(tid("icon-choice"));
+    await run.shot("icon-picker");
+    await choices[5].click();
+    await waitUntil(async () => /icon:/.test(fs.readFileSync(ctx("captain-bolt.md"), "utf8")), { what: "the page icon to be saved" });
+    await waitVisible(driver, By.css('[data-testid="tree-page"][data-path="captain-bolt.md"] [data-testid="row-icon"]'));
+    if (!fs.readFileSync(ctx("captain-bolt.md"), "utf8").includes("Loves the sea.")) throw new Error("choosing an icon lost the page text");
+
     // The AI menu.
     await clickWhenEnabled(driver, tid("ask-ai"));
     await waitVisible(driver, tid("doc-action-draft"));
@@ -382,6 +391,14 @@ export async function phaseC(run, app, config, fakes) {
     );
     await waitUntil(async () => fs.existsSync(ctx("crew")), { what: "the Crew folder" });
     await waitVisible(driver, By.css('[data-testid="tree-folder"][data-path="crew"]'));
+    // A folder icon, kept with the folder.
+    const crew = await driver.findElement(By.css('[data-testid="tree-folder"][data-path="crew"]'));
+    await driver.actions().move({ origin: crew }).perform();
+    await clickWhenEnabled(driver, By.css('[data-path="crew"] [data-testid="row-menu"]'));
+    await clickWhenEnabled(driver, tid("change-icon"));
+    await (await driver.findElements(tid("icon-choice")))[20].click();
+    await waitUntil(async () => fs.existsSync(ctx(".icons.json")) && fs.readFileSync(ctx(".icons.json"), "utf8").includes("crew"), { what: "the folder icon to be saved" });
+    await waitVisible(driver, By.css('[data-testid="tree-folder"][data-path="crew"] [data-testid="row-icon"]'));
     await driver.executeScript(`
       const page = document.querySelector('[data-testid="tree-page"][data-path="captain-bolt.md"]');
       const folder = document.querySelector('[data-testid="tree-folder"][data-path="crew"]');

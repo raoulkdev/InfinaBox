@@ -64,3 +64,13 @@ pub fn context_move(project_path: String, from: String, to: String) -> Result<St
 pub fn context_delete(project_path: String, path: String) -> Result<(), String> {
     context_cards::delete_entry(Path::new(&project_path), &path).map_err(err)
 }
+
+#[tauri::command(async)]
+pub fn context_folder_icons(project_path: String) -> Result<std::collections::BTreeMap<String, String>, String> {
+    context_cards::folder_icons(Path::new(&project_path)).map_err(err)
+}
+
+#[tauri::command(async)]
+pub fn context_set_folder_icon(project_path: String, path: String, icon: Option<String>) -> Result<(), String> {
+    context_cards::set_folder_icon(Path::new(&project_path), &path, icon.as_deref()).map_err(err)
+}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Popover } from "radix-ui";
-import { ClipboardCopy, MoreHorizontal, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { ClipboardCopy, SmilePlus, MoreHorizontal, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { MarkdownEditor } from "@/components/cockpit/MarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { contextRead, contextWrite } from "@/lib/studio-api";
 import type { Card, CardMeta, CardSummary, CardType } from "@/lib/studio-types";
 import { DOC_ACTIONS, questionAbout, type AskAi } from "./aiActions";
+import { IconPicker } from "./IconPicker";
 import { CARD_TYPES, STATUS_SUGGESTIONS, errorText } from "./cardTypes";
 
 // One page of the notes: a big title and a body you just type in. It saves
@@ -45,6 +46,7 @@ export function PageView({ projectPath, path, cards, refreshTick, onAsk, onTitle
   const [version, setVersion] = useState(0);
   const [save, setSave] = useState<Save>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [pickingIcon, setPickingIcon] = useState(false);
 
   // What is on disk as far as this page knows, and whether there are edits not yet written.
   const savedRef = useRef({ title: "", body: "", meta: null as CardMeta | null });
@@ -85,7 +87,10 @@ export function PageView({ projectPath, path, cards, refreshTick, onAsk, onTitle
     let cancelled = false;
     contextRead(projectPath, path).then((card) => {
       if (cancelled || dirtyRef.current) return;
-      const same = card.body === savedRef.current.body && (card.meta.title ?? "") === savedRef.current.title;
+      const same =
+        card.body === savedRef.current.body &&
+        (card.meta.title ?? "") === savedRef.current.title &&
+        JSON.stringify(card.meta.extra) === JSON.stringify(savedRef.current.meta?.extra);
       if (!same) apply(card);
     }, () => {});
     return () => {
@@ -150,6 +155,7 @@ export function PageView({ projectPath, path, cards, refreshTick, onAsk, onTitle
   if (!loaded || !meta) return <div className="h-full rounded-xl border border-border bg-card" />;
 
   const broken = loaded.header_error !== null;
+  const icon = meta.extra.icon?.[0] || null;
 
   const setMetaField = (patch: Partial<CardMeta>) => {
     setMeta((m) => (m ? { ...m, ...patch } : m));
@@ -158,6 +164,17 @@ export function PageView({ projectPath, path, cards, refreshTick, onAsk, onTitle
 
   return (
     <div className="flex h-full min-h-0 flex-col rounded-xl border border-border bg-card" data-testid="page-view">
+      <IconPicker
+        open={pickingIcon}
+        onOpenChange={setPickingIcon}
+        current={icon}
+        onPick={(next) => {
+          const extra = { ...meta.extra };
+          if (next) extra.icon = [next];
+          else delete extra.icon;
+          setMetaField({ extra });
+        }}
+      />
       <div data-tauri-drag-region className="flex h-10 shrink-0 items-center justify-end gap-1 px-3">
         <span className="mr-1 text-xs text-muted-foreground" data-testid="save-state" aria-live="polite">
           {save === "saving" ? "Saving…" : save === "error" ? "Couldn't save" : ""}
@@ -194,6 +211,18 @@ export function PageView({ projectPath, path, cards, refreshTick, onAsk, onTitle
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-8 pb-10">
+          <div className="flex items-center gap-2 pt-4 pb-3">
+            <button
+              type="button"
+              disabled={broken}
+              data-testid="page-icon"
+              onClick={() => setPickingIcon(true)}
+              aria-label={icon ? "Change icon" : "Add icon"}
+              title={icon ? "Change icon" : "Add icon"}
+              className={`flex size-10 shrink-0 items-center justify-center rounded-lg text-3xl leading-none hover:bg-accent ${icon ? "" : "text-muted-foreground/40 hover:text-muted-foreground"}`}
+            >
+              {icon ?? <SmilePlus className="size-5" />}
+            </button>
           <input
             ref={titleInput}
             value={title}
@@ -211,8 +240,9 @@ export function PageView({ projectPath, path, cards, refreshTick, onAsk, onTitle
             onKeyDown={(e) => {
               if (e.key === "Enter") (e.target as HTMLInputElement).blur();
             }}
-            className="w-full bg-transparent pt-4 pb-3 text-3xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground/50"
+            className="w-full bg-transparent text-3xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground/50"
           />
+          </div>
           {broken ? (
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm" data-testid="header-error">
               This page's header can't be read, so it's shown as it is on disk. Fix it in Code.

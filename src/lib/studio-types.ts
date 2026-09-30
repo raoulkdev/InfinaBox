@@ -323,6 +323,8 @@ export interface CardSummary {
   links: string[];
   broken_links: string[];
   backlinks: string[];
+  /** The page's icon (an emoji), if it has one. */
+  icon: string | null;
 }
 
 export interface BoardColumn {
