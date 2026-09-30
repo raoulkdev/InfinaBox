@@ -216,7 +216,7 @@ export function GenerateForm({ kind, projectPath, styleGuide, onAccepted }: Gene
           )}
 
           {kind === "voice" && (
-            <Field label="Voice ID (optional)" hint="Leave empty to use the provider's default voice.">
+            <Field label="Voice ID (optional)">
               <Input value={voiceId} onChange={(e) => setVoiceId(e.target.value)} className="max-w-72" />
             </Field>
           )}

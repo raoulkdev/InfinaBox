@@ -703,9 +703,6 @@ export function ChatPanel({
           ) : view.items.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
               <MessageSquare className="size-5 text-muted-foreground" />
-              <span className="max-w-xs text-sm text-muted-foreground">
-                Tell the AI what you'd like to make or change in your game.
-              </span>
             </div>
           ) : (
             <ChatTranscript

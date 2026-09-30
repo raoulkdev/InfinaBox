@@ -83,7 +83,7 @@ export function RolePicker({ value, onChange, disabled }: RolePickerProps) {
           sideOffset={6}
           collisionPadding={12}
           data-testid="role-picker-menu"
-          className="z-50 max-h-(--radix-popover-content-available-height) w-80 overflow-y-auto origin-(--radix-popover-content-transform-origin) rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-lg outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+          className="z-50 max-h-(--radix-popover-content-available-height) w-56 overflow-y-auto origin-(--radix-popover-content-transform-origin) rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-lg outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
         >
           <RadioGroup.Root
             value={value}
@@ -99,6 +99,7 @@ export function RolePicker({ value, onChange, disabled }: RolePickerProps) {
                 key={role}
                 value={role}
                 data-testid={`role-${role}`}
+                title={ROLE_DESCRIPTIONS[role]}
                 className="group flex items-start gap-2.5 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=checked]:bg-muted"
               >
                 <span className="mt-0.5 flex size-3.5 shrink-0 items-center justify-center rounded-full border border-foreground/30 group-data-[state=checked]:border-foreground">
@@ -106,7 +107,6 @@ export function RolePicker({ value, onChange, disabled }: RolePickerProps) {
                 </span>
                 <span className="flex min-w-0 flex-col">
                   <span className="text-sm">{ROLE_LABELS[role]}</span>
-                  <span className="text-xs text-muted-foreground">{ROLE_DESCRIPTIONS[role]}</span>
                 </span>
               </RadioGroup.Item>
             ))}

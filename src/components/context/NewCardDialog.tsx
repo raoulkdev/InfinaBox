@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -86,11 +85,6 @@ export function NewCardDialog({
       <DialogContent className="sm:max-w-md" data-testid="new-card-dialog">
         <DialogHeader>
           <DialogTitle>{heading}</DialogTitle>
-          <DialogDescription>
-            {fixedType
-              ? "Give it a short, clear name."
-              : "Start from a template, then give it a name. Your AI reads these documents to understand your game."}
-          </DialogDescription>
         </DialogHeader>
 
         {!fixedType && (
@@ -111,7 +105,6 @@ export function NewCardDialog({
                 <span className="mt-1 size-2.5 shrink-0 rounded-full" style={{ backgroundColor: typeInfo(t.type).color }} />
                 <span className="min-w-0">
                   <span className="block text-sm font-medium">{t.label}</span>
-                  <span className="block text-xs text-muted-foreground">{t.blurb}</span>
                 </span>
               </button>
             ))}

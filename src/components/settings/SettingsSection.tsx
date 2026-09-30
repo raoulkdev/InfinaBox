@@ -17,11 +17,11 @@ import { cn } from "@/lib/utils";
 
 type Category = "ai" | "godot" | "accounts" | "about";
 
-const CATEGORIES: { id: Category; label: string; blurb: string; icon: LucideIcon }[] = [
-  { id: "ai", label: "Your AI", blurb: "The AI that builds your games", icon: Bot },
-  { id: "godot", label: "Godot", blurb: "The engine that runs your games", icon: Cpu },
-  { id: "accounts", label: "Accounts", blurb: "Services for making pictures and sounds", icon: KeyRound },
-  { id: "about", label: "About & data", blurb: "Where things are kept", icon: Info },
+const CATEGORIES: { id: Category; label: string; icon: LucideIcon }[] = [
+  { id: "ai", label: "Your AI", icon: Bot },
+  { id: "godot", label: "Godot", icon: Cpu },
+  { id: "accounts", label: "Accounts", icon: KeyRound },
+  { id: "about", label: "General", icon: Info },
 ];
 
 function errorText(err: unknown): string {
@@ -77,7 +77,6 @@ export function SettingsSection({ projectPath }: SettingsSectionProps) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-xl border border-border bg-card">
         <div data-tauri-drag-region className="shrink-0 border-b border-border px-5 py-3">
           <h1 className="text-base font-semibold tracking-tight">{current.label}</h1>
-          <p className="text-sm text-muted-foreground">{current.blurb}</p>
         </div>
         <ScrollArea className="min-h-0 flex-1">
           <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-5 py-5">
@@ -129,10 +128,6 @@ function AccountsPage() {
 
   return (
     <>
-      <p className="text-sm text-muted-foreground">
-        Accounts you already own, used to make pictures and sounds in Assets → Generate. Keys are kept in your
-        computer's password storage — never in your project, its history, or any file InfinaBox writes.
-      </p>
       {error && (
         <Alert variant="destructive">
           <AlertCircle />
@@ -157,7 +152,6 @@ function AccountsPage() {
                   </span>
                 )}
               </span>
-              <span className="text-xs text-muted-foreground">{p.blurb}</span>
             </div>
             {p.connected ? (
               <Button variant="outline" size="sm" onClick={() => void disconnect(p)} disabled={disconnecting === p.id}>
@@ -215,24 +209,8 @@ function AboutPage() {
           <AlertDescription className="wrap-anywhere">{error}</AlertDescription>
         </Alert>
       )}
-      <Fact title="Your games">
-        Each game is an ordinary folder on your computer, with its history kept inside it. Nothing is uploaded
-        anywhere.
-      </Fact>
-      <Fact title="Keys and sign-ins">
-        Keys for accounts and API providers live in your computer's password storage (Keychain on Mac,
-        Credential Manager on Windows, your desktop's secret service on Linux). Claude Code and Codex keep their
-        own sign-ins; InfinaBox never sees them.
-      </Fact>
-      <Fact title="Settings">
-        Your choices (which AI, which Godot, model names) are saved in InfinaBox's own settings file. Keys are
-        never written there.
-      </Fact>
       <Fact title="Welcome checklist">
-        {settings?.first_run_done === false
-          ? "The welcome checklist will show on Home."
-          : "Show the three setup steps on Home again."}
-        <div className="mt-2">
+        <div>
           <Button
             variant="outline"
             size="sm"

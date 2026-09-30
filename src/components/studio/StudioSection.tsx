@@ -56,9 +56,6 @@ export function StudioSection({ projectPath, pendingTurn, onPendingTurnTaken }: 
             <Sparkles className="size-5 text-muted-foreground" />
           </div>
           <h2 className="text-lg font-medium tracking-tight">No project open</h2>
-          <p className="max-w-xs text-sm text-muted-foreground">
-            Create or open a project from Home to chat with your AI and play your game here.
-          </p>
         </div>
       </div>
     );

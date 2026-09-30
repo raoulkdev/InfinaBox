@@ -158,11 +158,6 @@ export function ModelPicker({ provider, value, onChange, disabled }: ModelPicker
                 onChange({ ...value, model: e.target.value.trim() || null });
               }}
             />
-            <p className="text-xs text-muted-foreground">
-              {provider === "claude-code" || provider === "codex"
-                ? "Default is whatever your AI uses on its own."
-                : "Default is the model you set in Settings → Your AI."}
-            </p>
           </section>
 
           {offer.efforts.length > 0 && (
@@ -185,7 +180,6 @@ export function ModelPicker({ provider, value, onChange, disabled }: ModelPicker
                   </RadioGroup.Item>
                 ))}
               </RadioGroup.Root>
-              <p className="text-xs text-muted-foreground">Higher effort thinks longer: better on hard changes, slower.</p>
             </section>
           )}
         </Popover.Content>

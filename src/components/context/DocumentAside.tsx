@@ -81,10 +81,7 @@ export function DocumentAside({ projectPath, path, cards, refreshTick, onAsk, on
               className="h-auto justify-start py-1.5 text-left whitespace-normal"
               onClick={() => onAsk(a.ask(path))}
             >
-              <span className="flex flex-col">
-                <span>{a.label}</span>
-                <span className="text-[11px] font-normal text-muted-foreground">{a.hint}</span>
-              </span>
+              {a.label}
             </Button>
           ))}
         </div>
@@ -136,7 +133,7 @@ export function DocumentAside({ projectPath, path, cards, refreshTick, onAsk, on
       <section className="flex flex-col gap-1">
         <h3 className="text-xs font-medium tracking-wide text-muted-foreground">Outline</h3>
         {outline.length === 0 ? (
-          <p className="text-xs text-muted-foreground">Headings you add (# Title, ## Section) show up here.</p>
+          <p className="text-xs text-muted-foreground">No headings yet.</p>
         ) : (
           <ul className="flex flex-col gap-0.5" data-testid="doc-outline">
             {outline.map((h, i) => (

@@ -195,8 +195,6 @@ export function ApiProviderCard({
           </Badge>
         )}
       </div>
-      <p className="text-sm text-muted-foreground">{def.blurb}</p>
-
       {isLocal ? (
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
           <ExternalLink url="https://ollama.com">Get Ollama</ExternalLink>
@@ -278,10 +276,7 @@ export function ApiProviderCard({
               {keyError}
             </p>
           )}
-          <p className="text-xs text-muted-foreground">
-            Kept in your computer's secure storage. InfinaBox never shows it again.
-          </p>
-        </div>
+          </div>
       )}
 
       <form
@@ -357,10 +352,6 @@ export function ApiProviderCard({
             </datalist>
           )}
         </label>
-        <p className="text-xs text-muted-foreground">
-          {def.modelHint}
-          {def.modelSuggestions.length > 0 && <> Suggestions: {def.modelSuggestions.join(", ")}.</>}
-        </p>
         {modelSaved && !modelDirty && (
           <p className="text-xs text-emerald-400" data-testid={`model-saved-${def.id}`}>
             Saved.

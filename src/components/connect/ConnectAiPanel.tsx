@@ -215,11 +215,6 @@ export function ConnectAiPanel({ onConnected }: ConnectAiPanelProps) {
   return (
     <div data-testid="connect-ai-panel" className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          InfinaBox uses your own AI: a subscription you already have, your own API key, or a
-          model on this computer. InfinaBox never sees your password and never charges you for
-          AI.
-        </p>
         <Button
           type="button"
           size="sm"

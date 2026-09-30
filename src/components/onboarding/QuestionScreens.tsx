@@ -36,7 +36,6 @@ export function IdeaScreen({ answers, update }: ScreenProps) {
     <div className="flex flex-col gap-6">
       <QuestionHeading
         title="What's your game about?"
-        helper="A sentence or two is plenty — you can change everything later."
       />
       <textarea
         autoFocus
@@ -64,7 +63,7 @@ export type TemplatesState =
 export function GenreScreen({ answers, update }: ScreenProps) {
   return (
     <div className="flex flex-col gap-5">
-      <QuestionHeading title="Is your game 2D or 3D?" helper="You can change your mind later." />
+      <QuestionHeading title="Is your game 2D or 3D?" />
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
         <ChoiceCard
           testId="onboarding-dimension-2d"
@@ -100,7 +99,6 @@ export function ReferencesScreen({ answers, update }: ScreenProps) {
     <div className="flex flex-col gap-6">
       <QuestionHeading
         title="Any games it's like?"
-        helper="Name a game or two it reminds you of. Totally optional — skip it if nothing comes to mind."
       />
       <Input
         autoFocus
@@ -137,7 +135,6 @@ export function NameScreen({
     <div className="flex flex-col gap-6">
       <QuestionHeading
         title="What's it called, and where should it live?"
-        helper="Here's a name from your idea — change it to anything you like."
       />
       <div className="flex flex-col gap-1.5">
         <label htmlFor="onboarding-name" className="text-xs font-medium tracking-wide text-muted-foreground">

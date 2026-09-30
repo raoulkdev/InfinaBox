@@ -189,9 +189,6 @@ export function CardsTab({
                   <FileText className="size-5 text-muted-foreground" />
                 </div>
                 <p className="text-sm font-medium">No document open</p>
-                <p className="max-w-xs text-xs text-muted-foreground">
-                  Pick a document on the left to read or edit it, or make a new one.
-                </p>
               </div>
             ),
           },
@@ -209,11 +206,7 @@ export function CardsTab({
                 onOpen={requestSelect}
               />
             ) : (
-              <div className="flex h-full flex-col items-center justify-center gap-1 rounded-xl border border-border bg-card p-4 text-center">
-                <p className="text-xs text-muted-foreground">
-                  Open a document to see its outline and ask the AI to work on it.
-                </p>
-              </div>
+              <div className="h-full rounded-xl border border-border bg-card" />
             ),
           },
         ]}

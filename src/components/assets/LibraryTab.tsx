@@ -226,9 +226,7 @@ function ProviderPane({
       ) : results === null ? (
         !error && (
           <p className="py-6 text-center text-sm text-muted-foreground">
-            {provider.needs_folder
-              ? "Choose a folder of files you already have, then look inside it."
-              : `Search ${provider.name} for something to add to your game.`}
+            {provider.needs_folder ? "Choose a folder." : `Search ${provider.name}.`}
           </p>
         )
       ) : results.length === 0 ? (

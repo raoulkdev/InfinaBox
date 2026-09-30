@@ -105,10 +105,7 @@ export function StudioSettingsPopover({ projectPath }: { projectPath: string }) 
           className="z-50 w-80 origin-(--radix-popover-content-transform-origin) rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-lg outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
         >
           <div className="flex items-start justify-between gap-2">
-            <div className="flex flex-col gap-0.5">
-              <span className="text-sm font-medium">How the AI works with you</span>
-              <span className="text-xs text-muted-foreground">Saved with this game.</span>
-            </div>
+            <span className="text-sm font-medium">How the AI works with you</span>
             {(state.status === "loading" || saving) && (
               <Loader2 className="mt-0.5 size-3.5 animate-spin text-muted-foreground" aria-label="Saving" />
             )}

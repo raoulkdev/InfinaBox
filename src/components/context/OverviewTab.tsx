@@ -15,8 +15,6 @@ import { errorText, typeInfo } from "./cardTypes";
 interface Shelf {
   type: CardType;
   title: string;
-  /** What belongs here, in a sentence. */
-  blurb: string;
   /** Template offered for "New". */
   template: string;
   /** A game should have at least one; shown as missing otherwise. */
@@ -24,14 +22,14 @@ interface Shelf {
 }
 
 const SHELVES: Shelf[] = [
-  { type: "concept", title: "The idea", blurb: "What the game is and why it's fun.", template: "gdd", core: true },
-  { type: "style-guide", title: "Look and sound", blurb: "Art style, colours, music mood.", template: "style", core: true },
-  { type: "mechanic", title: "Mechanics", blurb: "What the player can do, and how it works.", template: "mechanic", core: true },
-  { type: "character", title: "Characters", blurb: "The player, enemies, everyone else.", template: "character", core: false },
-  { type: "level", title: "Levels", blurb: "Places in the game and how they play.", template: "level", core: false },
-  { type: "story", title: "Story", blurb: "What happens, in order, and what is said.", template: "story", core: false },
-  { type: "task", title: "Tasks", blurb: "What's left to do; see the Board.", template: "task", core: false },
-  { type: "playtest", title: "Playtests", blurb: "What happened when someone played.", template: "playtest", core: false },
+  { type: "concept", title: "The idea", template: "gdd", core: true },
+  { type: "style-guide", title: "Look and sound", template: "style", core: true },
+  { type: "mechanic", title: "Mechanics", template: "mechanic", core: true },
+  { type: "character", title: "Characters", template: "character", core: false },
+  { type: "level", title: "Levels", template: "level", core: false },
+  { type: "story", title: "Story", template: "story", core: false },
+  { type: "task", title: "Tasks", template: "task", core: false },
+  { type: "playtest", title: "Playtests", template: "playtest", core: false },
 ];
 
 interface OverviewTabProps {
@@ -72,9 +70,7 @@ export function OverviewTab({ projectPath, cards, onOpen, onNew, onAskAi }: Over
           <div className="flex flex-col gap-0.5">
             <h2 className="text-base font-semibold tracking-tight">Your game's documents</h2>
             <p className="text-sm text-muted-foreground">
-              {cards === null
-                ? "Reading your documents…"
-                : `${list.length} document${list.length === 1 ? "" : "s"}. Your AI reads these to understand your game, so the more you write down, the better it builds.`}
+              {cards === null ? "Reading your documents…" : `${list.length} document${list.length === 1 ? "" : "s"}`}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -120,7 +116,6 @@ export function OverviewTab({ projectPath, cards, onOpen, onNew, onAskAi }: Over
                         <span className="rounded-full bg-amber-500/15 px-1.5 text-[11px] text-amber-300">missing</span>
                       )}
                     </h3>
-                    <p className="text-xs text-muted-foreground">{shelf.blurb}</p>
                   </div>
                   <Button size="icon-xs" variant="ghost" aria-label={`New ${shelf.title.toLowerCase()} document`} onClick={() => onNew(shelf.template)}>
                     <Plus />

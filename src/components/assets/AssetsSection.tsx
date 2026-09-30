@@ -71,9 +71,6 @@ export function AssetsSection({ projectPath }: AssetsSectionProps) {
           <Package className="size-5 text-muted-foreground" />
         </div>
         <h2 className="text-lg font-medium tracking-tight">No project open</h2>
-        <p className="max-w-xs text-sm text-muted-foreground">
-          Create or open a project from Home to see and add the pictures, sounds and models in your game.
-        </p>
       </div>
     );
   }
@@ -93,7 +90,6 @@ export function AssetsSection({ projectPath }: AssetsSectionProps) {
       >
         <div data-tauri-drag-region className="flex min-w-0 flex-1 flex-col">
           <span className="text-xs font-medium tracking-wide text-muted-foreground">Assets</span>
-          <p className="truncate text-sm">Pictures, sounds, 3D models and fonts, with their licenses.</p>
         </div>
         <TabsList>
           {TABS.map((t) => (

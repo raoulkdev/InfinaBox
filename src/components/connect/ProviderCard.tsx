@@ -113,8 +113,6 @@ export function ProviderCard({
           </Badge>
         )}
       </div>
-      <p className="text-sm text-muted-foreground">{p.blurb}</p>
-
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-muted-foreground">Installed</dt>
         <dd className="min-w-0 truncate text-foreground/90" title={p.version ?? undefined}>

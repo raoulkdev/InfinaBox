@@ -53,10 +53,7 @@ export function ContextSection({ projectPath, onAskAi }: ContextSectionProps) {
         className="flex shrink-0 items-center gap-3 rounded-xl border border-border bg-card px-3 py-2"
       >
         <div data-tauri-drag-region className="flex min-w-0 flex-1 flex-col">
-          <span className="text-xs font-medium tracking-wide text-muted-foreground">Context studio</span>
-          <p className="truncate text-sm">
-            Your game's documents: write, organise and plan it here, with your AI's help.
-          </p>
+          <span className="text-xs font-medium tracking-wide text-muted-foreground">Context</span>
         </div>
         {projectPath && (
           <TabsList>
@@ -78,9 +75,6 @@ export function ContextSection({ projectPath, onAskAi }: ContextSectionProps) {
             <BookOpen className="size-5 text-muted-foreground" />
           </div>
           <h2 className="text-lg font-medium tracking-tight">No project open</h2>
-          <p className="max-w-xs text-sm text-muted-foreground">
-            Create or open a project from Home to see and edit what your AI knows about your game.
-          </p>
         </div>
       )}
     </Tabs>

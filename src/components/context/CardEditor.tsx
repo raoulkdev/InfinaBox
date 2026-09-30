@@ -218,7 +218,7 @@ export function CardEditor({ projectPath, path, cards, refreshTick, onDirtyChang
         <div className="px-3 py-3">
           <p className="mb-1 text-xs font-medium text-muted-foreground">Linked from</p>
           {backlinks.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No other card links here yet.</p>
+            <p className="text-xs text-muted-foreground">None</p>
           ) : (
             <ul className="flex flex-wrap gap-1.5">
               {backlinks.map((p) => {
@@ -366,9 +366,7 @@ function HeaderForm({ meta, patch, path, cards, summary, onOpen }: HeaderFormPro
 
       <Field label="Implemented in" className="sm:col-span-2">
         {meta.implemented_in.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            No game files yet. Your AI fills this in when it builds this card.
-          </p>
+          <p className="text-xs text-muted-foreground">None</p>
         ) : (
           <ul className="flex flex-wrap gap-1.5">
             {meta.implemented_in.map((f) => (

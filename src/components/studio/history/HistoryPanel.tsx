@@ -308,8 +308,7 @@ export function HistoryPanel({ projectPath, aiWorking = false }: HistoryPanelPro
         )}
         {list.status === "ready" && snapshots.length === 0 && (
           <p className="px-3 py-2 text-sm text-muted-foreground">
-            No history yet. Every change your AI makes will be saved here, so you can always go
-            back.
+            No history yet.
           </p>
         )}
         {list.status === "ready" && snapshots.length > 0 && (
@@ -333,10 +332,6 @@ export function HistoryPanel({ projectPath, aiWorking = false }: HistoryPanelPro
           </p>
         )}
       </div>
-
-      <p className="shrink-0 border-t border-border px-3 py-1 text-[11px] text-muted-foreground">
-        History is saved on this computer only.
-      </p>
 
       <GoBackDialog
         snapshot={confirming}

@@ -142,7 +142,7 @@ export function ImagePreview({ src }: ImagePreviewProps) {
       </div>
       {natural && (
         <p className="text-xs text-muted-foreground">
-          {natural.w} × {natural.h} pixels. Scroll to zoom, drag to move.
+          {natural.w} × {natural.h} pixels
         </p>
       )}
 

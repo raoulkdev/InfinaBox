@@ -15,7 +15,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -307,9 +306,6 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
                   <>
                     <div className="flex flex-col gap-1">
                       <h1 className="text-xl font-semibold tracking-tight">Welcome to InfinaBox</h1>
-                      <p className="text-sm text-muted-foreground">
-                        Three steps and you'll be playing a game that's yours.
-                      </p>
                     </div>
 
                     {settings.status === "error" && (
@@ -369,15 +365,6 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
                         testId="step-first-game"
                         expanded
                       >
-                        <p className="text-sm text-muted-foreground">
-                          Answer a few quick questions about your idea. Your AI then builds a first
-                          version you can play.
-                        </p>
-                        {!(aiReady && godotReady) && (
-                          <p className="text-xs text-muted-foreground">
-                            Finish steps 1 and 2 first — your AI builds the game, and Godot runs it.
-                          </p>
-                        )}
                         <Button
                           type="button"
                           className="self-start"
@@ -437,9 +424,6 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
         <DialogContent className="grid-cols-[minmax(0,1fr)]">
           <DialogHeader>
             <DialogTitle>Empty project</DialogTitle>
-            <DialogDescription>
-              Creates a new folder with a blank Godot game, ready to open in Studio.
-            </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
@@ -735,7 +719,7 @@ function HomeLayout({
         )}
         {projects.length === 0 ? (
           <p className="p-10 text-center text-sm text-muted-foreground">
-            No games here yet — make a new one, or open one you already have.
+            No games yet.
           </p>
         ) : (
           <ScrollArea className="min-h-0 flex-1">

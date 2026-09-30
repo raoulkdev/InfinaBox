@@ -96,9 +96,6 @@ export function GenerateTab({ projectPath, onAccepted }: GenerateTabProps) {
 
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-medium">Your accounts</h3>
-        <p className="text-xs text-muted-foreground">
-          Generate pictures and sounds with accounts you already own. Nothing is sent anywhere until you press Generate.
-        </p>
         <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {providers.map((p) => (
             <li key={p.id} className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3" data-testid={`gen-provider-${p.id}`}>
@@ -116,7 +113,6 @@ export function GenerateTab({ projectPath, onAccepted }: GenerateTabProps) {
                   {p.connected ? "Connected" : "Not connected"}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground">{p.blurb}</p>
               <p className="text-xs">Makes: {p.kinds.map((k) => GEN_KIND_LABEL[k].toLowerCase()).join(", ")}</p>
               <div className="mt-auto">
                 {p.connected ? (
@@ -163,7 +159,6 @@ export function GenerateTab({ projectPath, onAccepted }: GenerateTabProps) {
 
         {styleGuide && (
           <div className="flex flex-col gap-1">
-            <Note tone="info">Your Style Guide card will be added to the prompt.</Note>
             <Collapsible>
               <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
                 <ChevronRight className="size-3.5 transition-transform group-data-[state=open]:rotate-90" />

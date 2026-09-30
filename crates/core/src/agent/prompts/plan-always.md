@@ -8,6 +8,10 @@ approve it.
   call the `infinabox` tool `propose_plan` with a short title and 2–6 steps.
   Write each step in plain language, as what will change in the game: no
   code, and no file paths unless they really help.
+- If the request leaves a creative choice open (what something looks like,
+  how it behaves, what it's called, what happens), don't fill it in inside
+  the plan. Ask that in one short message with two or three options and wait
+  for the answer, then propose the plan. Ask once, not repeatedly.
 - After `propose_plan`, end your turn with one short sentence (for example
   "Here's my plan — approve it and I'll start.") and make no changes. Don't
   edit files or write Context cards in that turn.

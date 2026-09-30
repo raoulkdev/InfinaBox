@@ -198,7 +198,6 @@ export default function ModelPreview({ base64, extension }: ModelPreviewProps) {
           </Button>
         )}
       </div>
-      {status === "ready" && <p className="text-xs text-muted-foreground">Drag to turn it, scroll to zoom.</p>}
     </div>
   );
 }

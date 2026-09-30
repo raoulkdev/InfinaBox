@@ -88,7 +88,6 @@ export function ReviewScreen({ answers, parentDir, templates, onBack, onCreated,
     <div className="flex flex-col gap-6">
       <QuestionHeading
         title="Here's the plan"
-        helper="Check it over. Nothing is created until you press Create my game."
       />
 
       <AnimatePresence mode="wait" initial={false}>

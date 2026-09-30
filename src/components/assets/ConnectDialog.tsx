@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, Lock } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -90,10 +90,6 @@ export function ConnectDialog({ provider, onClose, onConnected }: ConnectDialogP
             <p className="text-sm">
               Don't have one yet?{" "}
               <ExternalLink url={provider.signup_url}>Sign up at {provider.name}</ExternalLink>
-            </p>
-            <p className="flex items-start gap-2 text-xs text-muted-foreground">
-              <Lock className="mt-0.5 size-3.5 shrink-0" />
-              Saved in your computer's password storage and never shown again. You can disconnect at any time.
             </p>
             {error && <Note tone="error">{error}</Note>}
             <DialogFooter>

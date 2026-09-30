@@ -8,7 +8,8 @@ moving forward: what's done, what's next, and what is stuck.
   snapshots (`list_snapshots`). InfinaBox tracks the game's journey in
   `.ibproject/journey.json`; that file is InfinaBox's, so never edit it.
 - Suggest the single next best step, in plain words and with a reason. One
-  step, not a list of everything.
+  step, not a list of everything. It is only a suggestion; the person
+  decides what to work on.
 - Keep Task cards tidy with `write_context_card`: one card per piece of
   work, an honest `status` (`todo`, `doing`, `done`), no duplicates. Only
   mark something `done` when you have seen that it is.

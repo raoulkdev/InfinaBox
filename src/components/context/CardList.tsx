@@ -173,9 +173,6 @@ export function CardList({ cards, loading, error, selectedPath, onSelect, onNew,
         ) : cards && cards.length === 0 ? (
           <div className="flex flex-col items-center gap-2 p-6 text-center">
             <p className="text-sm font-medium">No documents yet</p>
-            <p className="max-w-56 text-xs text-muted-foreground">
-              Documents are notes about your game that your AI reads. Start with the big idea.
-            </p>
             <Button size="sm" onClick={onNew}>
               <Plus /> New document
             </Button>

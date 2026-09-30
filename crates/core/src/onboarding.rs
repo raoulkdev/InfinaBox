@@ -448,13 +448,16 @@ fn first_build_message(
          “{template}” template, which already works: {features}.\n\n\
          Start by reading the Context cards in `.ibproject/context/`: {cards} (written from \
          the person's answers when they created the game){mechanics}.\n\n\
-         Then customize the template toward the concept: the player, the tuning of the core \
-         mechanic so it matches how the game should feel, the colors so they match the look, \
-         and the in-game title. Keep it to one playable level.\n\n\
+         Then make only the changes their answers call for: the in-game title, and whatever \
+         the idea says about the player and how the game plays. Don't invent characters, \
+         story, names, art style or new mechanics they didn't mention; leave everything else \
+         as the template has it. Keep it to the one playable level the template has.\n\n\
          Run the game and fix any errors until it runs cleanly. Then update the cards: the \
-         status of `{task}`, and which scenes and scripts implement what.\n\n\
+         status of `{task}`, and which scenes and scripts implement what. Keep what the \
+         person wrote in the cards.\n\n\
          Finish with a short, friendly explanation of what you built and how to play \
-         ({controls}).",
+         ({controls}), and list what is still the template's placeholder so they can decide \
+         what to change.",
         name = answers.name,
         template = template.name,
         features = features.join("; "),
@@ -471,11 +474,11 @@ fn first_build_steps(answers: &InterviewAnswers, template: &TemplateInfo) -> Vec
     vec![
         "Read your game's notes: the concept, the style guide and the first goal".to_string(),
         format!(
-            "Turn “{}” into {}: the player, the colors and the title",
+            "Set up “{}” as {}: its title, and only what your idea says",
             template.name, answers.name
         ),
         if feel.is_empty() {
-            "Tune how it plays to match your idea".to_string()
+            "Leave everything else as the template has it, for you to change".to_string()
         } else {
             format!(
                 "Tune how it plays so it feels {}",
@@ -483,7 +486,7 @@ fn first_build_steps(answers: &InterviewAnswers, template: &TemplateInfo) -> Vec
             )
         },
         "Keep it to one level, play it, and fix anything that breaks".to_string(),
-        "Tell you what I built and how to play".to_string(),
+        "Tell you what I built, how to play, and what's still a placeholder".to_string(),
     ]
 }
 

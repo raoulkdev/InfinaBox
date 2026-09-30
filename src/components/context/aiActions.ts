@@ -25,7 +25,7 @@ export const DOC_ACTIONS: DocAction[] = [
     hint: "Fill in the empty parts, using what the game already says.",
     ask: (path) => ({
       role: "designer",
-      message: `Please write a first draft of the document \`${path}\`. Read the Concept card and any related documents first (list_context_cards, read_context_card), keep anything I've already written, fill in the empty parts, then save it with write_context_card. Tell me what you assumed.`,
+      message: `Please write a first draft of the document \`${path}\`. Read the Concept card and any related documents first (list_context_cards, read_context_card), keep anything I've already written, and fill in the empty parts using only what the game and my other documents already say. Where something creative is still open, don't invent it: leave a line starting \"TODO (your call):\" with two or three options. Then save it with write_context_card.`,
     }),
   },
   {
@@ -77,6 +77,6 @@ export function questionAbout(path: string, question: string): AiAsk {
 export function fillGapsAsk(missing: string[]): AiAsk {
   return {
     role: "designer",
-    message: `My game's documents are missing: ${missing.join(", ")}. Read what's there (list_context_cards, read_context_card), then write those documents with write_context_card, based on the Concept and the game as it is now. Keep each short, and tell me what you assumed.`,
+    message: `My game's documents are missing: ${missing.join(", ")}. Read what's there (list_context_cards, read_context_card), then write those documents with write_context_card using only what the Concept and the game already say. Where something creative is still open, leave a line starting \"TODO (your call):\" with two or three options instead of inventing it. Keep each short.`,
   };
 }

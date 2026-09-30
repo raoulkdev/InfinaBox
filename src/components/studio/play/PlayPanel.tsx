@@ -365,8 +365,7 @@ export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
           )}
           {gameState === "crashed" && (
             <p className="shrink-0 border-t border-border px-3 py-2 text-sm text-muted-foreground">
-              The game stopped unexpectedly. The messages below show what it printed before it
-              stopped.
+              The game stopped unexpectedly.
             </p>
           )}
           <GameErrorList entries={errors} onAskAiToFix={onAskAiToFix} />

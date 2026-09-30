@@ -20,7 +20,6 @@ export function CodeSection({ projectPath }: CodeSectionProps) {
       >
         <div data-tauri-drag-region className="flex min-w-0 flex-1 flex-col">
           <span className="text-xs font-medium tracking-wide text-muted-foreground">Code</span>
-          <p className="truncate text-sm">Your game's files and a terminal, for when you want to look under the hood.</p>
         </div>
       </div>
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">

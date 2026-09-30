@@ -133,10 +133,6 @@ export function ProjectTab({
             <FolderOpen className="size-5 text-muted-foreground" />
           </div>
           <h3 className="text-base font-medium">No assets in this game yet</h3>
-          <p className="max-w-sm text-sm text-muted-foreground">
-            Pictures, sounds, 3D models and fonts show up here. Import a file you have, find free ones in the Library, or
-            make new ones with Generate.
-          </p>
           <div className="flex flex-wrap justify-center gap-2">
             <Button onClick={() => void pickFile()}>
               <Upload />

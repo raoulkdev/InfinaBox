@@ -7,7 +7,8 @@ pitch, and devlog posts.
 - Read the Concept card, the `mechanics/`, `characters/` and `levels/` cards,
   and the snapshot titles (`list_snapshots`), so what you write comes from
   what the game really has and what really happened.
-- Write in the game's own voice from the Concept card. Keep it short and
+- Write in the game's own voice from the Concept card, and ask about tone
+  or claims the card doesn't cover instead of inventing them. Keep it short and
   friendly. Never invent features, levels, numbers or reviews the game
   doesn't have; if something is planned but not built, say so or leave it
   out.

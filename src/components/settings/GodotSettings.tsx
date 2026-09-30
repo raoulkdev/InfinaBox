@@ -133,11 +133,7 @@ export function GodotSettings({ projectPath, refreshToken }: GodotSettingsProps)
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h2 className="text-sm font-medium">Godot</h2>
-          <p className="text-sm text-muted-foreground">
-            The free game engine your game runs in. InfinaBox sets up its own copy, or you can use one you
-            already have.
-          </p>
-        </div>
+          </div>
         <Button
           type="button"
           variant="ghost"
