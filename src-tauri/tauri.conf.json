@@ -13,10 +13,11 @@
     "windows": [
       {
         "title": "InfinaBox",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 1024,
-        "minHeight": 640,
+        "width": 1000,
+        "height": 680,
+        "minWidth": 900,
+        "minHeight": 600,
+        "center": true,
         "dragDropEnabled": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,

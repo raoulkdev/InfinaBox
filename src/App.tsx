@@ -1,3 +1,4 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ContextMenuHost, type MenuEntry } from "@/lib/context-menu";
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -79,6 +80,8 @@ function App() {
   // — since that's the whole point of picking one from there.
   function handleOpenProject(path: string) {
     recordProjectOpened(path);
+    // Home is a small window; a game gets the whole screen.
+    void getCurrentWindow().maximize().catch(() => {});
     setProjectPath(path);
     // Opening any project drops a first build Studio hasn't started yet —
     // it belongs to the moment its game was created, not to a later visit.

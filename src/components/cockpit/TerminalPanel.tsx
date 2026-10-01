@@ -142,7 +142,7 @@ export function TerminalPanel({ projectPath }: TerminalPanelProps) {
       className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card"
     >
       <div data-tauri-drag-region className="flex h-9 shrink-0 items-center px-3">
-        <span className="text-xs font-medium tracking-wide text-muted-foreground">Agent</span>
+        <span className="text-xs font-medium tracking-wide text-muted-foreground">Terminal</span>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden bg-card p-2">
         <div ref={hostRef} className="h-full w-full" />

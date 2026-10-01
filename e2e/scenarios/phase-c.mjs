@@ -292,6 +292,13 @@ export async function phaseC(run, app, config, fakes) {
     await waitVisible(driver, tid("journey-panel"));
   }, { needs: ["c1"] });
 
+  await run.step("c5b", "Playtest & Launch fills the page", async () => {
+    await clickWhenEnabled(driver, tid("nav-launch"));
+    const panel = await waitVisible(driver, tid("journey-panel"));
+    const ratio = await driver.executeScript("const p = arguments[0]; return p.getBoundingClientRect().width / p.parentElement.getBoundingClientRect().width", panel);
+    if (ratio < 0.95) throw new Error(`the journey fills ${Math.round(ratio * 100)}% of the page`);
+  }, { needs: ["c5"] });
+
   await run.step("c6", "Home is a list of games with an inspector; Settings has its own pages", async () => {
     // An empty project doesn't end the first run; the list layout is what Home shows after it.
     const current = await call("app_settings_get", {});
@@ -584,6 +591,13 @@ export async function phaseC(run, app, config, fakes) {
     const canvas = await waitVisible(driver, tid("canvas"));
     const notesNow = async () => (await driver.findElements(tid("block-note"))).length;
 
+    // The block toolbar expands to show names beside the icons.
+    await clickWhenEnabled(driver, tid("toolbar-toggle"));
+    const bar = await driver.findElement(tid("canvas-toolbar"));
+    if (!(await driver.executeScript("return arguments[0].textContent", bar)).includes("To-do list")) throw new Error("the expanded toolbar shows no names");
+    await run.shot("toolbar-expanded");
+    await clickWhenEnabled(driver, tid("toolbar-toggle"));
+
     // Empty canvas: add a block where you clicked.
     const before = await notesNow();
     await ctxClick(canvas, 560, 40);
@@ -706,6 +720,13 @@ export async function phaseC(run, app, config, fakes) {
     await clickWhenEnabled(driver, tid("nav-code"));
     await new Promise((r) => setTimeout(r, 2500)); // the terminal starts
     await run.shot("code-page");
+    const layout = await driver.executeScript(`
+      const handle = document.querySelector('[data-testid="code-split-handle"]').getBoundingClientRect();
+      const term = document.querySelector('[data-testid="code-section"] .xterm').getBoundingClientRect();
+      const section = document.querySelector('[data-testid="code-section"]');
+      return { handleY: handle.top, termTop: term.top, text: section.innerText };`);
+    if (!(layout.termTop > layout.handleY)) throw new Error("the terminal isn't under the file browser");
+    if (!layout.text.includes("Terminal") || layout.text.includes("Agent")) throw new Error(`terminal title: ${layout.text.slice(0, 200)}`);
     await clickWhenEnabled(driver, tid("nav-settings"));
     await waitVisible(driver, tid("settings-section"));
     if ((await driver.findElements(tid("home-sidebar"))).length > 0) throw new Error("Settings from a game shows the Home sidebar");

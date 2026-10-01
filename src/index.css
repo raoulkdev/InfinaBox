@@ -189,3 +189,24 @@
 .xterm .xterm-viewport {
   background-color: var(--card) !important;
 }
+/* No decorative motion: nothing fades, slides or eases. Spinners stay, since
+ * they say something is happening. */
+*,
+*::before,
+*::after {
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+*:not(.animate-spin),
+*:not(.animate-spin)::before,
+*:not(.animate-spin)::after {
+  animation: none !important;
+}
+
+/* While a panel or block is being dragged or resized, nothing can be selected. */
+html.is-dragging,
+html.is-dragging * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  cursor: grabbing;
+}

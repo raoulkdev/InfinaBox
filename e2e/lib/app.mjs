@@ -88,6 +88,16 @@ export async function startApp({ binary, tauriDriver, nativeDriver, env, logDir,
     throw new Error(`Couldn't open a WebDriver session on the app (see ${logFile}): ${err.message}`);
   }
 
+  // The app opens small on Home (and maximizes when a game opens, which needs
+  // a window manager). Tests need room, so enlarge it once the size is noted.
+  try {
+    const rect = await driver.manage().window().getRect();
+    console.log(`app window opened at ${rect.width}x${rect.height}`);
+    await driver.manage().window().setRect({ width: 1360, height: 880 });
+  } catch {
+    // Sizing is best effort.
+  }
+
   async function stop() {
     try {
       await driver.quit();

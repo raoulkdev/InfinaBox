@@ -134,7 +134,7 @@ export function JourneyPanel({ projectPath, onAskProducer }: JourneyPanelProps) 
       onContextMenu={(e) => menu(e, [{ label: "Refresh", disabled: refreshing, onSelect: () => void load(false) }])}
       data-testid="journey-panel"
       aria-label="Your game's journey"
-      className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-4"
+      className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto rounded-xl border border-border bg-card p-4"
     >
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-medium tracking-wide text-muted-foreground">Your game's journey</h2>
