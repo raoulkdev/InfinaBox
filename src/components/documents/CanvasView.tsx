@@ -109,8 +109,11 @@ export function CanvasView(props: CanvasViewProps) {
   const [fileDrag, setFileDrag] = useState(false);
 
   const drag = useRef<Drag | null>(null);
+  // The drag handlers are created when a drag starts, so what they must read
+  // later (not just write) lives in refs.
+  const deltaRef = useRef<{ dx: number; dy: number; ids: Set<string> } | null>(null);
+  const dropRef = useRef<DropTarget | null>(null);
   const needsFit = useRef(!saved);
-  const cascade = useRef(0);
 
   const byId = useMemo(() => new Map(board.blocks.map((b) => [b.id, b])), [board.blocks]);
   const cardMap = useMemo(() => new Map(cards.map((c) => [c.path, c])), [cards]);
@@ -233,8 +236,14 @@ export function CanvasView(props: CanvasViewProps) {
       if (at) return at;
       const wrap = wrapRef.current!.getBoundingClientRect();
       const v = L.current.view;
-      cascade.current = (cascade.current + 1) % 8;
-      return { x: (wrap.width / 2 - v.x) / v.zoom + cascade.current * 24 - 100, y: (wrap.height / 2 - v.y) / v.zoom + cascade.current * 24 - 60 };
+      const p = { x: (wrap.width / 2 - v.x) / v.zoom - 100, y: (wrap.height / 2 - v.y) / v.zoom - 60 };
+      // Slide down and right until it isn't stacked on another block's corner.
+      const taken = Object.values(L.current.rects);
+      for (let i = 0; i < 40 && taken.some((r) => Math.abs(r.x - p.x) < 24 && Math.abs(r.y - p.y) < 24); i += 1) {
+        p.x += 32;
+        p.y += 32;
+      }
+      return p;
     },
     [],
   );
@@ -581,7 +590,9 @@ export function CanvasView(props: CanvasViewProps) {
         }
       }
       setGuides(found);
-      setDelta({ dx, dy, ids: new Set(d.ids) });
+      deltaRef.current = { dx, dy, ids: new Set(d.ids) };
+      dropRef.current = target;
+      setDelta(deltaRef.current);
       setDropTarget(target);
     } else if (d.kind === "resize") {
       const w0 = d.rect.w;
@@ -608,8 +619,10 @@ export function CanvasView(props: CanvasViewProps) {
     setMarquee(null);
     if (!d) return;
     if (d.kind === "move") {
-      const dl = delta;
-      const target = dropTarget;
+      const dl = deltaRef.current;
+      const target = dropRef.current;
+      deltaRef.current = null;
+      dropRef.current = null;
       setDelta(null);
       setDropTarget(null);
       if (!d.moved) {

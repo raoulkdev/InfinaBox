@@ -89,14 +89,20 @@ export function DocumentsView({ projectPath, cards, cardsError, refreshTick, ope
 
   const locateDoc = useCallback(
     (path: string, openEditor = true) => {
+      let found = false;
       for (const b of Object.values(boards)) {
         const blk = b.blocks.find((x) => x.type === "doc" && x.ref === path);
         if (blk) {
           navigate(b.id, blk.id);
+          found = true;
           break;
         }
       }
-      if (openEditor) openDoc(path);
+      // A document on no board can only be opened.
+      if (openEditor || !found) {
+        setMode("canvas");
+        openDoc(path);
+      }
     },
     [boards, navigate, openDoc],
   );
@@ -168,8 +174,9 @@ export function DocumentsView({ projectPath, cards, cardsError, refreshTick, ope
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !document.querySelector('[role="dialog"],[role="menu"]')) setEditorPath(null);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture phase: a menu or dialog still open at this keypress owns the Escape.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [editorPath]);
 
   const placed = useMemo(() => {

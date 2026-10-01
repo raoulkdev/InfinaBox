@@ -589,7 +589,9 @@ fn resolve_link(from: &str, raw: &str, existing: &HashSet<String>) -> Option<Str
 /// `[[Page|label]]`, `[[Page#heading]]`), in order, without repeats.
 pub fn wiki_targets(body: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    let mut rest = body;
+    // The Markdown editor writes brackets as `\[`; they still mean a link.
+    let unescaped = body.replace("\\[", "[").replace("\\]", "]");
+    let mut rest = unescaped.as_str();
     while let Some(start) = rest.find("[[") {
         let after = &rest[start + 2..];
         let Some(end) = after.find("]]") else { break };
@@ -1344,6 +1346,7 @@ mod tests {
         write_card(p, "world.md", &CardMeta { title: Some("The World".into()), ..Default::default() }, "Islands. Needs a [[Hero|the hero]].").unwrap();
         write_card(p, "cast/hero.md", &CardMeta { title: Some("Hero".into()), ..Default::default() }, "See [[the world]], [[cast/hero]] and [[Missing]].").unwrap();
         assert_eq!(wiki_targets("a [[X|y]] [[X#h]] [[ ]] [[Z]]"), ["X", "Z"]);
+        assert_eq!(wiki_targets("see \\[\\[Escaped\\]\\]"), ["Escaped"]);
         let g = graph(p).unwrap();
         let has = |a: &str, b: &str| g.edges.iter().any(|e| e.from == a && e.to == b && !e.broken);
         assert!(has("world.md", "cast/hero.md"), "{:?}", g.edges);

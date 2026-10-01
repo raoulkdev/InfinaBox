@@ -335,9 +335,10 @@ export async function phaseC(run, app, config, fakes) {
         }
       }, { timeoutMs: 8000, what });
     const centre = async (el) => driver.executeScript("const r = arguments[0].getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2];", el);
-    const drag = async (el, to) => {
+    const drag = async (el, to, [ox, oy] = [0, 0]) => {
       // `to` is another element (drop on it) or a [dx, dy] offset.
-      const [x1, y1] = await centre(el);
+      const [cx1, cy1] = await centre(el);
+      const [x1, y1] = [cx1 + ox, cy1 + oy];
       let dx;
       let dy;
       if (Array.isArray(to)) [dx, dy] = to;
@@ -347,7 +348,7 @@ export async function phaseC(run, app, config, fakes) {
         dy = y2 - y1;
       }
       const a = driver.actions({ async: true });
-      await a.move({ origin: el }).press().move({ origin: "pointer", x: Math.round(dx / 3), y: Math.round(dy / 3) }).move({ origin: "pointer", x: Math.round(dx / 3), y: Math.round(dy / 3) }).move({ origin: "pointer", x: dx - 2 * Math.round(dx / 3), y: dy - 2 * Math.round(dy / 3) }).release().perform();
+      await a.move({ origin: el, x: ox, y: oy }).press().move({ origin: "pointer", x: Math.round(dx / 3), y: Math.round(dy / 3) }).move({ origin: "pointer", x: Math.round(dx / 3), y: Math.round(dy / 3) }).move({ origin: "pointer", x: dx - 2 * Math.round(dx / 3), y: dy - 2 * Math.round(dy / 3) }).release().perform();
     };
     const clickEmpty = async () => {
       const canvas = await driver.findElement(tid("canvas"));
@@ -411,6 +412,7 @@ export async function phaseC(run, app, config, fakes) {
     await clickEmpty();
     let notes = await blocks("note");
     if (notes.length !== 2) throw new Error(`expected 2 notes, found ${notes.length}`);
+    await saved((b) => b.blocks.filter((x) => x.type === "note").length === 2 && JSON.stringify(b).includes("Second note"), "both notes to be saved");
     const before = readBoard().blocks.filter((b) => b.type === "note").map((b) => b.x);
     await drag(notes[1], [260, 90]);
     await saved((b) => b.blocks.filter((x) => x.type === "note")[1].x !== before[1], "the dragged note's position to be saved");
@@ -423,6 +425,7 @@ export async function phaseC(run, app, config, fakes) {
     await saved((b) => b.blocks.some((x) => x.type === "note" && x.color === "pink"), "the note colour");
 
     // Align two blocks (shift-click to select both).
+    await clickEmpty();
     notes = await blocks("note");
     await driver.actions().keyDown(Key.SHIFT).click(notes[0]).click(notes[1]).keyUp(Key.SHIFT).perform();
     await clickWhenEnabled(driver, tid("align-left"));
@@ -475,7 +478,7 @@ export async function phaseC(run, app, config, fakes) {
     notes = await blocks("note");
     const free = readBoard().blocks.filter((x) => x.type === "note" && !x.col)[0];
     const target = await driver.findElement(By.css(`[data-block-id="${free.id}"]`));
-    await drag(target, (await blocks("board"))[0]);
+    await drag(target, (await blocks("board"))[0], [-90, -28]);
     await saved((b) => !b.blocks.some((x) => x.id === free.id), "the note to leave the top board");
     if (!readBoard(childId).blocks.some((x) => x.id === free.id)) throw new Error("the note didn't arrive in the nested board");
     const arrowsLeft = readBoard().blocks.filter((x) => x.type === "arrow").length;
@@ -483,14 +486,12 @@ export async function phaseC(run, app, config, fakes) {
 
     // Undo puts it back; redo moves it again.
     await clickWhenEnabled(driver, tid("canvas-undo"));
-    await saved((b) => b.blocks.some((x) => x.id === free.id), "undo to put the note back");
+    await saved((b) => b.blocks.some((x) => x.id === free.id) && b.blocks.some((x) => x.type === "arrow"), "undo to put the note and its arrow back");
     if (readBoard(childId).blocks.some((x) => x.id === free.id)) throw new Error("undo left the note in both boards");
-    await clickWhenEnabled(driver, tid("canvas-undo"));
-    await saved((b) => b.blocks.some((x) => x.type === "arrow"), "a second undo to bring the arrow back");
     await clickWhenEnabled(driver, tid("canvas-redo"));
-    await saved((b) => !b.blocks.some((x) => x.type === "arrow"), "redo to remove the arrow again");
+    await saved((b) => !b.blocks.some((x) => x.id === free.id) && !b.blocks.some((x) => x.type === "arrow"), "redo to move the note away again");
     await clickWhenEnabled(driver, tid("canvas-undo"));
-    await saved((b) => b.blocks.some((x) => x.type === "arrow"), "undo once more");
+    await saved((b) => b.blocks.some((x) => x.id === free.id) && b.blocks.some((x) => x.type === "arrow"), "undo once more");
 
     // A picture dropped (through the file picker's input) and a file.
     const png = makePng(40, 20, [200, 40, 90]).toString("base64");
@@ -547,11 +548,20 @@ export async function phaseC(run, app, config, fakes) {
     await new Promise((r) => setTimeout(r, 900));
     await run.shot("graph-view");
     await clickWhenEnabled(driver, By.css(".react-flow__node"));
+    // A node whose document is on no board opens the document; any other lands on its board.
+    await waitUntil(async () => (await driver.findElements(tid("doc-editor"))).length > 0 || (await driver.findElements(tid("canvas"))).length > 0, { what: "the clicked node to open" });
+    if ((await driver.findElements(tid("doc-editor"))).length > 0) await clickWhenEnabled(driver, tid("doc-close"));
     await waitVisible(driver, tid("canvas"));
 
     // Deleting a document block keeps the document.
     const docs = await blocks("doc");
-    await docs[docs.length - 1].click();
+    // Blocks are stacked at the middle by now, so press the document block itself.
+    await driver.executeScript(
+      `const r = arguments[0].getBoundingClientRect();
+       arguments[0].dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, clientX: r.left + 10, clientY: r.top + 10 }));
+       window.dispatchEvent(new PointerEvent("pointerup", { button: 0, clientX: r.left + 10, clientY: r.top + 10 }));`,
+      docs[docs.length - 1],
+    );
     await driver.actions().sendKeys(Key.DELETE).perform();
     await saved((b) => b.blocks.filter((x) => x.type === "doc").length < docBlock + root0.blocks.filter((x) => x.type === "doc").length - 0, "the document block to be removed");
     if (!fs.existsSync(ctx("untitled.md")) && !fs.existsSync(ctx("the-lighthouse.md"))) throw new Error("deleting a block deleted its document");
