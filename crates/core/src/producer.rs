@@ -469,7 +469,8 @@ fn concept_is_written(body: &str) -> bool {
                 break;
             }
             in_pitch = heading.eq_ignore_ascii_case("pitch");
-        } else if in_pitch {
+        } else if in_pitch && !line.trim_start().starts_with('>') {
+            // Quoted lines are notes ("Not written yet"), not the pitch.
             text.push_str(line);
             text.push('\n');
         }
@@ -538,7 +539,14 @@ impl Facts {
                 Some(_) => (false, "The style guide card is empty.".into()),
             },
             "idea.first_milestone" => {
-                count_cards(self.of_type("task").count(), "task card", "task cards")
+                // The planning tasks a new game starts with don't count until
+                // they are started: a milestone is planned when there are
+                // tasks the developer has made or worked on.
+                let planned = self
+                    .of_type("task")
+                    .filter(|c| !(c.tags.iter().any(|t| t == "planning") && c.status == "todo"))
+                    .count();
+                count_cards(planned, "task card", "task cards")
             }
             "prototype.playable" => match &self.main_scene {
                 (Some(scene), true) => (true, format!("The game starts from {scene}.")),
@@ -854,30 +862,26 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let answers = onboarding::InterviewAnswers {
             idea: "A frog that collects moonlight".into(),
-            genre: "blank-2d".into(),
+            genre: "2d".into(),
             name: "Frog".into(),
-            feel: vec!["cozy".into()],
-            look: "soft pixel art".into(),
             ..Default::default()
         };
-        let made =
-            onboarding::create_from_interview(tmp.path(), &answers, "blank-2d", "codex").unwrap();
+        let made = onboarding::create_from_interview(tmp.path(), &answers).unwrap();
         let j = compute(Path::new(&made.path)).unwrap();
+        // Their pitch counts. Nothing else was decided, and the journey says so.
         assert!(criterion(&j, "idea.concept_written").done);
-        assert!(criterion(&j, "idea.style_guide").done);
-        assert!(criterion(&j, "idea.first_milestone").done);
-        assert_eq!(j.current, Stage::Prototype);
-        assert_eq!(j.next_step.unwrap().criterion_id, "prototype.runs_clean");
+        assert!(!criterion(&j, "idea.style_guide").done);
+        assert!(!criterion(&j, "idea.first_milestone").done);
+        assert_eq!(j.current, Stage::Idea);
 
         // The same interview without an idea leaves no pitch to count.
         let tmp2 = tempfile::tempdir().unwrap();
         let bare = onboarding::InterviewAnswers {
-            genre: "blank-2d".into(),
+            genre: "3d".into(),
             name: "Bare".into(),
             ..Default::default()
         };
-        let made =
-            onboarding::create_from_interview(tmp2.path(), &bare, "blank-2d", "codex").unwrap();
+        let made = onboarding::create_from_interview(tmp2.path(), &bare).unwrap();
         let j = compute(Path::new(&made.path)).unwrap();
         assert!(!criterion(&j, "idea.concept_written").done);
         assert!(!criterion(&j, "idea.style_guide").done);
@@ -885,6 +889,7 @@ mod tests {
 
     #[test]
     fn concept_detection_details() {
+        assert!(!concept_is_written("# G\n\n## Pitch\n\n> Not written yet: the game.\n"));
         assert!(!concept_is_written(
             "# G\n\n## Pitch\n\nWhat is the game, in one or two sentences?\n"
         ));

@@ -6,21 +6,19 @@ import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { fadeTransition, springTransition, widthTransition } from "@/lib/motion";
 import { pickProjectFolder } from "@/lib/project-picker";
-import { onboardingTemplates } from "@/lib/studio-api";
 import type { CreatedProject, InterviewAnswers } from "@/lib/studio-types";
-import { EMPTY_ANSWERS, OTHER_GENRE, projectNameProblem, suggestProjectName } from "./answers";
+import { EMPTY_ANSWERS, projectNameProblem, suggestProjectName } from "./answers";
 import {
   GenreScreen,
   IdeaScreen,
   NameScreen,
   ReferencesScreen,
+  TechnicalScreen,
   type ParentDirState,
-  type TemplatesState,
 } from "./QuestionScreens";
 import { ReviewScreen } from "./ReviewScreen";
 
-// The first-run interview (spec §6.2, Phase B plan Task FO): four short
-// questions, one per screen, then a review of what `onboarding_preview`
+// The new-game interview (spec §6.2): five short questions, one per screen, then a review of what `onboarding_preview`
 // says will be created, then "Create my game". The questions are a fixed
 // flow in the UI rather than an AI conversation — fast, free, and it works
 // before any AI turn has succeeded. All answers live here, so Back (or a
@@ -31,14 +29,11 @@ export interface OnboardingFlowProps {
   onCancel: () => void;
 }
 
-const QUESTION_COUNT = 4;
+const QUESTION_COUNT = 5;
+const IDEA_STEP = 0;
 const REFERENCES_STEP = 2;
-const NAME_STEP = 3;
+const NAME_STEP = 4;
 const REVIEW_STEP = QUESTION_COUNT;
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** The folder new games go in until the person picks another: their
  * Documents folder (home as a fallback), resolved by Tauri for this OS.
@@ -55,19 +50,10 @@ async function defaultParentDir(): Promise<string | null> {
   return null;
 }
 
-/** What's sent to the backend: trimmed, with `genre_other` only for
- * "Something else" and null when left empty. The name isn't trimmed —
+/** What's sent to the backend: trimmed. The name isn't trimmed —
  * leading/trailing spaces are a validation error, not silently fixed. */
 function normalize(a: InterviewAnswers): InterviewAnswers {
-  const other = a.genre === OTHER_GENRE ? (a.genre_other ?? "").trim() : "";
-  return {
-    ...a,
-    idea: a.idea.trim(),
-    genre_other: other || null,
-    feel: a.feel.map((f) => f.trim()).filter(Boolean),
-    look: a.look.trim(),
-    references: a.references.trim(),
-  };
+  return { ...a, idea: a.idea.trim(), references: a.references.trim() };
 }
 
 export function OnboardingFlow({ onCreated, onCancel }: OnboardingFlowProps) {
@@ -78,19 +64,10 @@ export function OnboardingFlow({ onCreated, onCancel }: OnboardingFlowProps) {
   // Once the person types a name, stop replacing it with a suggestion
   // from their (possibly edited) idea.
   const [nameEdited, setNameEdited] = useState(false);
-  const [templates, setTemplates] = useState<TemplatesState>({ status: "loading" });
   const [parentDir, setParentDir] = useState<ParentDirState>({ status: "loading" });
   const [busy, setBusy] = useState(false);
 
-  const loadTemplates = useCallback(() => {
-    setTemplates({ status: "loading" });
-    onboardingTemplates()
-      .then((list) => setTemplates({ status: "ready", templates: list }))
-      .catch((err) => setTemplates({ status: "error", error: errorText(err) }));
-  }, []);
-
   useEffect(() => {
-    loadTemplates();
     let cancelled = false;
     void defaultParentDir().then((path) => {
       // Never overwrite a folder the person already chose.
@@ -99,7 +76,7 @@ export function OnboardingFlow({ onCreated, onCancel }: OnboardingFlowProps) {
     return () => {
       cancelled = true;
     };
-  }, [loadTemplates]);
+  }, []);
 
   const update = useCallback((patch: Partial<InterviewAnswers>) => {
     setAnswers((prev) => ({ ...prev, ...patch }));
@@ -114,9 +91,10 @@ export function OnboardingFlow({ onCreated, onCancel }: OnboardingFlowProps) {
   const parent = parentDir.status === "ready" ? parentDir.path : null;
 
   const canContinue = [
-    answers.idea.trim() !== "",
+    true, // The idea is optional: some games start from a feeling, not a sentence.
     answers.genre !== "",
     true, // "Any games it's like?" is optional.
+    true, // A technical level is always chosen (balanced to begin with).
     !nameProblem && parent !== null,
   ][step] ?? false;
 
@@ -167,6 +145,7 @@ export function OnboardingFlow({ onCreated, onCancel }: OnboardingFlowProps) {
     <IdeaScreen answers={answers} update={update} />,
     <GenreScreen answers={answers} update={update} />,
     <ReferencesScreen answers={answers} update={update} />,
+    <TechnicalScreen answers={answers} update={update} />,
     <NameScreen
       answers={answers}
       update={update}
@@ -179,7 +158,11 @@ export function OnboardingFlow({ onCreated, onCancel }: OnboardingFlowProps) {
 
   const isReview = step === REVIEW_STEP;
   const nextLabel =
-    step === REFERENCES_STEP && answers.references.trim() === "" ? "Skip" : step === NAME_STEP ? "Review the plan" : "Next";
+    (step === REFERENCES_STEP && answers.references.trim() === "") || (step === IDEA_STEP && answers.idea.trim() === "")
+      ? "Skip"
+      : step === NAME_STEP
+        ? "Review the plan"
+        : "Next";
 
   return (
     <div ref={rootRef} data-testid="onboarding-flow" className="flex h-full min-h-0 w-full flex-col">
@@ -226,7 +209,6 @@ export function OnboardingFlow({ onCreated, onCancel }: OnboardingFlowProps) {
                   <ReviewScreen
                     answers={normalized}
                     parentDir={parent}
-                    templates={templates}
                     onBack={() => goTo(NAME_STEP)}
                     onCreated={onCreated}
                     onBusyChange={setBusy}

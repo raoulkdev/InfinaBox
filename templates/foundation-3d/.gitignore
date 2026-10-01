@@ -1,0 +1,9 @@
+# Godot's import cache and editor state: regenerated automatically, never
+# worth committing.
+.godot/
+
+# InfinaBox: when the game last ran without errors (local to this computer).
+.ibproject/journey.json
+
+# InfinaBox: files attached to chat messages (kept on this computer only).
+.ibproject/chat/attachments/

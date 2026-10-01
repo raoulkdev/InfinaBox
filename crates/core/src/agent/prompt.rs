@@ -14,7 +14,9 @@
 //! | an automatic error fix | `origin-auto-fix.md` (never plans) |
 //! | the onboarding's first build | `origin-first-build.md` (never plans) |
 //!
-//! then, for a specialist role (anything but the Director), that role's
+//! then the section for how technical the person wants things
+//! (`level-guided.md`, `level-balanced.md` or `level-technical.md`), then,
+//! for a specialist role (anything but the Director), that role's
 //! section from `prompts/roles/<slug>.md`, then always `explain.md` ("what
 //! I did and why"), then `teach.md` when "Teach me" is on, then the
 //! project's `AGENTS.md`.
@@ -25,7 +27,7 @@
 
 use std::path::Path;
 
-use super::types::{MessageOrigin, PlanPolicy, Role, TurnOptions};
+use super::types::{MessageOrigin, PlanPolicy, Role, TechnicalLevel, TurnOptions};
 
 /// The Director system prompt: who the agent is talking to and how it works.
 pub const DIRECTOR_PROMPT: &str = include_str!("prompts/director.md");
@@ -37,6 +39,9 @@ const ORIGIN_AUTO_FIX: &str = include_str!("prompts/origin-auto-fix.md");
 const ORIGIN_FIRST_BUILD: &str = include_str!("prompts/origin-first-build.md");
 const EXPLAIN: &str = include_str!("prompts/explain.md");
 const TEACH: &str = include_str!("prompts/teach.md");
+const LEVEL_GUIDED: &str = include_str!("prompts/level-guided.md");
+const LEVEL_BALANCED: &str = include_str!("prompts/level-balanced.md");
+const LEVEL_TECHNICAL: &str = include_str!("prompts/level-technical.md");
 
 const ROLE_DESIGNER: &str = include_str!("prompts/roles/designer.md");
 const ROLE_PROGRAMMER: &str = include_str!("prompts/roles/programmer.md");
@@ -106,7 +111,12 @@ pub fn turn_instructions(options: &TurnOptions) -> String {
         (MessageOrigin::AutoFix, _) => ORIGIN_AUTO_FIX,
         (MessageOrigin::FirstBuild, _) => ORIGIN_FIRST_BUILD,
     };
-    let mut sections = vec![plan.trim_end()];
+    let level = match options.technical_level {
+        TechnicalLevel::Guided => LEVEL_GUIDED,
+        TechnicalLevel::Balanced => LEVEL_BALANCED,
+        TechnicalLevel::Technical => LEVEL_TECHNICAL,
+    };
+    let mut sections = vec![plan.trim_end(), level.trim_end()];
     if let Some(role) = role_section(options.role) {
         sections.push(role.trim_end());
     }
@@ -207,7 +217,7 @@ mod tests {
     const POLICIES: [PlanPolicy; 2] = [PlanPolicy::AlwaysPlan, PlanPolicy::SmallChangesDirect];
 
     /// Every section a prompt can hold, by the heading it starts with.
-    const SECTIONS: [(&str, &str); 7] = [
+    const SECTIONS: [(&str, &str); 8] = [
         ("plan-always", "## Plans come first"),
         ("plan-small-changes", "## Plans for bigger changes"),
         (
@@ -216,6 +226,7 @@ mod tests {
         ),
         ("origin-auto-fix", "## This message: the game hit errors"),
         ("origin-first-build", "## This message: the first build"),
+        ("level-balanced", "## How technical to be: balanced"),
         ("explain", "## How to finish"),
         ("teach", "## Teach me"),
     ];
@@ -228,6 +239,7 @@ mod tests {
             origin,
             model: None,
             effort: None,
+            technical_level: TechnicalLevel::default(),
         }
     }
 
@@ -240,7 +252,7 @@ mod tests {
             (MessageOrigin::AutoFix, _) => "origin-auto-fix",
             (MessageOrigin::FirstBuild, _) => "origin-first-build",
         };
-        let mut v = vec![plan, "explain"];
+        let mut v = vec![plan, "level-balanced", "explain"];
         if o.teach {
             v.push("teach");
         }
@@ -385,9 +397,10 @@ mod tests {
                         _ => ORIGIN_FIRST_BUILD,
                     };
                     let mut want = format!(
-                        "{}\n\n{}\n\n{}",
+                        "{}\n\n{}\n\n{}\n\n{}",
                         DIRECTOR_PROMPT.trim_end(),
                         plan.trim_end(),
+                        LEVEL_BALANCED.trim_end(),
                         EXPLAIN.trim_end()
                     );
                     if teach {
@@ -398,6 +411,26 @@ mod tests {
                     assert!(!want.contains("## This message: work as"));
                 }
             }
+        }
+    }
+
+    #[test]
+    fn each_technical_level_gets_its_own_section_and_only_that_one() {
+        for (level, heading) in [
+            (TechnicalLevel::Guided, "## How technical to be: guided"),
+            (TechnicalLevel::Balanced, "## How technical to be: balanced"),
+            (TechnicalLevel::Technical, "## How technical to be: technical"),
+        ] {
+            let o = TurnOptions {
+                technical_level: level,
+                ..TurnOptions::default()
+            };
+            let text = turn_instructions(&o);
+            assert_eq!(text.matches("## How technical to be:").count(), 1, "{level:?}");
+            assert!(text.contains(heading), "{level:?}");
+            // The level comes after the plan section and before "how to finish".
+            assert!(text.find(heading) < text.find("## How to finish"), "{level:?}");
+            assert!(text.find("## Plans come first") < text.find(heading), "{level:?}");
         }
     }
 

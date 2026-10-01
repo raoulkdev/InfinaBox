@@ -34,17 +34,29 @@ static TEMPLATE_EXPLORER_3D: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/../../templates/explorer-3d");
 static TEMPLATE_FIRSTPERSON_3D: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/../../templates/firstperson-3d");
+static TEMPLATE_FOUNDATION_2D: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/../../templates/foundation-2d");
+static TEMPLATE_FOUNDATION_3D: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/../../templates/foundation-3d");
 static TEMPLATE_BLANK_2D: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../templates/blank-2d");
 static ADDON: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../godot-addon/infinabox");
 
 /// The template `create_project` uses ("Start from scratch").
 pub const BLANK_TEMPLATE_ID: &str = "blank-2d";
 
+/// The foundations a new game made through the interview starts from: an
+/// organised project with the systems every big game needs and no gameplay
+/// (`templates/foundation-2d`, `templates/foundation-3d`).
+pub const FOUNDATION_2D_ID: &str = "foundation-2d";
+pub const FOUNDATION_3D_ID: &str = "foundation-3d";
+
 /// Every bundled template by id, in the order they're offered: the genre
 /// templates (2D, then 3D), then "Start from scratch". Each id is also the
 /// template's folder name and the `id` in its `template.json` (checked by
 /// `template_info`).
-static TEMPLATES: [(&str, &Dir<'_>); 8] = [
+static TEMPLATES: [(&str, &Dir<'_>); 10] = [
+    (FOUNDATION_2D_ID, &TEMPLATE_FOUNDATION_2D),
+    (FOUNDATION_3D_ID, &TEMPLATE_FOUNDATION_3D),
     ("platformer-2d", &TEMPLATE_PLATFORMER_2D),
     ("topdown-2d", &TEMPLATE_TOPDOWN_2D),
     ("shooter-2d", &TEMPLATE_SHOOTER_2D),
@@ -888,6 +900,8 @@ mod tests {
         assert_eq!(
             ids,
             [
+                "foundation-2d",
+                "foundation-3d",
                 "platformer-2d",
                 "topdown-2d",
                 "shooter-2d",

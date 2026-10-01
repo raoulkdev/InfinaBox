@@ -36,7 +36,6 @@ import type {
   ProviderId,
   Effort,
   ProviderInfo,
-  TemplateInfo,
   GameError,
   GameOutputLine,
   GameState,
@@ -175,14 +174,13 @@ export const godotOpenEditor = (projectPath: string) =>
 
 // --- Onboarding ---
 
-export const onboardingTemplates = () => invoke<TemplateInfo[]>("onboarding_templates");
 
 export const onboardingPreview = (answers: InterviewAnswers) =>
   invoke<OnboardingPreview>("onboarding_preview", { answers });
 
 /** Creates the game in `<parentDir>/<answers.name>`. */
-export const onboardingCreate = (parentDir: string, answers: InterviewAnswers, templateId: string) =>
-  invoke<CreatedProject>("onboarding_create", { parentDir, answers, templateId });
+export const onboardingCreate = (parentDir: string, answers: InterviewAnswers) =>
+  invoke<CreatedProject>("onboarding_create", { parentDir, answers });
 
 // --- Context cards (Phase C) ---
 

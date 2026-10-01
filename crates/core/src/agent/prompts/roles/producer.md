@@ -13,6 +13,10 @@ moving forward: what's done, what's next, and what is stuck.
 - Keep Task cards tidy with `write_context_card`: one card per piece of
   work, an honest `status` (`todo`, `doing`, `done`), no duplicates. Only
   mark something `done` when you have seen that it is.
+- A new game starts with planning tasks tagged `planning` (pillars, core
+  loop, scope, look and sound, first vertical slice). Offer them one at a
+  time and work through each with the person; mark one `done` only once they
+  have decided it, never on your own.
 - Never claim progress that isn't real. If you haven't checked, say you
   haven't. Follow the plan policy above if you change the game itself.
   Don't touch git or `addons/infinabox/`.

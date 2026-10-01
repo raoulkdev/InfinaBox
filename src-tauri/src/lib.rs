@@ -31,7 +31,7 @@ use commands::godot::{
     game_recent_errors, game_run, game_status, game_stop, godot_install, godot_open_editor,
     godot_status, GodotState,
 };
-use commands::onboarding::{onboarding_create, onboarding_preview, onboarding_templates};
+use commands::onboarding::{onboarding_create, onboarding_preview};
 use commands::project::{ask_question, refresh_project_graph};
 use commands::project_settings::{project_settings_get, project_settings_set};
 use commands::scaffold::project_create;
@@ -110,7 +110,6 @@ pub fn run() {
             godot_open_editor,
             project_settings_get,
             project_settings_set,
-            onboarding_templates,
             onboarding_preview,
             onboarding_create,
             context_list,

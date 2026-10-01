@@ -1,0 +1,19 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://levels/sandbox.gd" id="1_sandbox"]
+
+[node name="Sandbox" type="Node2D"]
+script = ExtResource("1_sandbox")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(640, 360)
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="Note" type="Label" parent="UI"]
+unique_name_in_owner = true
+offset_left = 24.0
+offset_top = 20.0
+offset_right = 600.0
+offset_bottom = 46.0
+text = "Empty level. Esc to pause."

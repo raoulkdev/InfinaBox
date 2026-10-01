@@ -118,6 +118,37 @@ pub struct TurnOptions {
     pub model: Option<String>,
     /// How hard the AI should think. Ignored by runtimes that can't set it.
     pub effort: Option<Effort>,
+    /// How technical the person wants explanations to be.
+    pub technical_level: TechnicalLevel,
+}
+
+/// How technical the conversation is: the person can be anywhere from
+/// "never wrote code" to "ships games for a living", and the AI's wording,
+/// level of detail and the questions it asks follow. Set per game, changeable
+/// at any time.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TechnicalLevel {
+    /// Everyday words and game terms only; the AI makes the engineering
+    /// choices and explains the systems it sets up in plain language.
+    Guided,
+    /// Plain words first, with the real names (scene, signal, autoload) and
+    /// file names explained in passing.
+    #[default]
+    Balanced,
+    /// Precise, with code, file paths and the trade-offs; architecture
+    /// decisions are discussed.
+    Technical,
+}
+
+impl TechnicalLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TechnicalLevel::Guided => "guided",
+            TechnicalLevel::Balanced => "balanced",
+            TechnicalLevel::Technical => "technical",
+        }
+    }
 }
 
 /// How much thinking effort a turn gets (what the AI's CLI calls effort or
@@ -224,7 +255,9 @@ pub enum MessageOrigin {
     PlanApproval,
     /// InfinaBox sent the game's errors back automatically.
     AutoFix,
-    /// The first build after the onboarding interview.
+    /// The first build after the onboarding interview. Games are no longer
+    /// built automatically when they are made; the value stays so chats saved
+    /// by earlier versions still read and show.
     FirstBuild,
 }
 

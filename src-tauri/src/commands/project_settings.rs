@@ -81,6 +81,7 @@ mod tests {
             plan_policy: PlanPolicy::SmallChangesDirect,
             teach: true,
             auto_fix: false,
+            technical_level: Default::default(),
         };
         assert_eq!(set(&path, wanted.clone()).unwrap(), wanted);
         assert!(project.join(".ibproject/settings.json").is_file());

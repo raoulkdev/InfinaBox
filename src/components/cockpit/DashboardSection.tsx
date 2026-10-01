@@ -209,11 +209,8 @@ export function DashboardSection({ onOpenProject }: DashboardSectionProps) {
     }
     setView("home");
     setProjects(recordProjectOpened(created.path));
-    onOpenProject(created.path, {
-      threadId: created.thread_id,
-      message: created.first_build_message,
-      origin: "first_build",
-    });
+    // Nothing is built or sent: the game is planned in the chat that follows.
+    onOpenProject(created.path);
   }
 
   const selected = projects.find((p) => p.path === selectedPath) ?? projects[0] ?? null;

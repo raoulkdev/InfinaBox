@@ -126,9 +126,10 @@ export async function phaseC(run, app, config, fakes) {
   await run.step("c1", "A new project starts with a Context of typed cards; the Context section lists them", async () => {
     await waitVisible(driver, tid("new-project"), { timeoutMs: 30_000 });
     state.project = await createProjectFromHome(run, driver, tempParent("phase-c"), "Phase C Game");
-    const templates = await call("onboarding_templates", {});
-    run.note(`templates: ${templates.map((t) => `${t.id} (${t.dimension})`).join(", ")}`);
-    if (templates.length < 8) throw new Error(`expected 8 templates, got ${templates.length}`);
+    for (const [genre, id] of [["2d", "foundation-2d"], ["3d", "foundation-3d"]]) {
+      const shown = await call("onboarding_preview", { answers: { idea: "", genre, references: "", technical_level: "balanced", name: "Preview" } });
+      if (shown.choice.template_id !== id) throw new Error(`${genre} previews ${shown.choice.template_id}, not ${id}`);
+    }
     await call("context_write", {
       projectPath: state.project,
       path: "mechanics/jumping.md",

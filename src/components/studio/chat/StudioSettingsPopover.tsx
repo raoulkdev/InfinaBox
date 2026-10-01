@@ -3,7 +3,7 @@ import { Popover, RadioGroup, Switch } from "radix-ui";
 import { AlertCircle, Loader2, RefreshCw, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { projectSettingsGet, projectSettingsSet } from "@/lib/studio-api";
-import type { PlanPolicy, ProjectSettings } from "@/lib/studio-types";
+import type { PlanPolicy, ProjectSettings, TechnicalLevel } from "@/lib/studio-types";
 
 // The chat header's gear: how this game's AI works with the person — plans
 // first or not, "Teach me", and automatic error fixing. These are the
@@ -28,6 +28,12 @@ const PLAN_OPTIONS: { value: PlanPolicy; label: string; description: string }[] 
     label: "Small changes without a plan",
     description: "Quick tweaks happen right away. Bigger changes still get a plan.",
   },
+];
+
+const LEVEL_OPTIONS: { value: TechnicalLevel; label: string; description: string }[] = [
+  { value: "guided", label: "Guided", description: "Plain words; the AI explains what it sets up." },
+  { value: "balanced", label: "Balanced", description: "Plain words with the real names explained." },
+  { value: "technical", label: "Technical", description: "Code, files and trade-offs." },
 ];
 
 export function StudioSettingsPopover({ projectPath }: { projectPath: string }) {
@@ -125,6 +131,33 @@ export function StudioSettingsPopover({ projectPath }: { projectPath: string }) 
             </div>
           ) : (
             <div className="mt-3 flex flex-col gap-3">
+              <SettingGroup label="How technical">
+                <RadioGroup.Root
+                  value={settings?.technical_level ?? ""}
+                  disabled={!settings}
+                  onValueChange={(value) => settings && void save({ ...settings, technical_level: value as TechnicalLevel })}
+                  aria-label="How technical"
+                  className="flex flex-col gap-1"
+                >
+                  {LEVEL_OPTIONS.map((option) => (
+                    <RadioGroup.Item
+                      key={option.value}
+                      value={option.value}
+                      data-testid={`setting-level-${option.value}`}
+                      className="group flex items-start gap-2.5 rounded-lg border border-border px-2.5 py-2 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50 data-[state=checked]:border-foreground/30 data-[state=checked]:bg-muted/40"
+                    >
+                      <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border border-foreground/30 group-data-[state=checked]:border-foreground">
+                        <RadioGroup.Indicator className="size-2 rounded-full bg-foreground" />
+                      </span>
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <span className="text-sm">{option.label}</span>
+                        <span className="text-xs text-muted-foreground">{option.description}</span>
+                      </span>
+                    </RadioGroup.Item>
+                  ))}
+                </RadioGroup.Root>
+              </SettingGroup>
+
               <SettingGroup label="Plans">
                 <RadioGroup.Root
                   // "" (nothing picked) until loaded, so it stays controlled.

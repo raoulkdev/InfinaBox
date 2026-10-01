@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
-import { Box, FolderOpen, Loader2, Square } from "lucide-react";
+import { Box, Code, FolderOpen, Layers, Lightbulb, Loader2, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { InterviewAnswers, TemplateInfo } from "@/lib/studio-types";
+import type { InterviewAnswers, TechnicalLevel } from "@/lib/studio-types";
 import { DIMENSION_2D, DIMENSION_3D, joinPath } from "./answers";
 import { ChoiceCard } from "./Chip";
 
@@ -41,7 +41,7 @@ export function IdeaScreen({ answers, update }: ScreenProps) {
         autoFocus
         data-testid="onboarding-idea"
         className={textareaClass}
-        placeholder="A game where…"
+        placeholder="A game where… (or leave it for later)"
         value={answers.idea}
         onChange={(e) => update({ idea: e.target.value })}
         maxLength={600}
@@ -52,14 +52,7 @@ export function IdeaScreen({ answers, update }: ScreenProps) {
 
 // --- 2. Kind of game: 2D or 3D ---
 
-export type TemplatesState =
-  | { status: "loading" }
-  | { status: "ready"; templates: TemplateInfo[] }
-  | { status: "error"; error: string };
-
-/** Which starting template fits is worked out from the idea, within the
- * dimension picked here (the backend restricts its choice to that
- * dimension), so this question is only 2D or 3D. */
+/** The kind of foundation the game starts from: 2D or 3D. */
 export function GenreScreen({ answers, update }: ScreenProps) {
   return (
     <div className="flex flex-col gap-5">
@@ -68,7 +61,7 @@ export function GenreScreen({ answers, update }: ScreenProps) {
         <ChoiceCard
           testId="onboarding-dimension-2d"
           selected={answers.genre === DIMENSION_2D}
-          onSelect={() => update({ genre: DIMENSION_2D, genre_other: null })}
+          onSelect={() => update({ genre: DIMENSION_2D })}
           title="2D"
           icon={<Square className="size-4 text-muted-foreground" />}
         >
@@ -79,7 +72,7 @@ export function GenreScreen({ answers, update }: ScreenProps) {
         <ChoiceCard
           testId="onboarding-dimension-3d"
           selected={answers.genre === DIMENSION_3D}
-          onSelect={() => update({ genre: DIMENSION_3D, genre_other: null })}
+          onSelect={() => update({ genre: DIMENSION_3D })}
           title="3D"
           icon={<Box className="size-4 text-muted-foreground" />}
         >
@@ -113,7 +106,52 @@ export function ReferencesScreen({ answers, update }: ScreenProps) {
   );
 }
 
-// --- 4. Name and folder ---
+// --- 4. How technical ---
+
+const LEVELS: { id: TechnicalLevel; title: string; text: string; icon: ReactNode }[] = [
+  {
+    id: "guided",
+    title: "Guided",
+    text: "Plain words. The AI makes the engineering choices and explains what it sets up.",
+    icon: <Lightbulb className="size-4 text-muted-foreground" />,
+  },
+  {
+    id: "balanced",
+    title: "Balanced",
+    text: "Plain words first, with the real names and files explained as we go.",
+    icon: <Layers className="size-4 text-muted-foreground" />,
+  },
+  {
+    id: "technical",
+    title: "Technical",
+    text: "Code, files and trade-offs. Architecture decisions are discussed with you.",
+    icon: <Code className="size-4 text-muted-foreground" />,
+  },
+];
+
+export function TechnicalScreen({ answers, update }: ScreenProps) {
+  return (
+    <div className="flex flex-col gap-5">
+      <QuestionHeading title="How technical should we be?" helper="You can change this any time in the chat settings." />
+      <div className="grid grid-cols-1 gap-2.5">
+        {LEVELS.map((level) => (
+          <ChoiceCard
+            key={level.id}
+            testId={`onboarding-level-${level.id}`}
+            selected={answers.technical_level === level.id}
+            onSelect={() => update({ technical_level: level.id })}
+            title={level.title}
+            icon={level.icon}
+          >
+            <span className="text-sm text-muted-foreground">{level.text}</span>
+          </ChoiceCard>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// --- 5. Name and folder ---
 
 export type ParentDirState = { status: "loading" } | { status: "ready"; path: string | null };
 

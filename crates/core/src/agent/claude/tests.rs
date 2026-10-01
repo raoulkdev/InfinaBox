@@ -102,6 +102,7 @@ fn a_resumed_turn_carries_its_own_instructions_in_the_message() {
         origin: MessageOrigin::User,
         model: None,
         effort: None,
+        technical_level: Default::default(),
     };
     let args = build_args(&req, Path::new("/tmp/mcp.json"), "PROMPT");
     let message = args.last().unwrap().to_str().unwrap();
@@ -133,6 +134,7 @@ fn system_prompt_follows_the_turn_options_and_appends_the_projects_agents_md() {
         origin: MessageOrigin::AutoFix,
         model: None,
         effort: None,
+        technical_level: Default::default(),
     };
     let prompt = turn_system_prompt(&req);
     assert_eq!(

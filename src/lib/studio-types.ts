@@ -36,6 +36,9 @@ export type MessageOrigin = "user" | "plan_approval" | "auto_fix" | "first_build
 
 export type PlanPolicy = "always_plan" | "small_changes_direct";
 
+/** How technical the AI's explanations are (set per game). */
+export type TechnicalLevel = "guided" | "balanced" | "technical";
+
 export interface RuntimeStatus {
   name: string;
   installed: boolean;
@@ -185,30 +188,17 @@ export interface ProjectSettings {
   teach: boolean;
   /** Send the running game's errors back to the AI automatically. */
   auto_fix: boolean;
+  technical_level: TechnicalLevel;
 }
 
 // --- Phase B: onboarding (crates/core/src/onboarding.rs, scaffold.rs) ---
 
-export interface TemplateInfo {
-  id: string;
-  name: string;
-  description: string;
-  /** "2d" or "3d". */
-  dimension: string;
-  controls: string;
-  features: string[];
-  keywords: string[];
-}
-
 export interface InterviewAnswers {
   idea: string;
-  /** A template id, or "other". */
+  /** "2d" or "3d". */
   genre: string;
-  genre_other: string | null;
-  feel: string[];
-  look: string;
   references: string;
-  session_length: string;
+  technical_level: TechnicalLevel;
   name: string;
 }
 
@@ -222,13 +212,11 @@ export interface OnboardingPreview {
   project_name: string;
   /** Context cards that will be written, relative to .ibproject/context/. */
   cards: string[];
-  first_build_steps: string[];
+  setup_steps: string[];
 }
 
 export interface CreatedProject {
   path: string;
-  thread_id: string;
-  first_build_message: string;
 }
 
 /** A turn the app starts as soon as Studio shows the project (the

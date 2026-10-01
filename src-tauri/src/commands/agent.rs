@@ -687,6 +687,7 @@ fn turn_options(
         plan_policy: settings.plan_policy,
         teach: settings.teach,
         origin,
+        technical_level: settings.technical_level,
     }
 }
 
@@ -2300,6 +2301,7 @@ mod tests {
                 plan_policy: PlanPolicy::SmallChangesDirect,
                 teach: true,
                 auto_fix: false,
+                technical_level: Default::default(),
             },
         )
         .unwrap();
@@ -2344,6 +2346,7 @@ mod tests {
             origin,
             model: None,
             effort: None,
+            technical_level: Default::default(),
         };
         assert_eq!(
             options,

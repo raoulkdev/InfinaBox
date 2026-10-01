@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::agent::PlanPolicy;
+use crate::agent::{PlanPolicy, TechnicalLevel};
 
 /// Where the settings live, relative to the project folder.
 pub const SETTINGS_FILE: &str = ".ibproject/settings.json";
@@ -29,6 +29,8 @@ pub struct ProjectSettings {
     pub teach: bool,
     /// Send the running game's errors back to the agent automatically.
     pub auto_fix: bool,
+    /// How technical the AI's explanations are.
+    pub technical_level: TechnicalLevel,
 }
 
 impl Default for ProjectSettings {
@@ -37,6 +39,7 @@ impl Default for ProjectSettings {
             plan_policy: PlanPolicy::AlwaysPlan,
             teach: false,
             auto_fix: true,
+            technical_level: TechnicalLevel::Balanced,
         }
     }
 }
@@ -124,6 +127,7 @@ mod tests {
                 plan_policy: PlanPolicy::AlwaysPlan,
                 teach: false,
                 auto_fix: true,
+                technical_level: TechnicalLevel::Balanced,
             }
         );
     }
@@ -144,12 +148,13 @@ mod tests {
             plan_policy: PlanPolicy::SmallChangesDirect,
             teach: true,
             auto_fix: false,
+            technical_level: TechnicalLevel::Technical,
         };
         save(dir.path(), &settings).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join(SETTINGS_FILE)).unwrap(),
             "{\n  \"plan_policy\": \"small_changes_direct\",\n  \"teach\": true,\n  \
-\"auto_fix\": false\n}\n"
+\"auto_fix\": false,\n  \"technical_level\": \"technical\"\n}\n"
         );
         assert_eq!(load(dir.path()).unwrap(), settings);
 

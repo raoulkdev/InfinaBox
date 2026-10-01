@@ -46,10 +46,8 @@ const GAME_NAME = "Sky Hopper";
 const ANSWERS = {
   idea: "A little robot who hops between floating islands to collect lost stars",
 };
-const PLAN_REQUEST = "add a double jump";
+const PLAN_REQUEST = "add an Options button to the main menu";
 const READY_LINE = "[infinabox] ready 1";
-// The first build customizes a whole template: give it room.
-const FIRST_BUILD_TIMEOUT_MS = 20 * 60_000;
 const NOT_CHAT = [".", ":(exclude).ibproject/chat"];
 
 const chip = (text) => By.xpath(`//button[@data-chip][normalize-space()=${JSON.stringify(text)}]`);
@@ -248,7 +246,13 @@ export async function firstRun(run, app, config) {
     run.note(`references button reads "${skip}"`);
     if (skip !== "Skip") throw new Error(`with no references typed the button should read Skip, reads ${skip}`);
     await next(driver, 2);
-    // 4. Name and folder.
+    // 4. How technical: balanced to begin with; technical is picked.
+    await waitAttr(driver, tid("onboarding-level-balanced"), "aria-pressed", "true");
+    await clickWhenEnabled(driver, tid("onboarding-level-technical"));
+    await waitAttr(driver, tid("onboarding-level-technical"), "aria-pressed", "true");
+    await run.shot("interview-technical");
+    await next(driver, 3);
+    // 5. Name and folder.
     const name = await waitVisible(driver, tid("onboarding-name"));
     run.note(`suggested name: "${await name.getAttribute("value")}"`);
     run.note(`default folder: "${(await textOf(driver, tid("onboarding-parent-dir"))).trim()}"`);
@@ -266,7 +270,7 @@ export async function firstRun(run, app, config) {
     await waitVisible(driver, tid("onboarding-plan"), { timeoutMs: 30_000 });
   }, { needs: ["F4"] });
 
-  await run.step("F6", "The review shows the Platformer with its reason, the cards it will write, and the first build's steps", async () => {
+  await run.step("F6", "The review shows the 2D foundation with its reason, the notes it will write, and what gets set up (no build)", async () => {
     const template = await waitVisible(driver, tid("onboarding-template"));
     const templateId = await template.getAttribute("data-template-id");
     const reason = (await textOf(driver, tid("onboarding-template-reason"))).trim();
@@ -275,28 +279,26 @@ export async function firstRun(run, app, config) {
     );
     const steps = await visibleTexts(driver, tid("onboarding-build-step"));
     const where = (await textOf(driver, tid("onboarding-project-path"))).trim();
-    run.note(`template: ${templateId} "${(await template.getText()).trim()}" — ${reason}`);
+    run.note(`foundation: ${templateId} "${(await template.getText()).trim()}" — ${reason}`);
     run.note(`cards: ${JSON.stringify(cards)}`);
-    run.note(`first build steps: ${JSON.stringify(steps)}`);
+    run.note(`setup steps: ${JSON.stringify(steps)}`);
     run.note(`goes to: ${where}`);
     await run.shot("interview-review");
-    if (templateId !== "platformer-2d") throw new Error(`the review picked ${templateId}, not the Platformer`);
-    if (!reason) throw new Error("the review gives no reason for the template");
-    for (const card of ["concept.md", "style-guide.md", "tasks/first-playable.md"]) {
+    if (templateId !== "foundation-2d") throw new Error(`the review picked ${templateId}, not the 2D foundation`);
+    if (!reason) throw new Error("the review gives no reason for the foundation");
+    for (const card of ["concept.md", "style-guide.md", "systems/overview.md", "tasks/define-the-pillars.md"]) {
       if (!cards.includes(card)) throw new Error(`the review doesn't list ${card}`);
     }
-    if (!cards.some((c) => c.startsWith("mechanics/"))) throw new Error("the review lists none of the template's mechanic cards");
-    if (steps.length === 0) throw new Error("the review lists no first build steps");
+    if (steps.length === 0) throw new Error("the review lists no setup steps");
+    if (!steps.some((t) => t.includes("Build nothing else"))) throw new Error("the review doesn't say nothing else is built");
     if (where !== path.join(state.parent, GAME_NAME)) throw new Error(`the game would go to ${where}`);
   }, { needs: ["F5"] });
 
-  await run.step("F7", '"Create my game" lands on Studio; the project is on disk with one snapshot and a "First build" thread', async () => {
+  await run.step("F7", '"Create my game" lands on Studio; the project is on disk with one snapshot, the foundation and no gameplay', async () => {
     await clickWhenEnabled(driver, tid("onboarding-create"));
     await waitForStudio(driver);
     state.project = path.join(state.parent, GAME_NAME);
     run.note(`landed in Studio for ${state.project}`);
-    // Checked straight away, before the first build (which starts by
-    // itself) can change anything.
     const subjects = snapshotSubjects(p());
     run.note(`git log: ${JSON.stringify(subjects)}`);
     if (subjects.length !== 1 || subjects[0] !== `New game: ${GAME_NAME}`) {
@@ -306,75 +308,72 @@ export async function firstRun(run, app, config) {
     const want = [
       "project.godot",
       ".ibproject/.ibx",
+      ".ibproject/settings.json",
       ".ibproject/context/concept.md",
       ".ibproject/context/style-guide.md",
-      ".ibproject/context/tasks/first-playable.md",
-      "scenes/main.tscn",
-      "scenes/player.tscn",
-      "scenes/levels/level_1.tscn",
-      "scripts/player.gd",
+      ".ibproject/context/systems/overview.md",
+      ".ibproject/context/tasks/define-the-core-loop.md",
+      "core/events.gd",
+      "core/game_state.gd",
+      "core/save_system.gd",
+      "levels/sandbox.tscn",
+      "ui/main_menu.tscn",
       "addons/infinabox/plugin.cfg",
       "addons/infinabox/infinabox_runtime.gd",
     ];
     const missing = want.filter((f) => !tracked.includes(f));
-    run.note(`${tracked.length} files committed; mechanic cards: ${JSON.stringify(tracked.filter((f) => f.includes("context/mechanics/")))}`);
+    run.note(`${tracked.length} files committed`);
     if (missing.length > 0) throw new Error(`not committed in the new game: ${JSON.stringify(missing)}`);
+    if (tracked.some((f) => f.includes("player"))) throw new Error("the new game already has a player");
     const concept = fs.readFileSync(path.join(p(), ".ibproject/context/concept.md"), "utf8");
     if (!concept.includes(ANSWERS.idea)) throw new Error("concept.md doesn't carry the idea");
+    if (!concept.includes("Not decided yet")) throw new Error("concept.md invents decisions the person didn't make");
+    const level = JSON.parse(fs.readFileSync(path.join(p(), ".ibproject/settings.json"), "utf8")).technical_level;
+    if (level !== "technical") throw new Error(`the chosen technical level was saved as ${level}`);
     const godotCfg = fs.readFileSync(path.join(p(), "project.godot"), "utf8");
-    run.note(`project.godot ${godotCfg.match(/config\/name=.*/)?.[0]}`);
     if (!godotCfg.includes(`config/name="${GAME_NAME}"`)) throw new Error("project.godot isn't named after the game");
-    const threads = chatRecords(p());
-    const chatDir = path.join(p(), ".ibproject/chat");
-    const threadFiles = fs.readdirSync(chatDir).filter((f) => f.endsWith(".jsonl"));
-    const index = fs.readdirSync(chatDir).filter((f) => !f.endsWith(".jsonl"));
-    run.note(`chat files: ${JSON.stringify(threadFiles)}; others: ${JSON.stringify(index)}; records so far: ${threads.length}`);
-    const listed = await invokeCommand(driver, "chat_list_threads", { projectPath: p() });
-    run.note(`threads: ${JSON.stringify(listed.map((t) => `${t.title} (${t.provider})`))}`);
-    if (!listed.some((t) => t.title === "First build")) throw new Error('no "First build" chat thread');
+    if (!godotCfg.includes("SaveSystem=")) throw new Error("the foundation's autoloads are missing from project.godot");
     const settings = await invokeCommand(driver, "app_settings_get", {});
-    run.note(`first_run_done: ${settings.first_run_done}`);
     if (!settings.first_run_done) throw new Error("first_run_done wasn't set after making the first game");
   }, { needs: ["F6"] });
 
-  await run.step("F8", "The first build starts by itself in the chat", async () => {
-    const note = await waitVisible(driver, By.css('[data-testid="system-note"][data-origin="first_build"]'), { timeoutMs: 30_000 });
-    run.note(`note: ${(await note.getText()).split("\n")[0]}`);
-    await waitAttr(driver, tid("chat-panel"), "data-busy", "true", { timeoutMs: 30_000 });
-    const records = chatRecords(p()).filter((r) => r.kind === "user");
-    run.note(`first message origin: ${records[0]?.origin}; ${JSON.stringify(records[0]?.text.slice(0, 160))}…`);
-    if (records[0]?.origin !== "first_build") throw new Error("the first build's message isn't saved with its first_build origin");
-    await run.shot("first-build-started");
-    if (!config.realAi) {
-      // No real AI here: stop the build, which ends on the neutral note.
-      const stop = await waitVisible(driver, By.xpath('//*[@data-testid="chat-panel"]//button[normalize-space()="Stop"]'));
-      await stop.click();
-      await waitAttr(driver, tid("chat-panel"), "data-busy", "false", { timeoutMs: 60_000 });
-      await expectStoppedNote(run, driver);
-    }
+  await run.step("F8", "Nothing starts by itself: no AI turn, no first build, no changes", async () => {
+    await new Promise((r) => setTimeout(r, 5000));
+    await waitAttr(driver, tid("chat-panel"), "data-busy", "false");
+    if ((await driver.findElements(By.css('[data-testid="system-note"]'))).length > 0) throw new Error("a system message appeared in the chat");
+    const messages = chatRecords(p()).filter((r) => r.kind === "user");
+    if (messages.length > 0) throw new Error(`the app sent a message on its own: ${JSON.stringify(messages[0].text.slice(0, 120))}`);
+    const subjects = snapshotSubjects(p());
+    if (subjects.length !== 1) throw new Error(`a snapshot was made on its own: ${JSON.stringify(subjects)}`);
+    const dirty = git(p(), "status", "--porcelain", "--", ".", ":!.ibproject").trim();
+    if (dirty) throw new Error(`files changed on their own:\n${dirty}`);
+    await run.shot("studio-new-game");
+    const shown = await useStudioSettings(driver, {});
+    run.note(`settings shown: ${JSON.stringify(shown)}`);
   }, { needs: ["F7"] });
 
+  await run.step("F8b", "The foundation runs in Godot with no errors: the menu opens", async () => {
+    await ensureGameRunning(run, driver, p());
+    await new Promise((r) => setTimeout(r, 4000));
+    const errors = await ownErrors(driver);
+    run.note(`error rows about the project's files: ${JSON.stringify(errors)}`);
+    if (errors.length > 0) throw new Error(`the foundation has errors: ${JSON.stringify(errors)}`);
+    await shootGame(run, p(), "foundation-menu");
+    const stop = await driver.findElements(tid("game-stop"));
+    if (stop.length > 0 && (await stop[0].isEnabled())) await stop[0].click();
+    await waitAttr(driver, tid("play-panel"), "data-game-state", "stopped", { timeoutMs: 30_000 });
+  }, { needs: ["F8"], after: saveGameLog("F8b") });
+
   if (config.realAi) {
-    await run.step("F9", "The first build finishes with no error and a snapshot; the game runs without errors in its own files", async () => {
-      await waitForTurn(run, driver, { startedBy: "the first build", timeoutMs: FIRST_BUILD_TIMEOUT_MS });
-      const tools = toolLines(lastTurnEvents(p()));
-      run.attach("first-build-tools", tools.join("\n"));
-      run.note(`${tools.length} tool calls`);
-      const subjects = snapshotSubjects(p());
-      run.note(`git log: ${JSON.stringify(subjects)}`);
-      if (subjects[0] !== "First build") throw new Error(`the newest snapshot is ${JSON.stringify(subjects[0])}, not "First build"`);
-      await waitUntil(async () => (await visibleTexts(driver, tid("snapshot-title")))[0] === "First build", {
-        what: 'History to list "First build" on top',
-      });
-      run.attach("first-build-diff", git(p(), "diff", "--stat", "HEAD~1", "HEAD", "--", ...NOT_CHAT));
-      await ensureGameRunning(run, driver, p());
-      await new Promise((r) => setTimeout(r, 4000));
-      const errors = await ownErrors(driver);
-      run.note(`error rows about the project's files: ${JSON.stringify(errors)}`);
-      if (errors.length > 0) throw new Error("the first build left errors in the game's own files");
-      await shootGame(run, p(), "game-after-first-build");
-      await run.shot("studio-after-first-build");
-    }, { needs: ["F8"], after: saveGameLog("F9") });
+    await run.step("F9", "A first message is a conversation: the AI talks and asks, and builds nothing", async () => {
+      await sendChat(driver, "Let's talk about my game. What would you want to know first, before we build anything?");
+      await waitForTurn(run, driver, { startedBy: "the first message", timeoutMs: 10 * 60_000 });
+      const changed = git(p(), "status", "--porcelain", "--", ".", ":!.ibproject").trim();
+      run.note(`changes outside .ibproject: ${JSON.stringify(changed)}`);
+      if (changed) throw new Error(`the AI changed the game while the conversation was still about what to make:\n${changed}`);
+      if (snapshotSubjects(p()).length !== 1 && changed) throw new Error("the AI made a snapshot of game changes");
+      await run.shot("first-conversation");
+    }, { needs: ["F8"] });
 
     await run.step("F10", `A plan turn ("${PLAN_REQUEST}") shows a plan card and changes nothing; Approve builds it`, async () => {
       const headBefore = git(p(), "rev-parse", "HEAD").trim();
@@ -410,14 +409,14 @@ export async function firstRun(run, app, config) {
       }
       const settings = projectSettingsOnDisk(p());
       run.note(`project settings on disk: ${JSON.stringify(settings)} (missing = the defaults, auto-fix on)`);
-      const file = path.join(p(), "scripts/player.gd");
+      const file = path.join(p(), "ui/main_menu.gd");
       const original = fs.readFileSync(file, "utf8");
       const lines = original.replace(/\n$/, "").split("\n");
       lines.push("", "", "func _describe_speed() -> void:", '\tvar label_speed: int = "fast"', "\tprint(label_speed)");
       const errorLine = lines.length - 1;
       fs.writeFileSync(file, `${lines.join("\n")}\n`);
-      const where = `res://scripts/player.gd, line ${errorLine}`;
-      run.note(`scripts/player.gd edited by hand: line ${errorLine} assigns a String to an int`);
+      const where = `res://ui/main_menu.gd, line ${errorLine}`;
+      run.note(`ui/main_menu.gd edited by hand: line ${errorLine} assigns a String to an int`);
       const headBefore = git(p(), "rev-parse", "HEAD").trim();
 
       await clickWhenEnabled(driver, tid("game-play"));
@@ -437,7 +436,7 @@ export async function firstRun(run, app, config) {
       const fixMessage = chatRecords(p()).filter((r) => r.kind === "user").pop();
       run.note(`fix message (origin ${fixMessage?.origin}): ${JSON.stringify(fixMessage?.text.slice(0, 240))}`);
       if (fixMessage?.origin !== "auto_fix") throw new Error("the turn that started isn't an auto-fix");
-      if (!fixMessage.text.includes("player.gd")) throw new Error("the auto-fix message doesn't name player.gd");
+      if (!fixMessage.text.includes("main_menu.gd")) throw new Error("the auto-fix message doesn't name main_menu.gd");
       // A second attempt may follow if errors remain; wait until the chat
       // stays quiet.
       for (let i = 0; i < 3; i++) {
@@ -452,11 +451,11 @@ export async function firstRun(run, app, config) {
         // Undoing my hand edit exactly (the usual fix: delete the bad
         // function) leaves the project identical to its last snapshot, and
         // then no snapshot is made, by design. That's fine only if nothing
-        // outside the chat is left uncommitted and player.gd is back as
+        // outside the chat is left uncommitted and main_menu.gd is back as
         // committed; anything else means the fix's edits were lost.
         const dirty = git(p(), "status", "--porcelain", "--", ".", ":!.ibproject/chat").trim();
         if (dirty) throw new Error(`the fix made no snapshot and left changes uncommitted:\n${dirty}`);
-        run.note("the fix put player.gd back exactly as committed, so no snapshot was needed");
+        run.note("the fix put main_menu.gd back exactly as committed, so no snapshot was needed");
       } else if (subjects[0] !== "Automatic fix for game errors") {
         run.note(`(newest snapshot is "${subjects[0]}")`);
       }
@@ -464,7 +463,7 @@ export async function firstRun(run, app, config) {
       await new Promise((r) => setTimeout(r, 4000));
       const errors = await ownErrors(driver);
       run.note(`error rows about the project's files: ${JSON.stringify(errors)}`);
-      if (errors.some((e) => e.includes("player.gd"))) throw new Error("the player.gd error is still there");
+      if (errors.some((e) => e.includes("main_menu.gd"))) throw new Error("the main_menu.gd error is still there");
       if (errors.length > 0) throw new Error("errors in the game's own files remain");
       await shootGame(run, p(), "game-after-auto-fix");
       await run.shot("studio-after-auto-fix");
@@ -509,7 +508,7 @@ export async function firstRun(run, app, config) {
     const text = await waitUntil(
       async () => {
         const t = await driver.executeScript("return arguments[0].innerText + '\\n' + [...arguments[0].querySelectorAll('input')].map((i) => i.value).join('\\n')", section);
-        return [GAME_NAME, "mechanic", "task"].every((n) => t.toLowerCase().includes(n.toLowerCase())) ? t : null;
+        return [GAME_NAME, "systems", "tasks"].every((n) => t.toLowerCase().includes(n.toLowerCase())) ? t : null;
       },
       { timeoutMs: 20_000, what: "the starter documents to be on the canvas" },
     );

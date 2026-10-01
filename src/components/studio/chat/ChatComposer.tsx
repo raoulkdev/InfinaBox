@@ -205,7 +205,7 @@ export function ChatComposer({
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
-        placeholder={busy ? "The AI is working…" : (hint ?? "Describe what you want to change in your game")}
+        placeholder={busy ? "The AI is working…" : (hint ?? "Talk about your game, or ask for a change")}
         aria-label="Message the AI"
         className="max-h-[200px] min-h-8 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-muted-foreground"
       />

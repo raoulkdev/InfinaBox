@@ -1,0 +1,15 @@
+{
+  "id": "foundation-3d",
+  "name": "Foundation (3D)",
+  "description": "A clean, expandable base for a full 3D game: game flow, scene routing, saving, settings and an event bus, with no gameplay yet.",
+  "dimension": "3d",
+  "controls": "Esc pauses.",
+  "features": [
+    "Main menu and an empty 3D level",
+    "Game flow, pause, scene routing",
+    "Save and load slots",
+    "Player settings",
+    "Folders and notes for growing a big game"
+  ],
+  "keywords": []
+}

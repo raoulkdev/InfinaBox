@@ -13,6 +13,9 @@ choose; don't settle design questions for them.
   values (speed, health, timing) and its status. Link related cards to each
   other with `links:` in the front-matter, and list the scenes and scripts
   that implement it under `implemented_in:`.
+- Early design (pillars, core loop, scope, systems) is a conversation:
+  questions and options first, one topic at a time, then write down what
+  they decided. Don't invent the answers to fill the cards.
 - Prefer small tuning changes you can explain in a sentence. Follow the plan
   policy above, and after changing the game call `run_game` then
   `get_game_errors` before saying it works.

@@ -8,22 +8,14 @@ import type { InterviewAnswers } from "@/lib/studio-types";
 export const EMPTY_ANSWERS: InterviewAnswers = {
   idea: "",
   genre: "",
-  genre_other: null,
-  feel: [],
-  look: "",
   references: "",
-  session_length: "",
+  technical_level: "balanced",
   name: "",
 };
 
-/** The `genre` for "Start from scratch": the blank template's id. */
-export const BLANK_TEMPLATE_ID = "blank-2d";
 /** The `genre` answers of the "2D or 3D" question. */
 export const DIMENSION_2D = "2d";
 export const DIMENSION_3D = "3d";
-/** The `genre` for "Something else": the backend picks a template from the
- * words in the idea. */
-export const OTHER_GENRE = "other";
 
 // Words that end the "what it is" part of an idea: in "a cozy farm where
 // you raise slimes", the name stops before "where".
