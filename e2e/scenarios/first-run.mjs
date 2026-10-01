@@ -48,7 +48,7 @@ const ANSWERS = {
 };
 const PLAN_REQUEST = "add an Options button to the main menu";
 const READY_LINE = "[infinabox] ready 1";
-const NOT_CHAT = [".", ":(exclude).ibproject/chat"];
+const NOT_CHAT = [".", ":(exclude).ibproject/chat", ":(exclude).ibproject/boards"];
 
 const chip = (text) => By.xpath(`//button[@data-chip][normalize-space()=${JSON.stringify(text)}]`);
 const chipStartingWith = (text) => By.xpath(`//button[@data-chip][starts-with(normalize-space(), ${JSON.stringify(text)})]`);
@@ -453,7 +453,7 @@ export async function firstRun(run, app, config) {
         // then no snapshot is made, by design. That's fine only if nothing
         // outside the chat is left uncommitted and main_menu.gd is back as
         // committed; anything else means the fix's edits were lost.
-        const dirty = git(p(), "status", "--porcelain", "--", ".", ":!.ibproject/chat").trim();
+        const dirty = git(p(), "status", "--porcelain", "--", ".", ":!.ibproject/chat", ":!.ibproject/boards").trim();
         if (dirty) throw new Error(`the fix made no snapshot and left changes uncommitted:\n${dirty}`);
         run.note("the fix put main_menu.gd back exactly as committed, so no snapshot was needed");
       } else if (subjects[0] !== "Automatic fix for game errors") {
