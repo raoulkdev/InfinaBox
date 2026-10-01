@@ -567,6 +567,106 @@ export async function phaseC(run, app, config, fakes) {
     if (!fs.existsSync(ctx("untitled.md")) && !fs.existsSync(ctx("the-lighthouse.md"))) throw new Error("deleting a block deleted its document");
   }, { needs: ["c1"] });
 
+  await run.step("c7c", "Right-click menus on every page; typing and dragging share one gesture", async () => {
+    const boardFile = path.join(state.project, ".ibproject/boards/root.json");
+    const readRoot = () => JSON.parse(fs.readFileSync(boardFile, "utf8"));
+    const ctxClick = (el, dx = 10, dy = 10) =>
+      driver.executeScript(
+        `const r = arguments[0].getBoundingClientRect();
+         arguments[0].dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + arguments[1], clientY: r.top + arguments[2] }));`,
+        el, dx, dy,
+      );
+    const menuText = async () => driver.executeScript("return arguments[0].textContent", await waitVisible(driver, tid("context-menu")));
+    const closeMenu = async () => {
+      await driver.actions().sendKeys(Key.ESCAPE).perform();
+      await waitUntil(async () => (await driver.findElements(tid("context-menu"))).length === 0, { what: "the menu to close" });
+    };
+    const canvas = await waitVisible(driver, tid("canvas"));
+    const notesNow = async () => (await driver.findElements(tid("block-note"))).length;
+
+    // Empty canvas: add a block where you clicked.
+    const before = await notesNow();
+    await ctxClick(canvas, 560, 40);
+    const m1 = await menuText();
+    await run.shot("context-menu-canvas");
+    if (!m1.includes("Note") || !m1.includes("Paste") || !m1.includes("Fit everything")) throw new Error(`canvas menu: ${m1}`);
+    await run.shot("context-menu-canvas");
+    await clickWhenEnabled(driver, tid("ctx-add-note"));
+    await waitUntil(async () => (await notesNow()) === before + 1, { what: "the note added from the menu" });
+    await driver.actions().sendKeys("Menu note").perform();
+    await (await driver.findElement(tid("canvas"))).click();
+
+    // One gesture: click puts the caret in the text, pressing and dragging moves the block.
+    const notes = await driver.findElements(tid("block-note"));
+    const target = notes[notes.length - 1];
+    await target.click();
+    await driver.actions().sendKeys("ZZ").perform();
+    await waitUntil(async () => JSON.stringify(readRoot()).includes("ZZ"), { timeoutMs: 8000, what: "typing without a separate edit mode" });
+    await (await driver.findElement(tid("canvas"))).click();
+    const id = await target.getAttribute("data-block-id");
+    const x0 = readRoot().blocks.find((b) => b.id === id).x;
+    const a = driver.actions({ async: true });
+    await a.move({ origin: target }).press().move({ origin: "pointer", x: 40, y: 20 }).move({ origin: "pointer", x: 80, y: 40 }).move({ origin: "pointer", x: 40, y: 20 }).release().perform();
+    await waitUntil(async () => readRoot().blocks.find((b) => b.id === id).x !== x0, { timeoutMs: 8000, what: "dragging a note by its text" });
+    if (!JSON.stringify(readRoot()).includes("ZZ")) throw new Error("dragging lost the typed text");
+
+    // A block's own menu.
+    await ctxClick(target, 20, 20);
+    const m2 = await menuText();
+    if (!m2.includes("Duplicate") || !m2.includes("Delete") || !m2.includes("Color")) throw new Error(`block menu: ${m2}`);
+    await run.shot("context-menu-block");
+    await clickWhenEnabled(driver, tid("ctx-duplicate"));
+    await waitUntil(async () => (await notesNow()) === before + 2, { what: "the duplicate from the menu" });
+
+    // A text field gets Cut / Copy / Paste.
+    const name = await driver.findElement(tid("board-name"));
+    await ctxClick(name, 6, 6);
+    const m3 = await menuText();
+    if (!m3.includes("Paste") || !m3.includes("Select all")) throw new Error(`text field menu: ${m3}`);
+    await closeMenu();
+
+    // The sidebar and the rest of the app.
+    await ctxClick(await driver.findElement(tid("nav-context")), 6, 6);
+    const m4 = await menuText();
+    for (const w of ["Home", "Studio", "Assets", "Collapse sidebar"]) if (!m4.includes(w)) throw new Error(`sidebar menu lacks ${w}: ${m4}`);
+    await closeMenu();
+
+    // Studio: the chat and the game panel each have their own.
+    await clickWhenEnabled(driver, tid("nav-studio"));
+    await ctxClick(await waitVisible(driver, tid("chat-panel")), 200, 200);
+    const m5 = await menuText();
+    if (!m5.includes("New chat") || !m5.includes("Copy conversation")) throw new Error(`chat menu: ${m5}`);
+    await run.shot("context-menu-chat");
+    await closeMenu();
+    await ctxClick(await waitVisible(driver, tid("play-panel")), 200, 200);
+    const m6 = await menuText();
+    if (!m6.includes("Stop")) throw new Error(`play menu: ${m6}`);
+    await closeMenu();
+
+    // Settings and Assets.
+    await clickWhenEnabled(driver, tid("nav-assets"));
+    await ctxClick(await waitVisible(driver, tid("assets-section")), 300, 300);
+    const m7 = await menuText();
+    if (!m7.includes("Library") || !m7.includes("Refresh assets")) throw new Error(`assets menu: ${m7}`);
+    await closeMenu();
+    await clickWhenEnabled(driver, tid("nav-settings"));
+    await ctxClick(await waitVisible(driver, tid("settings-section")), 400, 300);
+    const m8 = await menuText();
+    if (!m8.includes("Godot") || !m8.includes("Accounts")) throw new Error(`settings menu: ${m8}`);
+    await closeMenu();
+
+    // Home: a game's row.
+    await clickWhenEnabled(driver, tid("nav-home"));
+    const row = await waitVisible(driver, tid("project-row"));
+    await ctxClick(row, 20, 10);
+    const m9 = await menuText();
+    if (!m9.includes("Open") || !m9.includes("Show in folder") || !m9.includes("Remove from list")) throw new Error(`game row menu: ${m9}`);
+    await run.shot("context-menu-home-row");
+    await closeMenu();
+    // Back into the game for the steps after.
+    await clickWhenEnabled(driver, tid("inspector-open"), { timeoutMs: 30_000 });
+  }, { needs: ["c7"] });
+
   await run.step("c7b", "Model choice and an attached picture reach the AI", async () => {
     // Model choice and an attached picture reach the AI (fake local model).
     await clickWhenEnabled(driver, tid("nav-studio"));

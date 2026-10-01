@@ -1,3 +1,4 @@
+import { useContextMenu } from "@/lib/context-menu";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bug, ChevronDown, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -207,8 +208,19 @@ function BoardCard({
   onOpen: (path: string) => void;
   onMove: (card: CardSummary, target: string) => void;
 }) {
+  const menu = useContextMenu();
   return (
     <li
+      onContextMenu={(e) =>
+        menu(e, [
+          { label: "Open", testId: "ctx-open", onSelect: () => onOpen(card.path) },
+          "separator",
+          { heading: "Move to" },
+          ...TASK_STATUSES.map((s) => ({ label: statusLabel(s), disabled: s === column, onSelect: () => onMove(card, s) })),
+          "separator",
+          { label: "Copy path", onSelect: () => void navigator.clipboard.writeText(card.path).catch(() => {}) },
+        ])
+      }
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", card.path);

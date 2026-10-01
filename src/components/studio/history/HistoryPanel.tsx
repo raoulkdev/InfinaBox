@@ -5,6 +5,7 @@
 // (product spec §7.5) — just what changed, when, and a safe way back. Every
 // row is a real snapshot from `snapshot_list`; nothing here is invented.
 
+import { useContextMenu } from "@/lib/context-menu";
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AlertCircle, History, Loader2, Save, Sparkles, Undo2 } from "lucide-react";
@@ -77,8 +78,15 @@ function SnapshotRow({ snapshot, latest, now, disabled, disabledReason, onGoBack
   // in visible text; the icon is just decoration beside it.
   const byAi = snapshot.thread_id !== null;
   const Icon = byAi ? Sparkles : Save;
+  const menu = useContextMenu();
   return (
     <li
+      onContextMenu={(e) =>
+        menu(e, [
+          { label: "Go back to this point", icon: <History />, disabled: disabled || latest, onSelect: () => onGoBack(snapshot), testId: "ctx-go-back" },
+          { label: "Copy name", onSelect: () => void navigator.clipboard.writeText(snapshot.title).catch(() => {}) },
+        ])
+      }
       data-testid="snapshot-row"
       data-snapshot-id={snapshot.id}
       className="group flex items-start gap-2 border-b border-border px-3 py-2 last:border-b-0 hover:bg-accent/50"

@@ -1,3 +1,4 @@
+import { useContextMenu } from "@/lib/context-menu";
 import { attachmentLabel, fileToBase64, nameFor, withAttachments } from "@/lib/attachments";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Loader2, MessageSquare, RefreshCw } from "lucide-react";
@@ -638,9 +639,22 @@ export function ChatPanel({
 
   const ready = !loading && problem === null && activeThreadId !== null;
   const provider = threads.find((t) => t.id === activeThreadId)?.provider ?? null;
+  const menu = useContextMenu();
+  const transcriptText = () =>
+    view.items
+      .flatMap((i) => (i.kind === "user" ? [`You: ${i.text}`] : i.kind === "assistant" ? [i.text] : []))
+      .join("\n\n");
 
   return (
     <div
+      onContextMenu={(e) =>
+        menu(e, [
+          { label: "New chat", onSelect: () => void handleCreateThread("New chat").catch(() => {}), disabled: !ready || busy },
+          { label: "Stop the AI", onSelect: () => void handleStop(), disabled: !busy || stopping },
+          { label: "Copy conversation", onSelect: () => void navigator.clipboard.writeText(transcriptText()).catch(() => {}), disabled: view.items.length === 0 },
+          { label: "Focus the message box", onSelect: () => composerRef.current?.focus() },
+        ])
+      }
       data-testid="chat-panel"
       data-busy={busy ? "true" : "false"}
       data-ready={ready ? "true" : "false"}

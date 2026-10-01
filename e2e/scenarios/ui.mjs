@@ -48,11 +48,11 @@ export async function uiChecks(run, app) {
   }, { needs: ["u1"] });
 
   await run.step("u3", "Dragging a panel reorders it, and the layout is saved in the app's settings", async () => {
-    await clickWhenEnabled(driver, tid("nav-context"));
-    await waitVisible(driver, tid("context-section"));
-    await waitUntil(async () => (await driver.findElements(By.css('[data-testid="context-section"] [data-testid="panel-reorder-grip"]'))).length >= 2, { what: "the panels' grips" });
-    const before = (await invokeCommand(driver, "layouts_get", {}))["context.notes"];
-    const grips = await driver.findElements(By.css('[data-testid="context-section"] [data-testid="panel-reorder-grip"]'));
+    await clickWhenEnabled(driver, tid("nav-code"));
+    await waitVisible(driver, tid("code-section"));
+    await waitUntil(async () => (await driver.findElements(By.css('[data-testid="code-section"] [data-testid="panel-reorder-grip"]'))).length >= 2, { what: "the panels' grips" });
+    const before = (await invokeCommand(driver, "layouts_get", {}))["build"];
+    const grips = await driver.findElements(By.css('[data-testid="code-section"] [data-testid="panel-reorder-grip"]'));
     // The first visible panel's grip: hover its panel so the grip accepts the pointer.
     let moved = false;
     for (const grip of grips) {
@@ -73,11 +73,11 @@ export async function uiChecks(run, app) {
     }
     if (!moved) throw new Error("no grip to drag");
     await new Promise((r) => setTimeout(r, 1200));
-    const mid = (await invokeCommand(driver, "layouts_get", {}))["context.notes"];
+    const mid = (await invokeCommand(driver, "layouts_get", {}))["build"];
     if (before && JSON.stringify(mid?.order) === JSON.stringify(before.order)) {
       // Pointer actions through the driver didn't move it: try the same gesture as synthetic events, to tell the app's logic from the driver.
       const synthetic = await driver.executeScript(`
-        const grip = document.querySelector('[data-testid="context-section"] [data-testid="panel-reorder-grip"]');
+        const grip = document.querySelector('[data-testid="code-section"] [data-testid="panel-reorder-grip"]');
         const r = grip.getBoundingClientRect();
         const x = r.x + r.width / 2, y = r.y + 2;
         const opts = (dx, buttons) => ({ bubbles: true, cancelable: true, clientX: x + dx, clientY: y, buttons, button: 0, pointerId: 1, pointerType: "mouse", isPrimary: true });
@@ -88,7 +88,7 @@ export async function uiChecks(run, app) {
       run.note(`driver drag did nothing; synthetic events sent: ${synthetic}`);
       await new Promise((r) => setTimeout(r, 1000));
     }
-    const after = (await invokeCommand(driver, "layouts_get", {}))["context.notes"];
+    const after = (await invokeCommand(driver, "layouts_get", {}))["build"];
     run.note(`before ${JSON.stringify(before?.order)}, after ${JSON.stringify(after?.order)}`);
     if (!after) throw new Error("no layout was saved in the app's settings");
     if (before && JSON.stringify(before.order) === JSON.stringify(after.order)) throw new Error("dragging the grip didn't reorder the panels");

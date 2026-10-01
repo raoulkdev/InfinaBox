@@ -1,3 +1,4 @@
+import { useContextMenu } from "@/lib/context-menu";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, Home, Network, PanelsTopLeft, Search, X } from "lucide-react";
 import {
@@ -52,6 +53,7 @@ export function DocumentsView({ projectPath, cards, cardsError, refreshTick, ope
   const [searching, setSearching] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const menu = useContextMenu();
   const seeding = useRef(false);
   const list = cards ?? [];
 
@@ -209,7 +211,20 @@ export function DocumentsView({ projectPath, cards, cardsError, refreshTick, ope
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col gap-2" data-testid="documents-view">
-      <div data-tauri-drag-region className="flex h-11 shrink-0 items-center gap-2 rounded-xl border border-border bg-card px-3">
+      <div
+        data-tauri-drag-region
+        onContextMenu={(e) =>
+          menu(e, [
+            { label: "Canvas", disabled: mode === "canvas", onSelect: () => setMode("canvas") },
+            { label: "Graph", disabled: mode === "graph", onSelect: () => setMode("graph") },
+            { label: "Search", onSelect: () => setSearching(true) },
+            ...(crumbs.length > 1
+              ? ["separator" as const, ...crumbs.slice(0, -1).map((b) => ({ label: `Go to ${b.title || "Untitled board"}`, onSelect: () => navigate(b.id) }))]
+              : []),
+          ])
+        }
+        className="flex h-11 shrink-0 items-center gap-2 rounded-xl border border-border bg-card px-3"
+      >
         {leading}
         <nav aria-label="Boards" data-testid="breadcrumbs" className="flex min-w-0 flex-1 items-center gap-0.5 text-sm">
           {crumbs.map((b, i) => {

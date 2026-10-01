@@ -1,3 +1,5 @@
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { useContextMenu } from "@/lib/context-menu";
 import { useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, LayoutGrid, List, Loader2, Receipt, RefreshCw, Search, Upload } from "lucide-react";
@@ -44,6 +46,13 @@ export function ProjectTab({
   const [importSource, setImportSource] = useState<string | null>(null);
   const [creditsOpen, setCreditsOpen] = useState(false);
   const [pickError, setPickError] = useState<string | null>(null);
+  const menu = useContextMenu();
+  const assetMenu = (e: React.MouseEvent, a: (typeof shown)[number]) =>
+    menu(e, [
+      { label: "Open", onSelect: () => onOpenAsset(a) },
+      { label: "Show in folder", onSelect: () => void revealItemInDir(`${projectPath}/${a.path}`).catch(() => {}) },
+      { label: "Copy path", onSelect: () => void navigator.clipboard.writeText(a.path).catch(() => {}) },
+    ]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -151,7 +160,7 @@ export function ProjectTab({
       ) : view === "grid" ? (
         <ul className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-3" data-testid="asset-grid">
           {shown.map((a) => (
-            <li key={a.path}>
+            <li key={a.path} onContextMenu={(e) => assetMenu(e, a)}>
               <button
                 type="button"
                 onClick={() => onOpenAsset(a)}
@@ -177,7 +186,7 @@ export function ProjectTab({
           {shown.map((a) => {
             const Icon = KIND_ICON[a.kind];
             return (
-              <li key={a.path}>
+              <li key={a.path} onContextMenu={(e) => assetMenu(e, a)}>
                 <button
                   type="button"
                   onClick={() => onOpenAsset(a)}

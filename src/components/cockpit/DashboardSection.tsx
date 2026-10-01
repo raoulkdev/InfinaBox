@@ -1,3 +1,5 @@
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { useContextMenu } from "@/lib/context-menu";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -689,9 +691,19 @@ function HomeLayout({
   onNewGame: () => void;
   error: string | null;
 }) {
+  const menu = useContextMenu();
   return (
     <div className="flex min-h-0 flex-1 gap-2" data-testid="home-layout">
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-xl border border-border bg-card">
+      <section
+        className="flex min-h-0 min-w-0 flex-1 flex-col rounded-xl border border-border bg-card"
+        onContextMenu={(e) =>
+          menu(e, [
+            { label: "New game", icon: <Sparkles />, onSelect: onNewGame },
+            { label: "Empty project", icon: <FolderPlus />, onSelect: onEmptyProject },
+            { label: "Open project", icon: <FolderOpen />, onSelect: onOpenFolder },
+          ])
+        }
+      >
         <div data-tauri-drag-region className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
           <h1 className="text-sm font-medium tracking-wide text-muted-foreground">
             Your games{projects.length > 0 ? ` · ${projects.length}` : ""}
@@ -734,6 +746,16 @@ function HomeLayout({
                       aria-pressed={active}
                       onClick={() => onSelect(project.path)}
                       onDoubleClick={() => onOpen(project.path)}
+                      onContextMenu={(e) => {
+                        onSelect(project.path);
+                        menu(e, [
+                          { label: "Open", onSelect: () => onOpen(project.path), testId: "ctx-open" },
+                          { label: "Show in folder", onSelect: () => void revealItemInDir(project.path).catch(() => {}) },
+                          { label: "Copy path", onSelect: () => void navigator.clipboard.writeText(project.path).catch(() => {}) },
+                          "separator",
+                          { label: "Remove from list", destructive: true, onSelect: () => onRemove(project.path) },
+                        ]);
+                      }}
                       className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/50 ${
                         active ? "bg-accent" : ""
                       }`}

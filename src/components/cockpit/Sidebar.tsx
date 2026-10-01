@@ -1,3 +1,4 @@
+import { useContextMenu } from "@/lib/context-menu";
 import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -220,6 +221,7 @@ function ProjectButtonRow({
 
 export function Sidebar({ active, onSelect, projectPath, onOpenProject }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(loadCollapsed);
+  const menu = useContextMenu();
 
   useEffect(() => {
     setLayout(COLLAPSED_STORAGE_KEY, collapsed);
@@ -227,6 +229,18 @@ export function Sidebar({ active, onSelect, projectPath, onOpenProject }: Sideba
 
   return (
     <motion.div
+      onContextMenu={(e) =>
+        menu(e, [
+          ...[...PINNED, ...(projectPath ? PROJECT_SECTIONS : []), SETTINGS_ITEM].map((item) => ({
+            label: item.label,
+            icon: <item.icon />,
+            disabled: item.id === active,
+            onSelect: () => onSelect(item.id),
+          })),
+          "separator",
+          { label: collapsed ? "Expand sidebar" : "Collapse sidebar", onSelect: () => setCollapsed((c) => !c) },
+        ])
+      }
       // Collapsed width has a floor: the macOS traffic lights are drawn
       // by the OS at a fixed offset (see `trafficLightPosition` in
       // tauri.conf.json — x: 22px inset, and the cluster itself is

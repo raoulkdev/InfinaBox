@@ -1,3 +1,4 @@
+import { useContextMenu } from "@/lib/context-menu";
 import { useEffect, useMemo, useState } from "react";
 import { Background, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -60,6 +61,7 @@ export function GraphView({
   const [links, setLinks] = useState<LinkGraph | null>(null);
   const [showBlocks, setShowBlocks] = useState(true);
   const [showNesting, setShowNesting] = useState(true);
+  const menu = useContextMenu();
 
   useEffect(() => {
     let cancelled = false;
@@ -170,6 +172,13 @@ export function GraphView({
         nodesConnectable={false}
         proOptions={{ hideAttribution: true }}
         onNodeClick={(_, node) => onPick((node.data as NodeData).target)}
+        onNodeContextMenu={(e, node) => menu(e, [{ label: "Open", testId: "ctx-open", onSelect: () => onPick((node.data as NodeData).target) }, { label: "Copy name", onSelect: () => void navigator.clipboard.writeText((node.data as NodeData).label).catch(() => {}) }])}
+        onPaneContextMenu={(e) =>
+          menu(e as unknown as React.MouseEvent, [
+            { label: showBlocks ? "Hide blocks" : "Show blocks", onSelect: () => setShowBlocks((v) => !v) },
+            { label: showNesting ? "Hide nesting lines" : "Show nesting lines", onSelect: () => setShowNesting((v) => !v) },
+          ])
+        }
       >
         <Background />
         <Controls showInteractive={false} />

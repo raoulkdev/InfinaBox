@@ -1,3 +1,4 @@
+import { useContextMenu } from "@/lib/context-menu";
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Package } from "lucide-react";
@@ -75,6 +76,7 @@ export function AssetsSection({ projectPath }: AssetsSectionProps) {
     );
   }
 
+  const menu = useContextMenu();
   const previewAsset = previewPath ? (assets?.find((a) => a.path === previewPath) ?? null) : null;
 
   return (
@@ -82,6 +84,13 @@ export function AssetsSection({ projectPath }: AssetsSectionProps) {
       value={tab}
       onValueChange={(value) => setTab(value as AssetsTab)}
       data-testid="assets-section"
+      onContextMenu={(e) =>
+        menu(e, [
+          ...TABS.map((t) => ({ label: t.label, disabled: t.id === tab, onSelect: () => setTab(t.id) })),
+          "separator",
+          { label: "Refresh assets", disabled: !projectPath || loading, onSelect: () => void refresh() },
+        ])
+      }
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2"
     >
       <div

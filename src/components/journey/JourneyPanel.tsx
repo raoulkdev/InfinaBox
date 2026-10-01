@@ -1,3 +1,4 @@
+import { useContextMenu } from "@/lib/context-menu";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Check, PartyPopper, RefreshCw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -127,8 +128,10 @@ export function JourneyPanel({ projectPath, onAskProducer }: JourneyPanelProps) 
   const open: Stage | null = journey ? (picked ?? journey.current) : null;
   const openStage = journey?.stages.find((s) => s.stage === open) ?? null;
 
+  const menu = useContextMenu();
   return (
     <section
+      onContextMenu={(e) => menu(e, [{ label: "Refresh", disabled: refreshing, onSelect: () => void load(false) }])}
       data-testid="journey-panel"
       aria-label="Your game's journey"
       className="flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-card p-4"

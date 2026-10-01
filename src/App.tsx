@@ -1,3 +1,4 @@
+import { ContextMenuHost, type MenuEntry } from "@/lib/context-menu";
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
@@ -130,11 +131,31 @@ function App() {
       ),
   };
 
+  // Right-clicks no page claims: where to go.
+  const appMenu = (): MenuEntry[] => {
+    const go = (label: string, target: Section, area: "home" | "project" = "project"): MenuEntry => ({
+      label,
+      disabled: section === target && (target !== "settings" || settingsArea === area),
+      onSelect: () => {
+        if (target === "settings") setSettingsArea(area);
+        setSection(target);
+      },
+    });
+    return [
+      go("Home", "home"),
+      ...(projectPath
+        ? [go("Studio", "studio"), go("Documents", "context"), go("Assets", "assets"), go("Playtest & Launch", "launch"), go("Code", "code")]
+        : []),
+      go("Settings", "settings", projectPath && !inHomeArea ? "project" : "home"),
+    ];
+  };
+
   return (
     // MotionConfig with reducedMotion="user" makes every animation in this
     // tree respect the OS-level "reduce motion" accessibility setting
     // automatically — Motion shortens/skips transitions for users who have
     // it on, with no per-component opt-in needed.
+    <ContextMenuHost fallback={appMenu}>
     <MotionConfig reducedMotion="user">
       {/* No dedicated top bar — every block is the same full height it
           always was. macOS still draws the traffic lights at a fixed
@@ -284,6 +305,7 @@ function App() {
         </AnimatePresence>
       </div>
     </MotionConfig>
+    </ContextMenuHost>
   );
 }
 

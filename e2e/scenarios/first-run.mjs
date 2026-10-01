@@ -504,14 +504,16 @@ export async function firstRun(run, app, config) {
     await clickWhenEnabled(driver, tid("nav-context"));
     const section = await waitVisible(driver, tid("context-section"));
     await waitUntil(async () => !(await isInert(driver, section)), { what: "Context to become the active section" });
+    // The starter Context is placed on the Documents canvas: its documents as blocks, its folders as boards.
+    await waitVisible(driver, tid("canvas"));
     const text = await waitUntil(
       async () => {
-        const t = await driver.executeScript("return arguments[0].innerText", section);
-        return [GAME_NAME, "Style guide", "First playable", "mechanic", "task"].every((n) => t.toLowerCase().includes(n.toLowerCase())) ? t : null;
+        const t = await driver.executeScript("return arguments[0].innerText + '\\n' + [...arguments[0].querySelectorAll('input')].map((i) => i.value).join('\\n')", section);
+        return [GAME_NAME, "mechanic", "task"].every((n) => t.toLowerCase().includes(n.toLowerCase())) ? t : null;
       },
-      { timeoutMs: 20_000, what: "the Context cards to be listed" },
+      { timeoutMs: 20_000, what: "the starter documents to be on the canvas" },
     );
-    run.note(`Context lists: ${JSON.stringify(text.split("\n").filter((l) => /^Cards|^(Concept|Mechanic|Style guide|Task)$/.test(l.trim())))}`);
+    run.note(`Documents shows: ${JSON.stringify(text.split("\n").filter(Boolean).slice(0, 12))}`);
     await run.shot("context-cards");
     for (const id of ["assets", "launch", "code", "settings"]) {
       await clickWhenEnabled(driver, tid(`nav-${id}`));

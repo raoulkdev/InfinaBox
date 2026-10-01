@@ -1,12 +1,8 @@
 import { useState } from "react";
 import { File, Folder, Trash2 } from "lucide-react";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { useContextMenu } from "@/lib/context-menu";
 import { Button } from "@/components/ui/button";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
 import { DeleteEntryDialog } from "@/components/cockpit/DeleteEntryDialog";
 import { cn } from "@/lib/utils";
 import type { FileEntry } from "@/types/fs";
@@ -32,6 +28,15 @@ export function FileGrid({
   onDeleteEntry,
 }: FileGridProps) {
   const [pendingDelete, setPendingDelete] = useState<FileEntry | null>(null);
+  const menu = useContextMenu();
+  const entryMenu = (e: React.MouseEvent, entry: FileEntry) =>
+    menu(e, [
+      { label: entry.is_dir ? "Open folder" : "Open", onSelect: () => (entry.is_dir ? onOpenFolder(entry.path) : onSelectFile(entry.path)) },
+      { label: "Show in folder", onSelect: () => void revealItemInDir(entry.path).catch(() => {}) },
+      { label: "Copy path", onSelect: () => void navigator.clipboard.writeText(entry.path).catch(() => {}) },
+      "separator",
+      { label: "Delete", destructive: true, icon: <Trash2 />, testId: "ctx-delete", onSelect: () => setPendingDelete(entry) },
+    ]);
 
   return (
     <>
@@ -40,9 +45,9 @@ export function FileGrid({
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(76px,1fr))] gap-1 p-3">
           {entries.map((entry) => (
-            <ContextMenu key={entry.path}>
-              <ContextMenuTrigger asChild>
-                <Button
+            <Button
+              key={entry.path}
+              onContextMenu={(e) => entryMenu(e, entry)}
                   type="button"
                   variant="ghost"
                   onClick={() => (entry.is_dir ? onOpenFolder(entry.path) : onSelectFile(entry.path))}
@@ -60,14 +65,6 @@ export function FileGrid({
                     {entry.name}
                   </span>
                 </Button>
-              </ContextMenuTrigger>
-              <ContextMenuContent>
-                <ContextMenuItem variant="destructive" onSelect={() => setPendingDelete(entry)}>
-                  <Trash2 />
-                  Delete
-                </ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu>
           ))}
         </div>
       )}

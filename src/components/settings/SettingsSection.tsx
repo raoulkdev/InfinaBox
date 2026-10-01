@@ -1,3 +1,4 @@
+import { useContextMenu } from "@/lib/context-menu";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AlertCircle, Bot, CheckCircle2, Cpu, Info, KeyRound, Loader2, Plug, RotateCcw, Unplug, type LucideIcon } from "lucide-react";
 import { GodotSettings } from "./GodotSettings";
@@ -43,9 +44,14 @@ export function SettingsSection({ projectPath }: SettingsSectionProps) {
   }
 
   const current = CATEGORIES.find((c) => c.id === category)!;
+  const menu = useContextMenu();
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 gap-2" data-testid="settings-section">
+    <div
+      className="flex min-h-0 min-w-0 flex-1 gap-2"
+      data-testid="settings-section"
+      onContextMenu={(e) => menu(e, CATEGORIES.map((c) => ({ label: c.label, icon: <c.icon />, disabled: c.id === category, onSelect: () => select(c.id) })))}
+    >
       <nav
         aria-label="Settings"
         className="flex w-56 shrink-0 flex-col gap-1 rounded-xl border border-border bg-card p-2"

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignStartHorizontal, AlignStartVertical, ArrowDownToLine, ArrowUpToLine, Copy, Maximize, Minus, Plus, Trash2 } from "lucide-react";
+import { revealItemInDir, openUrl } from "@tauri-apps/plugin-opener";
+import { useContextMenu, type MenuEntry } from "@/lib/context-menu";
 import { boardSaveFile } from "@/lib/studio-api";
 import { getLayout, setLayout } from "@/lib/layout-store";
 import type { CardSummary } from "@/lib/studio-types";
@@ -176,12 +178,24 @@ export function CanvasView(props: CanvasViewProps) {
     setView({ zoom, x: (width - u.w * zoom) / 2 - u.x * zoom + 30, y: (height - u.h * zoom) / 2 - u.y * zoom });
   }, []);
 
+  // The first fit waits until the board is actually on screen (a section that
+  // isn't showing has no size).
+  const [wrapW, setWrapW] = useState(0);
   useEffect(() => {
-    if (needsFit.current && Object.keys(rects).length > 0) {
+    const wrap = wrapRef.current;
+    if (!wrap || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setWrapW(wrap.clientWidth));
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!needsFit.current || wrapW === 0) return;
+    const u = unionRect(Object.values(rects));
+    if (u && u.w > 0) {
       needsFit.current = false;
       fit();
     }
-  }, [rects, fit]);
+  }, [rects, fit, wrapW]);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -553,8 +567,11 @@ export function CanvasView(props: CanvasViewProps) {
       setSel(hit);
     } else if (d.kind === "move") {
       if (!d.moved && Math.hypot(e.clientX - d.cx, e.clientY - d.cy) < 4) return;
+      window.getSelection()?.removeAllRanges();
       d.moved = true;
       setEditingId(null);
+      (document.activeElement as HTMLElement | null)?.blur?.();
+      window.getSelection()?.removeAllRanges();
       let dx = (e.clientX - d.cx) / v.zoom;
       let dy = (e.clientY - d.cy) / v.zoom;
       const found: Guide[] = [];
@@ -740,14 +757,20 @@ export function CanvasView(props: CanvasViewProps) {
       return;
     }
     if (!L.current.sel.has(b.id)) setSel(new Set([b.id]));
-    if (t.closest(INTERACTIVE)) return;
+    // One gesture does both: press-and-drag moves the block, a plain click
+    // puts the caret in the text. A field that already has the caret keeps
+    // its own drag (selecting text), and buttons never start a move.
+    const hit = t.closest<HTMLElement>(INTERACTIVE);
+    if (hit) {
+      const field = hit.matches('input,textarea,[contenteditable="true"],[contenteditable="plaintext-only"]') && !hit.closest("[data-no-drag]");
+      if (!field || document.activeElement === hit) return;
+    }
     startMove(e, b.id);
   };
 
   const onBlockDouble = (b: Block) => {
     if (b.type === "doc") onOpenDoc(b.ref);
     else if (b.type === "board" && b.ref) onOpenBoard(b.ref);
-    else if (EDITS_IN_PLACE.has(b.type) || b.type === "sketch") setEditingId(b.id);
   };
 
   const startResize = (e: React.PointerEvent, b: Block, handle: "se" | "e") => {
@@ -1001,6 +1024,67 @@ export function CanvasView(props: CanvasViewProps) {
       })()
     : null;
 
+  const menu = useContextMenu();
+  const onMenu = (e: React.MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.closest("[data-canvas-ui]")) return;
+    const at = toWorld(e.clientX, e.clientY);
+    const arrowId = t.closest<SVGGElement>("[data-arrow-id]")?.dataset.arrowId;
+    const blockId = arrowId ?? t.closest<HTMLElement>("[data-block-id]")?.dataset.blockId;
+    const blk = blockId ? L.current.byId.get(blockId) : undefined;
+    if (!blk) {
+      const kinds: [BlockType, string][] = [["note", "Note"], ["doc", "Document"], ["todo", "To-do list"], ["column", "Column"], ["board", "Board"], ["image", "Image"], ["file", "File"], ["link", "Link"], ["sketch", "Sketch"], ["swatch", "Color"], ["table", "Table"], ["text", "Text"], ["comment", "Comment"]];
+      menu(e, [
+        { heading: "Add here" },
+        ...kinds.map<MenuEntry>(([type, label]) => ({ label, testId: `ctx-add-${type}`, onSelect: () => add(type, at) })),
+        "separator",
+        { label: "Paste", shortcut: "⌘V", disabled: !clipboard, onSelect: paste },
+        { label: "Select all", shortcut: "⌘A", onSelect: () => select(L.current.board.blocks.filter((b) => b.type !== "arrow" && !b.col).map((b) => b.id)) },
+        "separator",
+        { label: "Undo", shortcut: "⌘Z", disabled: !store.canUndo, onSelect: store.undo },
+        { label: "Redo", shortcut: "⇧⌘Z", disabled: !store.canRedo, onSelect: store.redo },
+        "separator",
+        { label: "Fit everything", onSelect: fit },
+        { label: "Zoom to 100%", onSelect: () => setView((v) => ({ ...v, zoom: 1 })) },
+        { label: "Search", shortcut: "⌘F", onSelect: onSearch },
+      ]);
+      return;
+    }
+    if (!L.current.sel.has(blk.id)) setSel(new Set([blk.id]));
+    const chosen = L.current.sel.has(blk.id) ? [...L.current.sel] : [blk.id];
+    const single = chosen.length === 1;
+    const notes = chosen.map((id) => L.current.byId.get(id)).filter((b): b is Block => !!b);
+    const items: MenuEntry[] = [];
+    if (single && blk.type === "doc") items.push({ label: "Open document", testId: "ctx-open", onSelect: () => onOpenDoc(blk.ref) });
+    if (single && blk.type === "board" && blk.ref) items.push({ label: "Open board", testId: "ctx-open", onSelect: () => onOpenBoard(blk.ref) });
+    if (single && blk.type === "link" && isWebUrl(blk.url)) items.push({ label: "Open link", onSelect: () => void openUrl(blk.url).catch(() => {}) });
+    if (single && (blk.type === "file" || blk.type === "image") && blk.src) items.push({ label: "Show in folder", onSelect: () => void revealItemInDir(`${projectPath}/${blk.src}`).catch(() => {}) });
+    if (items.length) items.push("separator");
+    if (blk.type !== "arrow") {
+      items.push(
+        { label: "Duplicate", shortcut: "⌘D", testId: "ctx-duplicate", onSelect: () => void duplicate(selectedBlocks(), L.current.board, { dx: 28, dy: 28 }) },
+        { label: "Copy", shortcut: "⌘C", onSelect: () => void copy(false) },
+        { label: "Cut", shortcut: "⌘X", onSelect: () => void copy(true) },
+        "separator",
+        { label: "Bring to front", shortcut: "]", onSelect: () => order(true) },
+        { label: "Send to back", shortcut: "[", onSelect: () => order(false) },
+      );
+    }
+    if (notes.length && notes.every((b) => b.type === "note")) {
+      items.push("separator", { heading: "Color" });
+      for (const c of NOTE_COLORS) {
+        items.push({ label: c[0]!.toUpperCase() + c.slice(1), onSelect: () => commit((tx) => tx.board(boardId).blocks.forEach((b) => chosen.includes(b.id) && b.type === "note" && (b.color = c))) });
+      }
+    }
+    const aligned = notes.filter((b) => !b.col && b.type !== "arrow");
+    if (aligned.length > 1) {
+      items.push("separator", { heading: "Align" });
+      for (const [m, label] of [["left", "Left"], ["hcenter", "Center"], ["right", "Right"], ["top", "Top"], ["vcenter", "Middle"], ["bottom", "Bottom"]] as const) items.push({ label, onSelect: () => align(m) });
+    }
+    items.push("separator", { label: "Delete", shortcut: "⌫", destructive: true, testId: "ctx-delete", onSelect: remove });
+    menu(e, items);
+  };
+
   const dots = Math.max(8, 24 * view.zoom);
   const hand = tool === "hand" || space;
 
@@ -1016,6 +1100,7 @@ export function CanvasView(props: CanvasViewProps) {
         backgroundPosition: `${view.x}px ${view.y}px`,
       }}
       onPointerDown={onWrapDown}
+      onContextMenu={onMenu}
       onDoubleClick={(e) => {
         if ((e.target as HTMLElement).closest("[data-block-id],[data-canvas-ui]")) return;
         const r = wrapRef.current!.getBoundingClientRect();
@@ -1066,7 +1151,6 @@ export function CanvasView(props: CanvasViewProps) {
                     if (e.shiftKey) setSel((s) => new Set(s.has(a.id) ? [...s].filter((i) => i !== a.id) : [...s, a.id]));
                     else setSel(new Set([a.id]));
                   }}
-                  onDoubleClick={() => setEditingId(a.id)}
                 />
                 <line x1={p1.x} y1={p1.y} x2={p2.x - 8 * Math.cos(ang)} y2={p2.y - 8 * Math.sin(ang)} stroke="currentColor" strokeWidth={on ? 2.5 : 2} />
                 <polygon points={`${p2.x},${p2.y} ${hx(0.4)},${hy(0.4)} ${hx(-0.4)},${hy(-0.4)}`} fill="currentColor" />
@@ -1094,8 +1178,7 @@ export function CanvasView(props: CanvasViewProps) {
           if (!rf || !rt) return null;
           const p1 = edgePoint(rf, { x: rt.x + rt.w / 2, y: rt.y + rt.h / 2 });
           const p2 = edgePoint(rt, { x: rf.x + rf.w / 2, y: rf.y + rf.h / 2 });
-          const editing = editingId === a.id;
-          if (!a.label && !editing) return null;
+          if (!a.label && !sel.has(a.id)) return null;
           return (
             <div
               key={a.id}
@@ -1106,21 +1189,15 @@ export function CanvasView(props: CanvasViewProps) {
                 e.stopPropagation();
                 setSel(new Set([a.id]));
               }}
-              onDoubleClick={() => setEditingId(a.id)}
             >
-              {editing ? (
-                <input
-                  autoFocus
-                  value={a.label}
-                  size={Math.max(6, a.label.length + 1)}
-                  onChange={(e) => update(a.id, { label: e.target.value })}
-                  onBlur={() => setEditingId(null)}
-                  onKeyDown={(e) => (e.key === "Enter" || e.key === "Escape") && (e.target as HTMLElement).blur()}
-                  className="bg-transparent text-center outline-none"
-                />
-              ) : (
-                a.label
-              )}
+              <input
+                value={a.label}
+                placeholder="Label"
+                size={Math.max(5, a.label.length + 1)}
+                onChange={(e) => update(a.id, { label: e.target.value })}
+                onKeyDown={(e) => (e.key === "Enter" || e.key === "Escape") && (e.target as HTMLElement).blur()}
+                className="bg-transparent text-center outline-none"
+              />
             </div>
           );
         })}
@@ -1151,7 +1228,7 @@ export function CanvasView(props: CanvasViewProps) {
         canRedo={store.canRedo}
       />
 
-      {barPos && selBlocks.length > 0 && !editingId && (
+      {barPos && selBlocks.length > 0 && (
         <div
           data-canvas-ui
           data-testid="selection-bar"

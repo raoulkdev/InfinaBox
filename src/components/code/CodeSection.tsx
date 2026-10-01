@@ -13,7 +13,7 @@ export interface CodeSectionProps {
 
 export function CodeSection({ projectPath }: CodeSectionProps) {
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2">
+    <div data-testid="code-section" className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2">
       <div
         data-tauri-drag-region
         className="flex shrink-0 items-center gap-3 rounded-xl border border-border bg-card px-3 py-2"

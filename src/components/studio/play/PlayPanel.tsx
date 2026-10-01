@@ -5,6 +5,7 @@
 // game's state, every output line, and every parsed error. Failures from
 // the backend are shown with their real text rather than smoothed over.
 
+import { useContextMenu } from "@/lib/context-menu";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Loader2, Play, RotateCw, Square } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -246,6 +247,7 @@ export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
   }
 
   const live = gameState === "running" || gameState === "starting";
+  const menu = useContextMenu();
   const version = godot.status === "ready" ? godot.godot.version : null;
 
   return (
@@ -255,6 +257,12 @@ export function PlayPanel({ projectPath, onAskAiToFix }: PlayPanelProps) {
         godot.status === "ready" ? (godot.godot.installed ? "installed" : "missing") : godot.status
       }
       data-game-state={gameState}
+      onContextMenu={(e) =>
+        menu(e, [
+          { label: live ? "Restart" : "Play", disabled: pending !== null || godot.status !== "ready" || !godot.godot.installed, onSelect: () => void run() },
+          { label: "Stop", disabled: !live || pending !== null, onSelect: () => void stop() },
+        ])
+      }
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card"
     >
       <div

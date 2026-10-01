@@ -1,3 +1,4 @@
+import { useContextMenu } from "@/lib/context-menu";
 import { Gamepad2, Settings as SettingsIcon, type LucideIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
@@ -16,8 +17,13 @@ const ITEMS: { id: HomePage; label: string; icon: LucideIcon }[] = [
 ];
 
 export function HomeSidebar({ active, onSelect }: { active: HomePage; onSelect: (page: HomePage) => void }) {
+  const menu = useContextMenu();
   return (
-    <div className="relative flex h-full w-[212px] shrink-0 flex-col" data-testid="home-sidebar">
+    <div
+      className="relative flex h-full w-[212px] shrink-0 flex-col"
+      data-testid="home-sidebar"
+      onContextMenu={(e) => menu(e, ITEMS.map((i) => ({ label: i.label, icon: <i.icon />, disabled: i.id === active, onSelect: () => onSelect(i.id) })))}
+    >
       {/* Same shell as the game sidebar: a full-height card whose empty
        * strip behind the macOS traffic lights is real drag space. */}
       <div data-tauri-drag-region className="absolute inset-0 rounded-xl border border-border bg-card" />

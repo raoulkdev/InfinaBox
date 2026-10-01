@@ -127,14 +127,14 @@ function Editable({
   const empty = html ? !value.replace(/<[^>]*>/g, "").trim() : !value;
   return (
     <div className="relative">
-      {empty && !editing && <span className="pointer-events-none absolute inset-0 opacity-50">{placeholder}</span>}
+      {empty && <span className="pointer-events-none absolute inset-0 opacity-50">{placeholder}</span>}
       <div
         ref={ref}
-        contentEditable={editing ? (html ? true : ("plaintext-only" as unknown as boolean)) : false}
+        contentEditable={html ? true : ("plaintext-only" as unknown as boolean)}
         suppressContentEditableWarning
         spellCheck={false}
-        data-editable={editing ? "" : undefined}
-        className={cn("min-h-[1.25em] whitespace-pre-wrap break-words outline-none", editing && "cursor-text select-text", className)}
+        data-editable=""
+        className={cn("min-h-[1.25em] cursor-text select-text whitespace-pre-wrap break-words outline-none", className)}
         style={style}
         onInput={(e) => onChange(read(e.currentTarget))}
         onBlur={(e) => {
@@ -203,6 +203,7 @@ function NoteContent({ b, ctx }: { b: Extract<Block, { type: "note" }>; ctx: Blo
         html
         value={b.html}
         editing={editing}
+        className="min-h-12"
         placeholder="Note"
         onChange={(html) => put(ctx, b, { html })}
         onDone={ctx.stopEditing}
@@ -502,44 +503,37 @@ function FileContent({ b, ctx }: { b: Extract<Block, { type: "file" }>; ctx: Blo
 // ---- link ----
 
 function LinkContent({ b, ctx }: { b: Extract<Block, { type: "link" }>; ctx: BlockCtx }) {
-  const editing = ctx.editingId === b.id || !b.url;
   const web = isWebUrl(b.url);
   return (
-    <div className="rounded-lg border border-border bg-card p-3 shadow-sm">
-      {editing ? (
-        <div className="flex flex-col gap-1" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) ctx.stopEditing(); }}>
-          <input
-            autoFocus
-            value={b.url}
-            placeholder="https://"
-            data-testid="link-url"
-            onChange={(e) => put(ctx, b, { url: e.target.value })}
-            onBlur={(e) => {
-              const fixed = normalizeUrl(e.target.value);
-              if (fixed !== b.url) put(ctx, b, { url: fixed });
-            }}
-            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLElement).blur()}
-            className={cn(field, "text-sm")}
-          />
-          <input value={b.title} placeholder="Title" onChange={(e) => put(ctx, b, { title: e.target.value })} className={cn(field, "text-sm font-medium")} />
-          <input value={b.description} placeholder="Description" onChange={(e) => put(ctx, b, { description: e.target.value })} className={cn(field, "text-xs")} />
-        </div>
-      ) : (
-        <>
-          <div className="line-clamp-2 text-sm font-medium">{b.title || hostOf(b.url)}</div>
-          {b.description && <div className="mt-0.5 line-clamp-3 text-xs text-muted-foreground">{b.description}</div>}
-          <button
-            type="button"
-            data-no-drag
-            disabled={!web}
-            onClick={() => web && void openUrl(b.url).catch(() => {})}
-            className="mt-1.5 flex max-w-full items-center gap-1 truncate text-[11px] text-muted-foreground hover:text-foreground disabled:cursor-default"
-          >
-            <ArrowUpRight className="size-3 shrink-0" />
-            <span className="truncate">{hostOf(b.url)}</span>
-          </button>
-        </>
-      )}
+    <div className="rounded-lg border border-border bg-card p-2.5 shadow-sm">
+      <input value={b.title} placeholder={b.url ? hostOf(b.url) : "Title"} onChange={(e) => put(ctx, b, { title: e.target.value })} className={cn(field, "w-full text-sm font-medium")} />
+      <input value={b.description} placeholder="Description" onChange={(e) => put(ctx, b, { description: e.target.value })} className={cn(field, "w-full text-xs text-muted-foreground")} />
+      <div className="mt-1 flex items-center gap-1">
+        <input
+          autoFocus={ctx.editingId === b.id}
+          value={b.url}
+          placeholder="https://"
+          data-testid="link-url"
+          onChange={(e) => put(ctx, b, { url: e.target.value })}
+          onBlur={(e) => {
+            const fixed = normalizeUrl(e.target.value);
+            if (fixed !== b.url) put(ctx, b, { url: fixed });
+          }}
+          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLElement).blur()}
+          className={cn(field, "flex-1 text-[11px] text-muted-foreground")}
+        />
+        <button
+          type="button"
+          data-no-drag
+          disabled={!web}
+          title="Open"
+          aria-label="Open link"
+          onClick={() => web && void openUrl(b.url).catch(() => {})}
+          className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground disabled:opacity-40"
+        >
+          <ArrowUpRight className="size-3.5" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -593,16 +587,21 @@ function SketchContent({ b, ctx }: { b: Extract<Block, { type: "sketch" }>; ctx:
         ))}
         {live.current && <path d={d(live.current)} fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
       </svg>
-      {editing && (
-        <div data-no-drag className="absolute right-1.5 top-1.5 flex gap-1">
+      <div data-no-drag className={cn("absolute right-1.5 top-1.5 flex gap-1", !editing && "opacity-0 transition-opacity group-hover/block:opacity-100")}>
+        {editing && (
           <button type="button" className="rounded bg-background/90 px-1.5 py-0.5 text-[11px] hover:bg-muted" onClick={() => put(ctx, b, { strokes: b.strokes.slice(0, -1) })}>
             Undo stroke
           </button>
-          <button type="button" className="rounded bg-background/90 px-1.5 py-0.5 text-[11px] hover:bg-muted" onClick={ctx.stopEditing}>
-            Done
-          </button>
-        </div>
-      )}
+        )}
+        <button
+          type="button"
+          data-testid="sketch-toggle"
+          className="rounded bg-background/90 px-1.5 py-0.5 text-[11px] hover:bg-muted"
+          onClick={() => (editing ? ctx.stopEditing() : ctx.startEditing(b.id))}
+        >
+          {editing ? "Done" : "Draw"}
+        </button>
+      </div>
     </div>
   );
 }
