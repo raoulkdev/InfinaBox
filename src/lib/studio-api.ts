@@ -317,3 +317,24 @@ export const onConnectExit = (cb: (p: ConnectExitPayload) => void) => subscribe(
 
 export const onAutofixState = (cb: (p: AutoFixStatePayload) => void) =>
   subscribe("autofix-state", cb);
+
+export interface CardHit {
+  path: string;
+  title: string;
+  snippet: string;
+}
+
+export const contextSearch = (projectPath: string, query: string) =>
+  invoke<CardHit[]>("context_search", { projectPath, query });
+
+export interface StoredBoard {
+  id: string;
+  json: string;
+}
+
+export const boardsReadAll = (projectPath: string) => invoke<StoredBoard[]>("boards_read_all", { projectPath });
+export const boardWrite = (projectPath: string, id: string, json: string) =>
+  invoke<void>("board_write", { projectPath, id, json });
+export const boardDelete = (projectPath: string, id: string) => invoke<void>("board_delete", { projectPath, id });
+export const boardSaveFile = (projectPath: string, name: string, dataBase64: string) =>
+  invoke<string>("board_save_file", { projectPath, name, dataBase64 });

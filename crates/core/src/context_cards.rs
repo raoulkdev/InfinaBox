@@ -585,16 +585,55 @@ fn resolve_link(from: &str, raw: &str, existing: &HashSet<String>) -> Option<Str
     .find(|c| existing.contains(c))
 }
 
+/// The targets of `[[wiki links]]` in a body (`[[Page]]`, `[[folder/page]]`,
+/// `[[Page|label]]`, `[[Page#heading]]`), in order, without repeats.
+pub fn wiki_targets(body: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut rest = body;
+    while let Some(start) = rest.find("[[") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("]]") else { break };
+        let inner = &after[..end];
+        rest = &after[end + 2..];
+        if inner.contains('\n') || inner.is_empty() {
+            continue;
+        }
+        let target = inner.split('|').next().unwrap_or("").split('#').next().unwrap_or("").trim();
+        if !target.is_empty() && !out.iter().any(|t| t == target) {
+            out.push(target.to_string());
+        }
+    }
+    out
+}
+
+/// The card a wiki link names: by path (with or without `.md`), else by title.
+fn resolve_wiki(from: &str, raw: &str, existing: &HashSet<String>, titles: &BTreeMap<String, String>) -> Option<String> {
+    resolve_link(from, raw, existing)
+        .or_else(|| resolve_link(from, &format!("{raw}.md"), existing))
+        .or_else(|| titles.get(&raw.to_lowercase()).cloned())
+}
+
 fn summarize(cards: &[Card]) -> (Vec<CardSummary>, Vec<LinkEdge>) {
     let existing: HashSet<String> = cards.iter().map(|c| c.path.clone()).collect();
+    let mut titles: BTreeMap<String, String> = BTreeMap::new();
+    for card in cards {
+        titles.entry(display_title(card).to_lowercase()).or_insert_with(|| card.path.clone());
+    }
     let mut backlinks: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut summaries = Vec::new();
     let mut edges = Vec::new();
     for card in cards {
         let mut links: Vec<String> = Vec::new();
         let mut broken: Vec<String> = Vec::new();
-        for raw in &card.meta.links {
-            match resolve_link(&card.path, raw, &existing) {
+        let wiki = wiki_targets(&card.body);
+        let raws = card.meta.links.iter().map(|r| (r, false)).chain(wiki.iter().map(|r| (r, true)));
+        for (raw, is_wiki) in raws {
+            let found = if is_wiki {
+                resolve_wiki(&card.path, raw, &existing, &titles)
+            } else {
+                resolve_link(&card.path, raw, &existing)
+            };
+            match found {
                 Some(target) => {
                     if !links.contains(&target) {
                         links.push(target.clone());
@@ -1259,6 +1298,37 @@ pub fn board(project: &Path, types: &[CardType]) -> Result<Board> {
     Ok(Board { columns: ordered })
 }
 
+/// One search hit: the card, and the line it matched on (or its title).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CardHit {
+    pub path: String,
+    pub title: String,
+    pub snippet: String,
+}
+
+/// Cards whose title or text contains `query` (case-insensitive), best first
+/// (title matches, then body), at most `limit`.
+pub fn search(project: &Path, query: &str, limit: usize) -> Result<Vec<CardHit>> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+    let cards = load_cards(project)?;
+    let mut hits: Vec<(bool, CardHit)> = Vec::new();
+    for card in &cards {
+        let title = display_title(card);
+        let in_title = title.to_lowercase().contains(&q);
+        let line = card.body.lines().find(|l| l.to_lowercase().contains(&q));
+        if !in_title && line.is_none() {
+            continue;
+        }
+        let snippet: String = line.unwrap_or("").trim().chars().take(140).collect();
+        hits.push((in_title, CardHit { path: card.path.clone(), title, snippet }));
+    }
+    hits.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.path.cmp(&b.1.path)));
+    Ok(hits.into_iter().take(limit).map(|(_, h)| h).collect())
+}
+
 pub fn graph(project: &Path) -> Result<LinkGraph> {
     let (nodes, edges) = summarize(&load_cards(project)?);
     Ok(LinkGraph { nodes, edges })
@@ -1266,6 +1336,26 @@ pub fn graph(project: &Path) -> Result<LinkGraph> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn wiki_links_resolve_by_title_or_path_and_search_finds_text() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = dir.path();
+        write_card(p, "world.md", &CardMeta { title: Some("The World".into()), ..Default::default() }, "Islands. Needs a [[Hero|the hero]].").unwrap();
+        write_card(p, "cast/hero.md", &CardMeta { title: Some("Hero".into()), ..Default::default() }, "See [[the world]], [[cast/hero]] and [[Missing]].").unwrap();
+        assert_eq!(wiki_targets("a [[X|y]] [[X#h]] [[ ]] [[Z]]"), ["X", "Z"]);
+        let g = graph(p).unwrap();
+        let has = |a: &str, b: &str| g.edges.iter().any(|e| e.from == a && e.to == b && !e.broken);
+        assert!(has("world.md", "cast/hero.md"), "{:?}", g.edges);
+        assert!(has("cast/hero.md", "world.md"));
+        assert!(has("cast/hero.md", "cast/hero.md"));
+        assert!(g.edges.iter().any(|e| e.broken && e.to == "Missing"));
+        let hits = search(p, "island", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "world.md");
+        assert_eq!(search(p, "hero", 10).unwrap()[0].path, "cast/hero.md");
+        assert!(search(p, "  ", 10).unwrap().is_empty());
+    }
     use super::*;
 
     fn project() -> tempfile::TempDir {

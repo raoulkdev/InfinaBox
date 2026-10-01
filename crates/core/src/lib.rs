@@ -10,6 +10,7 @@ pub mod app_settings;
 pub mod assets;
 pub mod ask;
 pub mod autofix;
+pub mod boards;
 pub mod chat_store;
 pub mod connect;
 pub mod context_cards;

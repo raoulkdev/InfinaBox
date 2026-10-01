@@ -1,25 +1,22 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { motion } from "motion/react";
 import { BookOpen } from "lucide-react";
-import { GraphsSection } from "@/components/cockpit/GraphsSection";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { onProjectFilesChanged } from "@/lib/fs-watch";
 import { fadeTransition } from "@/lib/motion";
 import { contextList } from "@/lib/studio-api";
 import type { CardSummary } from "@/lib/studio-types";
 import { BoardTab } from "./BoardTab";
-import { NotesTab, type OpenRequest } from "./NotesTab";
+import { DocumentsView, type OpenRequest } from "@/components/documents/DocumentsView";
 import type { AskAi } from "./aiActions";
-import { MapTab } from "./MapTab";
 import { errorText } from "./cardTypes";
 
-// The Context section (product spec §7.2): the one model of the game —
-// its concept, style guide, mechanics and tasks — as typed Markdown cards in
-// `.ibproject/context/`, seen as a list (Cards), a task Board, a Map of the
-// links between cards, and graph documents over `.ibproject/graphs/`. Both
-// the person and their AI read and write these cards. It's one of
-// App.tsx's permanently mounted sections: any tab can hold an unsaved card
-// or graph edit, so no tab is ever unmounted by switching away.
+// The Context section (product spec §7.2), shown as "Documents": the game's
+// documents and notes laid out on boards you arrange freely (see
+// `components/documents/`), plus a Tasks tab with the status board of task
+// cards. Both the person and their AI read and write the cards. It's one of
+// App.tsx's permanently mounted sections: an open document or an unsaved board
+// edit can be in flight, so no tab is ever unmounted by switching away.
 
 export interface ContextSectionProps {
   projectPath: string | null;
@@ -27,17 +24,24 @@ export interface ContextSectionProps {
   onAskAi: AskAi;
 }
 
-type ContextTab = "notes" | "board" | "map" | "graphs";
+type ContextTab = "documents" | "tasks";
 
 const TABS: { id: ContextTab; label: string }[] = [
-  { id: "notes", label: "Notes" },
-  { id: "board", label: "Board" },
-  { id: "map", label: "Map" },
-  { id: "graphs", label: "Graphs" },
+  { id: "documents", label: "Documents" },
+  { id: "tasks", label: "Tasks" },
 ];
 
 export function ContextSection({ projectPath, onAskAi }: ContextSectionProps) {
-  const [tab, setTab] = useState<ContextTab>("notes");
+  const [tab, setTab] = useState<ContextTab>("documents");
+  const switcher = (
+    <TabsList>
+      {TABS.map((t) => (
+        <TabsTrigger key={t.id} value={t.id} className="px-3">
+          {t.label}
+        </TabsTrigger>
+      ))}
+    </TabsList>
+  );
 
   return (
     <Tabs
@@ -46,26 +50,8 @@ export function ContextSection({ projectPath, onAskAi }: ContextSectionProps) {
       data-testid="context-section"
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2"
     >
-      <div
-        data-tauri-drag-region
-        className="flex shrink-0 items-center gap-3 rounded-xl border border-border bg-card px-3 py-2"
-      >
-        <div data-tauri-drag-region className="flex min-w-0 flex-1 flex-col">
-          <span className="text-xs font-medium tracking-wide text-muted-foreground">Notes</span>
-        </div>
-        {projectPath && (
-          <TabsList>
-            {TABS.map((t) => (
-              <TabsTrigger key={t.id} value={t.id} className="px-3">
-                {t.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        )}
-      </div>
-
       {projectPath ? (
-        <ContextViews projectPath={projectPath} tab={tab} setTab={setTab} onAskAi={onAskAi} />
+        <ContextViews projectPath={projectPath} tab={tab} setTab={setTab} onAskAi={onAskAi} switcher={switcher} />
       ) : (
         // Honest empty state, like Studio's: Context belongs to a project.
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-border bg-card text-center">
@@ -87,11 +73,13 @@ function ContextViews({
   tab,
   setTab,
   onAskAi,
+  switcher,
 }: {
   projectPath: string;
   tab: ContextTab;
   setTab: (tab: ContextTab) => void;
   onAskAi: AskAi;
+  switcher: ReactNode;
 }) {
   const [cards, setCards] = useState<CardSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -124,7 +112,7 @@ function ContextViews({
   const openCard = useCallback(
     (path: string) => {
       setOpenRequest((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
-      setTab("notes");
+      setTab("documents");
     },
     [setTab],
   );
@@ -150,30 +138,35 @@ function ContextViews({
   return (
     <div className="relative min-h-0 flex-1">
       {pane(
-        "notes",
-        <NotesTab
+        "documents",
+        <DocumentsView
           projectPath={projectPath}
           cards={cards}
           cardsError={error}
           refreshTick={tick}
           openRequest={openRequest}
-          onReload={bump}
           onChanged={bump}
           onAskAi={onAskAi}
+          leading={switcher}
         />,
       )}
       {pane(
-        "board",
-        <BoardTab
-          projectPath={projectPath}
-          refreshTick={tick}
-          onOpen={openCard}
-          onChanged={bump}
-          existingPaths={(cards ?? []).map((c) => c.path)}
-        />,
+        "tasks",
+        <div className="flex size-full min-h-0 flex-col gap-2">
+          <div data-tauri-drag-region className="flex h-11 shrink-0 items-center rounded-xl border border-border bg-card px-3">
+            {switcher}
+          </div>
+          <div className="relative min-h-0 flex-1">
+            <BoardTab
+              projectPath={projectPath}
+              refreshTick={tick}
+              onOpen={openCard}
+              onChanged={bump}
+              existingPaths={(cards ?? []).map((c) => c.path)}
+            />
+          </div>
+        </div>,
       )}
-      {pane("map", <MapTab projectPath={projectPath} refreshTick={tick} onOpen={openCard} />)}
-      {pane("graphs", <GraphsSection projectPath={projectPath} />)}
     </div>
   );
 }

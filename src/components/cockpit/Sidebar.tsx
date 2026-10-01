@@ -74,7 +74,7 @@ const PINNED: SectionItem[] = [{ id: "home", label: "Home", icon: Home }];
 // don't need the discipline groups the old 13-entry sidebar did.
 const PROJECT_SECTIONS: SectionItem[] = [
   { id: "studio", label: "Studio", icon: Sparkles },
-  { id: "context", label: "Notes", icon: BookOpen },
+  { id: "context", label: "Documents", icon: BookOpen },
   { id: "assets", label: "Assets", icon: Images },
   { id: "launch", label: "Playtest & Launch", icon: Rocket },
   { id: "code", label: "Code", icon: Wrench },

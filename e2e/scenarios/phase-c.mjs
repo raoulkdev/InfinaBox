@@ -156,7 +156,8 @@ export async function phaseC(run, app, config, fakes) {
     run.note(`${cards.length} cards; board, backlinks, broken link and graph all reported by the real commands`);
     await clickWhenEnabled(driver, tid("nav-context"));
     await waitVisible(driver, tid("context-section"));
-    await waitUntil(async () => (await driver.findElements(tid("tree-page"))).length >= 2, { what: "the notes tree to show pages" });
+    await waitVisible(driver, tid("canvas"));
+    await waitUntil(async () => (await driver.findElements(tid("block-doc"))).length >= 1, { what: "the canvas to show the project's document" });
     await run.shot("context-cards");
   });
 
@@ -316,37 +317,67 @@ export async function phaseC(run, app, config, fakes) {
     }
   }, { needs: ["c1"] });
 
-  await run.step("c7", "Notes: pages, folders, templates, autosave, drag to move, delete; model choice and attachments reach the AI", async () => {
+  await run.step("c7", "Documents: boards, blocks, arrows, columns, nesting, undo, search, graph, images", async () => {
     // Back to the game from Settings (Home → Open).
     await clickWhenEnabled(driver, tid("home-nav-home"));
     await clickWhenEnabled(driver, tid("inspector-open"), { timeoutMs: 30_000 });
     await clickWhenEnabled(driver, tid("nav-context"));
-    await waitVisible(driver, tid("notes-tree"));
+    await waitVisible(driver, tid("canvas"));
     const ctx = (rel) => path.join(state.project, ".ibproject/context", rel);
+    const boardFile = (id) => path.join(state.project, ".ibproject/boards", `${id}.json`);
+    const readBoard = (id = "root") => JSON.parse(fs.readFileSync(boardFile(id), "utf8"));
+    const saved = (check, what) =>
+      waitUntil(async () => {
+        try {
+          return check(readBoard());
+        } catch {
+          return false;
+        }
+      }, { timeoutMs: 8000, what });
+    const centre = async (el) => driver.executeScript("const r = arguments[0].getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2];", el);
+    const drag = async (el, to) => {
+      // `to` is another element (drop on it) or a [dx, dy] offset.
+      const [x1, y1] = await centre(el);
+      let dx;
+      let dy;
+      if (Array.isArray(to)) [dx, dy] = to;
+      else {
+        const [x2, y2] = await centre(to);
+        dx = x2 - x1;
+        dy = y2 - y1;
+      }
+      const a = driver.actions({ async: true });
+      await a.move({ origin: el }).press().move({ origin: "pointer", x: Math.round(dx / 3), y: Math.round(dy / 3) }).move({ origin: "pointer", x: Math.round(dx / 3), y: Math.round(dy / 3) }).move({ origin: "pointer", x: dx - 2 * Math.round(dx / 3), y: dy - 2 * Math.round(dy / 3) }).release().perform();
+    };
+    const clickEmpty = async () => {
+      const canvas = await driver.findElement(tid("canvas"));
+      const { width, height } = await canvas.getRect();
+      await driver.actions().move({ origin: canvas, x: Math.floor(width / 2) - 24, y: -Math.floor(height / 2) + 24 }).click().perform();
+    };
+    const blocks = (type) => driver.findElements(tid(`block-${type}`));
 
-    // A page from a template; its title is its name, and the file follows.
-    await clickWhenEnabled(driver, tid("new-menu"));
-    await run.shot("new-menu");
-    await clickWhenEnabled(driver, tid("template-character"));
-    await waitUntil(async () => fs.existsSync(ctx("character-sheet.md")), { what: "the templated page" });
-    const first = fs.readFileSync(ctx("character-sheet.md"), "utf8");
-    if (!first.includes("type: character") || !first.includes("## Behaviour")) throw new Error(`template not written: ${first.slice(0, 300)}`);
+    // The first time, what the project had becomes a board.
+    await waitUntil(async () => fs.existsSync(boardFile("root")), { what: "the root board to be saved" });
+    const root0 = readBoard();
+    if (!root0.blocks.some((b) => b.type === "doc")) throw new Error("existing documents weren't placed on the root board");
+    await run.shot("documents-canvas");
+
+    // A document: a card on disk, a block on the board, a focused editor.
+    await clickWhenEnabled(driver, tid("add-doc"));
+    await run.shot("new-document-menu");
+    await clickWhenEnabled(driver, tid("new-doc-blank"));
+    await waitUntil(async () => fs.existsSync(ctx("untitled.md")), { what: "the new document" });
+    await waitVisible(driver, tid("doc-editor"));
     const title = await waitVisible(driver, tid("page-title"));
     await driver.executeScript("arguments[0].focus(); arguments[0].select();", title);
     await title.sendKeys("Captain Bolt");
-    run.note(`title now reads: ${await title.getAttribute("value")}`);
-    await title.sendKeys(Key.ENTER);
-    await waitUntil(async () => fs.existsSync(ctx("captain-bolt.md")) && !fs.existsSync(ctx("character-sheet.md")), { what: "the file to be renamed after its title" });
-    if (!fs.readFileSync(ctx("captain-bolt.md"), "utf8").includes("title: Captain Bolt")) throw new Error("title not saved in the page");
-
-    // Typing in the body saves by itself.
-    // The page reopens under its new name; find the body again until it holds still.
+    await waitUntil(async () => fs.readFileSync(ctx("untitled.md"), "utf8").includes("title: Captain Bolt"), { timeoutMs: 8000, what: "the title to be saved" });
     await waitUntil(
       async () => {
         try {
           const editable = await driver.findElement(By.css('[data-testid="page-body"] .mdx-editor-content'));
           await editable.click();
-          await editable.sendKeys("Loves the sea.");
+          await editable.sendKeys("Loves the sea. See [[The Lighthouse]].");
           return true;
         } catch {
           return false;
@@ -354,72 +385,179 @@ export async function phaseC(run, app, config, fakes) {
       },
       { what: "the page body to take typing" },
     );
-    await waitUntil(async () => fs.readFileSync(ctx("captain-bolt.md"), "utf8").includes("Loves the sea."), { timeoutMs: 8000, what: "autosave" });
-    await run.shot("notes-page");
-
-    // A page icon, saved in the page's header and shown in the tree.
+    await waitUntil(async () => fs.readFileSync(ctx("untitled.md"), "utf8").includes("Loves the sea."), { timeoutMs: 8000, what: "autosave" });
+    await run.shot("document-editor");
     await clickWhenEnabled(driver, tid("page-icon"));
-    await run.shot("icon-picker");
     await clickWhenEnabled(driver, tid("icon-tab-mono"));
-    await run.shot("icon-picker-mono");
     await (await driver.findElements(tid("icon-choice-mono")))[26].click();
-    await waitUntil(async () => /icon: "?lucide:/.test(fs.readFileSync(ctx("captain-bolt.md"), "utf8")), { what: "the page's black-and-white icon to be saved" });
-    await waitVisible(driver, By.css('[data-testid="tree-page"][data-path="captain-bolt.md"] [data-testid="row-icon"]'));
-    if (!fs.readFileSync(ctx("captain-bolt.md"), "utf8").includes("Loves the sea.")) throw new Error("choosing an icon lost the page text");
-
-    // The AI menu.
+    await waitUntil(async () => /icon: "?lucide:/.test(fs.readFileSync(ctx("untitled.md"), "utf8")), { what: "the document's icon to be saved" });
+    if (!fs.readFileSync(ctx("untitled.md"), "utf8").includes("Loves the sea.")) throw new Error("choosing an icon lost the text");
     await clickWhenEnabled(driver, tid("ask-ai"));
     await waitVisible(driver, tid("doc-action-draft"));
-    await run.shot("ask-ai-menu");
     await driver.actions().sendKeys(Key.ESCAPE).perform();
+    await clickWhenEnabled(driver, tid("doc-close"));
+    await waitUntil(async () => (await driver.findElements(tid("doc-editor"))).length === 0, { what: "the editor to close" });
+    await saved((b) => b.blocks.some((x) => x.type === "doc" && x.ref === "untitled.md"), "the document block to be saved");
+    const docBlock = (await blocks("doc")).length;
+    if (docBlock < 1) throw new Error("no document block on the canvas");
 
-    // A folder of the person's own; dragging the page into it moves the file.
-    await clickWhenEnabled(driver, tid("new-menu"));
-    await clickWhenEnabled(driver, tid("new-folder"));
-    await waitUntil(
-      async () => {
-        try {
-          const rename = await driver.findElement(tid("rename-input"));
-          await driver.executeScript("arguments[0].focus(); arguments[0].select();", rename);
-          await rename.sendKeys("Crew");
-          await rename.sendKeys(Key.ENTER);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-      { what: "the new folder's name box to take typing" },
+    // Notes: type in place, drag, snap.
+    await clickWhenEnabled(driver, tid("add-note"));
+    await driver.actions().sendKeys("Remember the lighthouse").perform();
+    await clickEmpty();
+    await saved((b) => JSON.stringify(b).includes("Remember the lighthouse"), "the note's text to be saved");
+    await clickWhenEnabled(driver, tid("add-note"));
+    await driver.actions().sendKeys("Second note").perform();
+    await clickEmpty();
+    let notes = await blocks("note");
+    if (notes.length !== 2) throw new Error(`expected 2 notes, found ${notes.length}`);
+    const before = readBoard().blocks.filter((b) => b.type === "note").map((b) => b.x);
+    await drag(notes[1], [260, 90]);
+    await saved((b) => b.blocks.filter((x) => x.type === "note")[1].x !== before[1], "the dragged note's position to be saved");
+    await run.shot("notes-on-canvas");
+
+    // Colour from the selection bar.
+    notes = await blocks("note");
+    await notes[0].click();
+    await clickWhenEnabled(driver, tid("note-color-pink"));
+    await saved((b) => b.blocks.some((x) => x.type === "note" && x.color === "pink"), "the note colour");
+
+    // Align two blocks (shift-click to select both).
+    notes = await blocks("note");
+    await driver.actions().keyDown(Key.SHIFT).click(notes[0]).click(notes[1]).keyUp(Key.SHIFT).perform();
+    await clickWhenEnabled(driver, tid("align-left"));
+    await saved((b) => {
+      const n = b.blocks.filter((x) => x.type === "note");
+      return n[0].x === n[1].x;
+    }, "the notes to line up");
+    await clickEmpty();
+
+    // An arrow between them.
+    await clickWhenEnabled(driver, tid("tool-arrow"));
+    notes = await blocks("note");
+    await drag(notes[0], notes[1]);
+    await saved((b) => b.blocks.some((x) => x.type === "arrow"), "the arrow to be saved");
+    await waitUntil(async () => (await blocks("arrow")).length === 1, { what: "the arrow on the canvas" });
+    await run.shot("arrow-between-notes");
+    const arrow = readBoard().blocks.find((x) => x.type === "arrow");
+    const noteIds = readBoard().blocks.filter((x) => x.type === "note").map((x) => x.id);
+    if (!noteIds.includes(arrow.from) || !noteIds.includes(arrow.to)) throw new Error("the arrow isn't attached to the notes");
+
+    // A column takes blocks dropped on it.
+    await clickWhenEnabled(driver, tid("add-column"));
+    await run.shot("column-added");
+    notes = await blocks("note");
+    const body = await driver.findElement(By.css("[data-column-body]"));
+    await drag(notes[1], body);
+    await saved((b) => {
+      const col = b.blocks.find((x) => x.type === "column");
+      return col && col.children.length === 1 && b.blocks.find((x) => x.id === col.children[0]).col === col.id;
+    }, "the note to snap into the column");
+    await run.shot("note-in-column");
+    const arrowAfter = (await blocks("arrow")).length;
+    if (arrowAfter !== 1) throw new Error("the arrow was lost when its note moved into the column");
+
+    // A board inside a board.
+    await clickWhenEnabled(driver, tid("add-board"));
+    await saved((b) => b.blocks.some((x) => x.type === "board"), "the board block to be saved");
+    const boardBlock = (await blocks("board"))[0];
+    await driver.actions().move({ origin: boardBlock, x: 0, y: -30 }).doubleClick().perform();
+    await waitUntil(async () => (await driver.findElements(tid("crumb"))).length === 1, { what: "the breadcrumb to show the nested board" });
+    const name = await waitVisible(driver, tid("board-name"));
+    await driver.executeScript("arguments[0].focus(); arguments[0].select();", name);
+    await name.sendKeys("Crew");
+    const childId = readBoard().blocks.find((x) => x.type === "board").ref;
+    await waitUntil(async () => fs.existsSync(boardFile(childId)) && readBoard(childId).title === "Crew", { timeoutMs: 8000, what: "the board's name to be saved" });
+    await run.shot("nested-board");
+    await clickWhenEnabled(driver, tid("crumb"));
+    await waitUntil(async () => (await driver.findElements(tid("crumb"))).length === 0, { what: "back at the top board" });
+    // Drag a note onto the board block: it moves in.
+    notes = await blocks("note");
+    const free = readBoard().blocks.filter((x) => x.type === "note" && !x.col)[0];
+    const target = await driver.findElement(By.css(`[data-block-id="${free.id}"]`));
+    await drag(target, (await blocks("board"))[0]);
+    await saved((b) => !b.blocks.some((x) => x.id === free.id), "the note to leave the top board");
+    if (!readBoard(childId).blocks.some((x) => x.id === free.id)) throw new Error("the note didn't arrive in the nested board");
+    const arrowsLeft = readBoard().blocks.filter((x) => x.type === "arrow").length;
+    if (arrowsLeft !== 0) throw new Error("an arrow to a note that moved away was kept");
+
+    // Undo puts it back; redo moves it again.
+    await clickWhenEnabled(driver, tid("canvas-undo"));
+    await saved((b) => b.blocks.some((x) => x.id === free.id), "undo to put the note back");
+    if (readBoard(childId).blocks.some((x) => x.id === free.id)) throw new Error("undo left the note in both boards");
+    await clickWhenEnabled(driver, tid("canvas-undo"));
+    await saved((b) => b.blocks.some((x) => x.type === "arrow"), "a second undo to bring the arrow back");
+    await clickWhenEnabled(driver, tid("canvas-redo"));
+    await saved((b) => !b.blocks.some((x) => x.type === "arrow"), "redo to remove the arrow again");
+    await clickWhenEnabled(driver, tid("canvas-undo"));
+    await saved((b) => b.blocks.some((x) => x.type === "arrow"), "undo once more");
+
+    // A picture dropped (through the file picker's input) and a file.
+    const png = makePng(40, 20, [200, 40, 90]).toString("base64");
+    await driver.executeScript(
+      `const input = document.querySelector('[data-testid="canvas-file-input"]');
+       const bytes = Uint8Array.from(atob(arguments[0]), (c) => c.charCodeAt(0));
+       const dt = new DataTransfer();
+       dt.items.add(new File([bytes], "red box.png", { type: "image/png" }));
+       dt.items.add(new File([new Uint8Array([1, 2, 3])], "notes.bin", { type: "application/octet-stream" }));
+       input.files = dt.files;
+       input.dispatchEvent(new Event("change", { bubbles: true }));`,
+      png,
     );
-    await waitUntil(async () => fs.existsSync(ctx("crew")), { what: "the Crew folder" });
-    await waitVisible(driver, By.css('[data-testid="tree-folder"][data-path="crew"]'));
-    // A folder icon, kept with the folder.
-    const crew = await driver.findElement(By.css('[data-testid="tree-folder"][data-path="crew"]'));
-    await driver.actions().move({ origin: crew }).perform();
-    await clickWhenEnabled(driver, By.css('[data-path="crew"] [data-testid="row-menu"]'));
-    await clickWhenEnabled(driver, tid("change-icon"));
-    await (await driver.findElements(tid("icon-choice")))[20].click();
-    await waitUntil(async () => fs.existsSync(ctx(".icons.json")) && fs.readFileSync(ctx(".icons.json"), "utf8").includes("crew"), { what: "the folder icon to be saved" });
-    await waitVisible(driver, By.css('[data-testid="tree-folder"][data-path="crew"] [data-testid="row-icon"]'));
-    await driver.executeScript(`
-      const page = document.querySelector('[data-testid="tree-page"][data-path="captain-bolt.md"]');
-      const folder = document.querySelector('[data-testid="tree-folder"][data-path="crew"]');
-      const dt = new DataTransfer();
-      page.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
-      folder.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt }));
-      folder.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));`);
-    await waitUntil(async () => fs.existsSync(ctx("crew/captain-bolt.md")), { what: "the page to move into the folder" });
-    await run.shot("notes-tree-folder");
-    const listed = await call("context_list", { projectPath: state.project });
-    if (!listed.some((c) => c.path === "crew/captain-bolt.md" && c.card_type === "character")) throw new Error("moved page isn't listed as a character");
+    await waitUntil(async () => (await blocks("image")).length === 1 && (await blocks("file")).length === 1, { what: "the picture and the file on the canvas" });
+    await saved((b) => b.blocks.some((x) => x.type === "image" && x.src.startsWith(".ibproject/boards/files/")), "the image block to be saved");
+    const imageBlock = readBoard().blocks.find((x) => x.type === "image");
+    if (!fs.existsSync(path.join(state.project, imageBlock.src))) throw new Error("the picture file isn't in the project");
+    // A link and a to-do list, a swatch and a table.
+    for (const type of ["link", "todo", "swatch", "table", "text", "comment", "sketch"]) await clickWhenEnabled(driver, tid(`add-${type}`));
+    await clickEmpty();
+    await saved((b) => ["link", "todo", "swatch", "table", "text", "comment", "sketch"].every((t) => b.blocks.some((x) => x.type === t)), "every kind of block to be saved");
+    await clickWhenEnabled(driver, tid("zoom-fit"));
+    await new Promise((r) => setTimeout(r, 600));
+    await run.shot("every-block-type");
 
-    // Delete asks first.
-    const row = await driver.findElement(By.css('[data-testid="tree-page"][data-path="crew/captain-bolt.md"]'));
-    await driver.actions().move({ origin: row }).perform();
-    await clickWhenEnabled(driver, By.css('[data-path="crew/captain-bolt.md"] [data-testid="row-menu"]'));
-    await clickWhenEnabled(driver, tid("delete"));
-    await clickWhenEnabled(driver, tid("confirm-delete"));
-    await waitUntil(async () => !fs.existsSync(ctx("crew/captain-bolt.md")), { what: "the page to be deleted" });
+    // Links between documents: [[wiki links]] are edges.
+    await call("context_write", {
+      projectPath: state.project,
+      path: "the-lighthouse.md",
+      meta: { type: null, title: "The Lighthouse", status: null, links: [], implemented_in: [], tags: [], extra: {} },
+      body: "Back to [[Captain Bolt]].",
+    });
+    const graph = await call("context_graph", { projectPath: state.project });
+    const linked = (a, b) => graph.edges.some((e) => e.from === a && e.to === b && !e.broken);
+    if (!linked("untitled.md", "the-lighthouse.md") || !linked("the-lighthouse.md", "untitled.md")) throw new Error(`wiki links aren't edges: ${JSON.stringify(graph.edges)}`);
 
+    // Search finds blocks and documents; picking a block lands on it.
+    await clickWhenEnabled(driver, tid("search-open"));
+    await waitVisible(driver, tid("unplaced-doc")); // the lighthouse card isn't on a board
+    await run.shot("search-unplaced");
+    const input = await waitVisible(driver, tid("search-input"));
+    await input.sendKeys("lighthouse");
+    await waitUntil(async () => (await driver.findElements(tid("hit-block"))).length >= 1 && (await driver.findElements(tid("hit-doc"))).length >= 1, { what: "search results for blocks and documents" });
+    await run.shot("search-results");
+    await clickWhenEnabled(driver, tid("hit-block"));
+    await waitVisible(driver, tid("selection-bar"));
+
+    // The same boards as a graph; clicking a node opens it.
+    await clickWhenEnabled(driver, tid("mode-graph"));
+    await waitVisible(driver, tid("graph-view"));
+    await waitUntil(async () => /\d+ nodes/.test(await (await driver.findElement(tid("graph-count"))).getText()), { what: "graph nodes" });
+    const counts = await (await driver.findElement(tid("graph-count"))).getText();
+    run.note(`graph: ${counts}`);
+    await new Promise((r) => setTimeout(r, 900));
+    await run.shot("graph-view");
+    await clickWhenEnabled(driver, By.css(".react-flow__node"));
+    await waitVisible(driver, tid("canvas"));
+
+    // Deleting a document block keeps the document.
+    const docs = await blocks("doc");
+    await docs[docs.length - 1].click();
+    await driver.actions().sendKeys(Key.DELETE).perform();
+    await saved((b) => b.blocks.filter((x) => x.type === "doc").length < docBlock + root0.blocks.filter((x) => x.type === "doc").length - 0, "the document block to be removed");
+    if (!fs.existsSync(ctx("untitled.md")) && !fs.existsSync(ctx("the-lighthouse.md"))) throw new Error("deleting a block deleted its document");
+  }, { needs: ["c1"] });
+
+  await run.step("c7b", "Model choice and an attached picture reach the AI", async () => {
     // Model choice and an attached picture reach the AI (fake local model).
     await clickWhenEnabled(driver, tid("nav-studio"));
     await waitVisible(driver, tid("chat-composer"));
@@ -454,7 +592,7 @@ export async function phaseC(run, app, config, fakes) {
     await run.shot("message-with-attachment");
   }, { needs: ["c4"] });
 
-  await run.step("c8", "Code page and Settings from inside a game; Board and Map tabs", async () => {
+  await run.step("c8", "Code page and Settings from inside a game; Tasks tab", async () => {
     await clickWhenEnabled(driver, tid("nav-code"));
     await new Promise((r) => setTimeout(r, 2500)); // the terminal starts
     await run.shot("code-page");
@@ -466,19 +604,11 @@ export async function phaseC(run, app, config, fakes) {
     await clickWhenEnabled(driver, tid("nav-context"));
     await waitUntil(
       async () => {
-        await clickWhenEnabled(driver, By.xpath("//button[@role='tab'][normalize-space()='Board']"));
+        await clickWhenEnabled(driver, By.xpath("//button[@role='tab'][normalize-space()='Tasks']"));
         return (await driver.findElements(tid("board-tab"))).length > 0;
       },
-      { what: "the Board tab to open" },
+      { what: "the Tasks tab to open" },
     );
-    await run.shot("context-board");
-    await waitUntil(
-      async () => {
-        await clickWhenEnabled(driver, By.xpath("//button[@role='tab'][normalize-space()='Map']"));
-        return (await driver.findElements(tid("map-tab"))).length > 0;
-      },
-      { what: "the Map tab to open" },
-    );
-    await run.shot("context-map");
+    await run.shot("context-tasks");
   }, { needs: ["c7"] });
 }
