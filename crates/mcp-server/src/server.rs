@@ -36,6 +36,9 @@ pub const TOOL_NAMES: &[&str] = &[
     "get_game_output",
     "list_snapshots",
     "propose_plan",
+    "project_map",
+    "find_symbol",
+    "describe_scene",
 ];
 
 /// What the agent is told after a plan was accepted.
@@ -99,6 +102,18 @@ pub struct PlanParams {
     // One doc line on purpose: schemars keeps a doc comment's line breaks.
     /// The steps in order, as plain sentences about what will change in the game (no code). 2-6 steps is best; at most 8, each at most 200 characters.
     pub steps: Vec<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SymbolParams {
+    /// One GDScript name: a function, signal, variable, constant, class or autoload, e.g. "player_died" or "Events".
+    pub name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SceneParams {
+    /// A scene's path in the game, e.g. "scenes/main.tscn".
+    pub path: String,
 }
 
 #[derive(Clone)]
@@ -311,6 +326,56 @@ with title, time, and files changed. Read-only: InfinaBox creates snapshots itse
         Ok(to_json(&snapshots))
     }
 
+    #[tool(
+        description = "A map of the game's structure: its name, main scene, autoloads \
+(global singletons), input actions, every script (class name, what it extends, its \
+signals and functions) and every scene (root script, node count). Read it before adding \
+a system, so new code goes where the game's existing code is."
+    )]
+    async fn project_map(&self) -> Result<String, String> {
+        let project = self.project()?.clone();
+        let map = blocking("reading the game's structure", move || {
+            infinabox_core::code_index::project_map(&project)
+        })
+        .await?;
+        Ok(to_json(&map))
+    }
+
+    #[tool(
+        description = "Find where a name is defined and every place it is used across the \
+game's scripts and scenes: function calls, signal emits and connects (including the ones \
+set up in scene files), and plain uses. Use it before renaming, removing or changing \
+something, to see what else depends on it. Whole-word match, case-sensitive."
+    )]
+    async fn find_symbol(
+        &self,
+        Parameters(SymbolParams { name }): Parameters<SymbolParams>,
+    ) -> Result<String, String> {
+        let project = self.project()?.clone();
+        let report = blocking("looking up a name", move || {
+            infinabox_core::code_index::find_symbol(&project, &name)
+        })
+        .await?;
+        Ok(to_json(&report))
+    }
+
+    #[tool(
+        description = "Read one scene's structure without opening the raw .tscn file: its \
+nodes (path, class, attached script, instanced scene, groups), signal connections, and the \
+scripts and scenes it loads."
+    )]
+    async fn describe_scene(
+        &self,
+        Parameters(SceneParams { path }): Parameters<SceneParams>,
+    ) -> Result<String, String> {
+        let project = self.project()?.clone();
+        let scene = blocking("reading a scene", move || {
+            infinabox_core::code_index::describe_scene(&project, &path)
+        })
+        .await?;
+        Ok(to_json(&scene))
+    }
+
     /// Nothing is stored here: the agent runtime sees this call in the
     /// CLI's own stream and shows it as a plan card (`PlanProposed`). The
     /// checks are `infinabox_core::agent::prompt::validate_plan`, the same
@@ -396,6 +461,33 @@ mod tests {
         assert!(err.contains("question"), "{err}");
         // Reading still works.
         assert_eq!(server.list_context_cards().await.unwrap(), "No Context cards yet.");
+    }
+
+    #[tokio::test]
+    async fn the_index_tools_read_the_game() {
+        let project = temp_project();
+        std::fs::create_dir_all(project.join("scripts")).unwrap();
+        std::fs::write(
+            project.join("scripts/a.gd"),
+            "extends Node\nsignal hit\nfunc go():\n\thit.emit()\n",
+        )
+        .unwrap();
+        let server = InfinaBoxServer::new(Some(project), None);
+        let map = server.project_map().await.unwrap();
+        assert!(map.contains("scripts/a.gd"), "{map}");
+        let found = server
+            .find_symbol(Parameters(SymbolParams { name: "hit".into() }))
+            .await
+            .unwrap();
+        assert!(found.contains("\"signal\"") && found.contains("\"emit\""), "{found}");
+        assert!(server
+            .find_symbol(Parameters(SymbolParams { name: "a b".into() }))
+            .await
+            .is_err());
+        assert!(server
+            .describe_scene(Parameters(SceneParams { path: "x.tscn".into() }))
+            .await
+            .is_err());
     }
 
     #[tokio::test]

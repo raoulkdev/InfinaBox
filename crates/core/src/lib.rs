@@ -12,6 +12,7 @@ pub mod ask;
 pub mod autofix;
 pub mod boards;
 pub mod chat_store;
+pub mod code_index;
 pub mod connect;
 pub mod context_cards;
 pub mod generate;

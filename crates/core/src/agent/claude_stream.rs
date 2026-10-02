@@ -400,6 +400,9 @@ impl ClaudeStream {
                     Some(c) => format!("Updating the {c} Context card"),
                     None => "Updating a Context card".to_string(),
                 },
+                "project_map" => "Looking at how the game is put together".to_string(),
+                "find_symbol" => "Looking up where something is used".to_string(),
+                "describe_scene" => "Reading a scene".to_string(),
                 "list_snapshots" => "Looking at the project's history".to_string(),
                 // Only reached when the plan was malformed (a valid one
                 // becomes `PlanProposed`).
