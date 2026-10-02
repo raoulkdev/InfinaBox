@@ -64,7 +64,8 @@ use super::claude_stream::{ClaudeStream, StreamEnd};
 use super::path::{find_on_path, login_shell_path};
 use super::prompt;
 use super::types::{
-    AgentErrorKind, AgentEvent, AgentRuntime, McpLaunch, RuntimeStatus, TurnRequest, clean_model,
+    AgentErrorKind, AgentEvent, AgentRuntime, McpLaunch, RuntimeStatus, TurnMode, TurnRequest,
+    clean_model,
 };
 
 /// The name the InfinaBox MCP server is registered under, which makes its
@@ -80,6 +81,11 @@ pub const BUILTIN_TOOLS: &str = "Read,Edit,Write,Glob,Grep";
 /// (all of `TOOL_NAMES` in `crates/mcp-server/src/server.rs`, including
 /// `propose_plan`), via the server wildcard verified against a real run.
 pub const ALLOWED_TOOLS: &str = "Read,Edit,Write,Glob,Grep,mcp__infinabox__*";
+
+/// What an Ask-mode turn gets instead: the reading tools only. (The MCP
+/// server refuses its own writing tools in that mode as well.)
+pub const ASK_BUILTIN_TOOLS: &str = "Read,Glob,Grep";
+pub const ASK_ALLOWED_TOOLS: &str = "Read,Glob,Grep,mcp__infinabox__*";
 
 /// What the CLI is called on `PATH`.
 const PROGRAM: &str = "claude";
@@ -431,10 +437,11 @@ pub(crate) fn build_args(
     args.push("--mcp-config".into());
     args.push(mcp_config.into());
     args.push("--strict-mcp-config".into());
+    let asking = req.options.mode == TurnMode::Ask;
     args.push("--tools".into());
-    args.push(BUILTIN_TOOLS.into());
+    args.push(if asking { ASK_BUILTIN_TOOLS } else { BUILTIN_TOOLS }.into());
     args.push("--allowedTools".into());
-    args.push(ALLOWED_TOOLS.into());
+    args.push(if asking { ASK_ALLOWED_TOOLS } else { ALLOWED_TOOLS }.into());
     args.push("--permission-mode".into());
     args.push("acceptEdits".into());
     args.push("--append-system-prompt".into());

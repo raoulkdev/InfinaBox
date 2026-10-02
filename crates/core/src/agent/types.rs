@@ -120,6 +120,19 @@ pub struct TurnOptions {
     pub effort: Option<Effort>,
     /// How technical the person wants explanations to be.
     pub technical_level: TechnicalLevel,
+    /// Whether the AI may change the game this turn.
+    pub mode: TurnMode,
+}
+
+/// What a typed message is for. In `Ask` the AI only reads and answers: no
+/// file is written, no card saved, no plan proposed (each runtime takes the
+/// writing tools away, and the MCP server refuses its own writes).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnMode {
+    #[default]
+    Build,
+    Ask,
 }
 
 /// How technical the conversation is: the person can be anywhere from

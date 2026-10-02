@@ -404,6 +404,7 @@ impl FixHost for AppFixHost {
             Default::default(),
             None,
             None,
+            Default::default(),
         )
     }
 

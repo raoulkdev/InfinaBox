@@ -741,3 +741,17 @@ fn a_chosen_model_and_effort_reach_codex() {
     assert_eq!(args[m + 1], "some-model");
     assert!(args.iter().any(|a| a == "model_reasoning_effort=\"xhigh\""), "{args:?}");
 }
+
+#[test]
+fn an_ask_turn_runs_in_a_read_only_sandbox() {
+    use crate::agent::{TurnMode, TurnOptions};
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path(), "how does saving work?");
+    req.options = TurnOptions { mode: TurnMode::Ask, ..Default::default() };
+    let args: Vec<String> = build_args(&req, "INSTRUCTIONS")
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let i = args.iter().position(|a| a == "--sandbox").unwrap();
+    assert_eq!(args[i + 1], "read-only");
+}

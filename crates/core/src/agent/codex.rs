@@ -42,6 +42,7 @@
 //!   worth knowing: in this version a `workspace-write` run records the
 //!   project as trusted in the user's `$CODEX_HOME/config.toml` (Codex's own
 //!   behaviour, with or without `--ignore-user-config`; verified).
+//!   An Ask-mode turn uses `--sandbox read-only` instead.
 //! - `--skip-git-repo-check`: InfinaBox projects are git repos, but a
 //!   folder that isn't would otherwise fail with "Not inside a trusted
 //!   directory".
@@ -81,7 +82,8 @@ use super::codex_stream::{CodexStream, MCP_SERVER_NAME, StreamEnd};
 use super::path::{find_on_path, login_shell_path};
 use super::prompt::{self, system_prompt};
 use super::types::{
-    AgentErrorKind, AgentEvent, AgentRuntime, Effort, RuntimeStatus, TurnRequest, clean_model,
+    AgentErrorKind, AgentEvent, AgentRuntime, Effort, RuntimeStatus, TurnMode, TurnRequest,
+    clean_model,
 };
 
 /// The CLI's program name, looked up on the login-shell PATH.
@@ -335,7 +337,7 @@ pub(crate) fn build_args(req: &TurnRequest, instructions: &str) -> Vec<OsString>
         "--disable",
         "hooks",
         "--sandbox",
-        "workspace-write",
+        if req.options.mode == TurnMode::Ask { "read-only" } else { "workspace-write" },
         "-C",
     ]
     .into_iter()

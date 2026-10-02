@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  TurnMode,
   AgentEventPayload,
   AssetInfo,
   Board,
@@ -71,6 +72,7 @@ export const agentSend = (
   role?: Role,
   model?: string | null,
   effort?: Effort | null,
+  mode?: TurnMode,
 ) =>
   invoke<void>("agent_send", {
     projectPath,
@@ -80,6 +82,7 @@ export const agentSend = (
     role: role ?? null,
     model: model ?? null,
     effort: effort ?? null,
+    mode: mode ?? null,
   });
 
 /** Saves a file attached to a message; returns its project-relative path. */

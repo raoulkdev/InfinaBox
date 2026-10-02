@@ -21,6 +21,9 @@ use rmcp::ServiceExt;
 pub const ENV_PROJECT: &str = "INFINABOX_PROJECT";
 pub const ENV_BRIDGE_ADDR: &str = "INFINABOX_BRIDGE_ADDR";
 pub const ENV_BRIDGE_TOKEN: &str = "INFINABOX_BRIDGE_TOKEN";
+/// Set to `1` for an Ask-mode turn: the server then refuses every tool that
+/// changes the game or its cards.
+pub const ENV_READ_ONLY: &str = "INFINABOX_READ_ONLY";
 
 /// The command-line flag that makes the app executable run this server
 /// instead of its window.

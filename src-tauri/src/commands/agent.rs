@@ -58,7 +58,9 @@ use infinabox_core::chat_store::{self, ChatRecord, ThreadSummary};
 use infinabox_core::connect::ProviderId;
 use infinabox_core::project_settings;
 use infinabox_core::snapshot::{self, Snapshot};
-use infinabox_mcp_server::{ENV_BRIDGE_ADDR, ENV_BRIDGE_TOKEN, ENV_PROJECT, MCP_SERVER_FLAG};
+use infinabox_mcp_server::{
+    ENV_BRIDGE_ADDR, ENV_BRIDGE_TOKEN, ENV_PROJECT, ENV_READ_ONLY, MCP_SERVER_FLAG,
+};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -340,6 +342,8 @@ pub(crate) struct TurnSlot {
     /// A model chosen for this message (already cleaned), and the effort.
     model: Option<String>,
     effort: Option<Effort>,
+    /// A question (Ask) or a request (Build).
+    mode: infinabox_core::agent::TurnMode,
 }
 
 impl Drop for TurnSlot {
@@ -401,6 +405,7 @@ pub(crate) fn start_turn(
         role: Default::default(),
         model: None,
         effort: None,
+        mode: Default::default(),
     };
     let record = ChatRecord::User {
         text: message.to_string(),
@@ -668,6 +673,7 @@ fn turn_options(
     role: infinabox_core::agent::Role,
     model: Option<String>,
     effort: Option<Effort>,
+    mode: infinabox_core::agent::TurnMode,
     log: &mut TurnLog,
 ) -> TurnOptions {
     let settings = project_settings::load(project).unwrap_or_else(|e| {
@@ -688,6 +694,7 @@ fn turn_options(
         teach: settings.teach,
         origin,
         technical_level: settings.technical_level,
+        mode,
     }
 }
 
@@ -756,7 +763,7 @@ fn drive(
             log.note_store_error(e);
         }
     }
-    let options = turn_options(project, slot.origin, slot.role, slot.model.clone(), slot.effort, log);
+    let options = turn_options(project, slot.origin, slot.role, slot.model.clone(), slot.effort, slot.mode, log);
 
     let mut retried = false;
     loop {
@@ -1053,11 +1060,14 @@ impl TurnSink for AppSink {
 /// How the agent CLI launches the InfinaBox MCP server: this same
 /// executable with `--mcp-server` (see `main.rs`), told the project and how
 /// to reach this app's bridge.
-fn mcp_launch(app: &AppHandle, project: &str) -> Result<McpLaunch, String> {
+fn mcp_launch(app: &AppHandle, project: &str, read_only: bool) -> Result<McpLaunch, String> {
     let command = std::env::current_exe().map_err(|e| {
         format!("InfinaBox couldn't find its own program file to give the AI its tools: {e}")
     })?;
     let mut env = vec![(ENV_PROJECT.to_string(), project.to_string())];
+    if read_only {
+        env.push((ENV_READ_ONLY.to_string(), "1".to_string()));
+    }
     match lock(&app.state::<BridgeState>().0).as_ref() {
         Some(bridge) => {
             env.push((ENV_BRIDGE_ADDR.to_string(), bridge.addr.clone()));
@@ -1107,6 +1117,7 @@ pub(crate) fn send_turn(
     role: infinabox_core::agent::Role,
     model: Option<String>,
     effort: Option<Effort>,
+    mode: infinabox_core::agent::TurnMode,
 ) -> Result<(), String> {
     let provider = selected_provider(app)?;
     let model = model.as_deref().and_then(clean_model);
@@ -1126,13 +1137,18 @@ pub(crate) fn send_turn(
     slot.role = role;
     slot.model = model;
     slot.effort = effort;
+    slot.mode = mode;
     autofix::note_turn_started(app, &project_path, &thread_id, origin);
     let project_key = project_path.clone();
     let worker_app = app.clone();
     let spawned = std::thread::Builder::new()
         .name("agent-turn".into())
         .spawn(move || {
-            let mcp = mcp_launch(&worker_app, &project_path);
+            let mcp = mcp_launch(
+                &worker_app,
+                &project_path,
+                mode == infinabox_core::agent::TurnMode::Ask,
+            );
             let sink = AppSink {
                 app: worker_app,
                 project_path,
@@ -1168,6 +1184,7 @@ pub fn agent_send(
     role: Option<infinabox_core::agent::Role>,
     model: Option<String>,
     effort: Option<Effort>,
+    mode: Option<infinabox_core::agent::TurnMode>,
 ) -> Result<(), String> {
     send_turn(
         &app,
@@ -1178,6 +1195,7 @@ pub fn agent_send(
         role.unwrap_or_default(),
         model,
         effort,
+        mode.unwrap_or_default(),
     )
 }
 
@@ -2347,6 +2365,7 @@ mod tests {
             model: None,
             effort: None,
             technical_level: Default::default(),
+            mode: Default::default(),
         };
         assert_eq!(
             options,

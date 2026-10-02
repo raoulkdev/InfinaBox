@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type RefObject } from "react";
 import { ArrowUp, FileText, Loader2, Paperclip, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { ProviderId, Role } from "@/lib/studio-types";
+import type { ProviderId, Role, TurnMode } from "@/lib/studio-types";
 import { ModelPicker, type ModelChoice } from "./ModelPicker";
 import { RolePicker } from "./RolePicker";
 
@@ -29,6 +29,9 @@ interface ChatComposerProps {
   /** Who the next message is sent to (default: the Director). */
   role: Role;
   onRoleChange: (role: Role) => void;
+  /** Ask only reads and answers; Build may change the game. */
+  mode: TurnMode;
+  onModeChange: (mode: TurnMode) => void;
   /** The AI in use, and the model/effort chosen for the next message. */
   provider: ProviderId | null;
   modelChoice: ModelChoice;
@@ -65,6 +68,8 @@ export function ChatComposer({
   inputRef,
   role,
   onRoleChange,
+  mode,
+  onModeChange,
   provider,
   modelChoice,
   onModelChange,
@@ -234,6 +239,22 @@ export function ChatComposer({
       )}
       </div>
       <div className="flex items-center gap-2 px-1">
+        <div role="group" aria-label="Mode" className="flex rounded-md border border-border p-0.5 text-xs">
+          {(["build", "ask"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              data-testid={`mode-${m}`}
+              aria-pressed={mode === m}
+              disabled={busy}
+              onClick={() => onModeChange(m)}
+              title={m === "ask" ? "Ask: the AI answers and changes nothing" : "Build: the AI can change the game"}
+              className={`rounded px-2 py-0.5 ${mode === m ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+            >
+              {m === "ask" ? "Ask" : "Build"}
+            </button>
+          ))}
+        </div>
         <span className="text-xs text-muted-foreground">Ask as</span>
         <RolePicker value={role} onChange={onRoleChange} disabled={busy} />
         <ModelPicker provider={provider} value={modelChoice} onChange={onModelChange} disabled={busy} />

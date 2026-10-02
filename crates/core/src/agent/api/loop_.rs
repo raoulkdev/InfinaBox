@@ -31,7 +31,7 @@ use super::{
 };
 use crate::agent::claude_stream::STOPPED_MESSAGE;
 use crate::agent::prompt::{self, PROPOSE_PLAN_TOOL};
-use crate::agent::types::{AgentErrorKind, AgentEvent, TurnRequest, Usage};
+use crate::agent::types::{AgentErrorKind, AgentEvent, TurnMode, TurnRequest, Usage};
 use crate::chat_store::{self, ChatRecord};
 use crate::redact::redact;
 
@@ -99,6 +99,10 @@ pub fn run_turn(
         }),
     }
     let mut specs = tools::specs();
+    if req.options.mode == TurnMode::Ask {
+        // A question changes nothing: the writing tools aren't offered.
+        specs.retain(|t| !matches!(t.name.as_str(), "write_file" | "edit_file"));
+    }
     specs.extend(mcp_tools.iter().cloned());
 
     let agents_md = prompt::read_agents_md(&req.project_path);
@@ -154,6 +158,14 @@ pub fn run_turn(
                 break 'rounds;
             }
             let is_mcp = mcp_tools.iter().any(|t| t.name == call.name);
+            if req.options.mode == TurnMode::Ask && matches!(call.name.as_str(), "write_file" | "edit_file") {
+                messages.push(Message::ToolResult {
+                    call_id: call.id.clone(),
+                    content: "This message is a question, so nothing can be changed. Answer without editing files.".into(),
+                    is_error: true,
+                });
+                continue;
+            }
             let outcome = run_tool(call, is_mcp, &file_tools, bridge.as_mut(), cancel, &mut turn);
             let ToolOutcome::Finished { content, is_error } = outcome else {
                 failure = Some((AgentErrorKind::Cancelled, STOPPED_MESSAGE.into()));

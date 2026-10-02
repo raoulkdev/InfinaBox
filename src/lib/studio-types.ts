@@ -257,6 +257,10 @@ export interface AutoFixStatePayload {
 /** How hard the AI thinks about a message. Not every AI offers every level. */
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
+/** What a typed message is for: "ask" only reads and answers, "build" may
+ * change the game. */
+export type TurnMode = "build" | "ask";
+
 export type Role =
   | "director"
   | "designer"

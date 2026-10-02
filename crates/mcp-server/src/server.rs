@@ -106,6 +106,8 @@ pub struct InfinaBoxServer {
     /// `None` when `INFINABOX_PROJECT` isn't set; project tools then say so.
     project: Option<PathBuf>,
     bridge: Option<BridgeConfig>,
+    /// Ask mode: tools that write are refused.
+    read_only: bool,
     tool_router: ToolRouter<Self>,
 }
 
@@ -114,8 +116,25 @@ impl InfinaBoxServer {
         Self {
             project,
             bridge,
+            read_only: false,
             tool_router: Self::tool_router(),
         }
+    }
+
+    /// A server that refuses every tool that writes (an Ask-mode turn).
+    pub fn read_only(mut self) -> Self {
+        self.read_only = true;
+        self
+    }
+
+    fn writable(&self, what: &str) -> Result<(), String> {
+        if self.read_only {
+            return Err(format!(
+                "This message is a question, so {what} isn't allowed. Answer from what you read; \
+                 if something should change, say so and the person can switch to Build."
+            ));
+        }
+        Ok(())
     }
 
     /// Reads `INFINABOX_PROJECT`, `INFINABOX_BRIDGE_ADDR`, `INFINABOX_BRIDGE_TOKEN`.
@@ -123,7 +142,11 @@ impl InfinaBoxServer {
         let project = std::env::var_os(crate::ENV_PROJECT)
             .filter(|v| !v.is_empty())
             .map(PathBuf::from);
-        Self::new(project, BridgeConfig::from_env())
+        let server = Self::new(project, BridgeConfig::from_env());
+        match std::env::var(crate::ENV_READ_ONLY).as_deref() {
+            Ok("1") => server.read_only(),
+            _ => server,
+        }
     }
 
     fn project(&self) -> Result<&PathBuf, String> {
@@ -216,6 +239,7 @@ stay inside the context folder."
         &self,
         Parameters(WriteCard { path, markdown }): Parameters<WriteCard>,
     ) -> Result<String, String> {
+        self.writable("saving a card")?;
         let ctx = self.context()?;
         let written = blocking("writing a context card", move || {
             ctx.write(&path, &markdown)
@@ -302,6 +326,7 @@ it, end your turn with one short sentence and make no changes until the person a
         &self,
         Parameters(PlanParams { title, steps }): Parameters<PlanParams>,
     ) -> Result<String, String> {
+        self.writable("proposing a plan")?;
         infinabox_core::agent::prompt::validate_plan(&title, &steps)?;
         Ok(PLAN_SHOWN.to_string())
     }
@@ -346,6 +371,31 @@ mod tests {
         let mut expected: Vec<String> = TOOL_NAMES.iter().map(|s| s.to_string()).collect();
         expected.sort();
         assert_eq!(names, expected);
+    }
+
+    #[tokio::test]
+    async fn a_read_only_server_refuses_to_write() {
+        let project = temp_project();
+        let server = InfinaBoxServer::new(Some(project.clone()), None).read_only();
+        let err = server
+            .write_context_card(Parameters(WriteCard {
+                path: "a.md".into(),
+                markdown: "# A\n".into(),
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.contains("question"), "{err}");
+        assert!(!project.join(".ibproject/context/a.md").exists());
+        let err = server
+            .propose_plan(Parameters(PlanParams {
+                title: "Do it".into(),
+                steps: vec!["One".into()],
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.contains("question"), "{err}");
+        // Reading still works.
+        assert_eq!(server.list_context_cards().await.unwrap(), "No Context cards yet.");
     }
 
     #[tokio::test]

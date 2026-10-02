@@ -13,6 +13,7 @@
 //! | the person approved a plan | `origin-plan-approval.md` (never re-plans) |
 //! | an automatic error fix | `origin-auto-fix.md` (never plans) |
 //! | the onboarding's first build | `origin-first-build.md` (never plans) |
+//! | typed by the person in Ask mode | `mode-ask.md` (a question: nothing is changed) |
 //!
 //! then the section for how technical the person wants things
 //! (`level-guided.md`, `level-balanced.md` or `level-technical.md`), then,
@@ -27,7 +28,7 @@
 
 use std::path::Path;
 
-use super::types::{MessageOrigin, PlanPolicy, Role, TechnicalLevel, TurnOptions};
+use super::types::{MessageOrigin, PlanPolicy, Role, TechnicalLevel, TurnMode, TurnOptions};
 
 /// The Director system prompt: who the agent is talking to and how it works.
 pub const DIRECTOR_PROMPT: &str = include_str!("prompts/director.md");
@@ -37,6 +38,7 @@ const PLAN_SMALL_CHANGES: &str = include_str!("prompts/plan-small-changes.md");
 const ORIGIN_PLAN_APPROVAL: &str = include_str!("prompts/origin-plan-approval.md");
 const ORIGIN_AUTO_FIX: &str = include_str!("prompts/origin-auto-fix.md");
 const ORIGIN_FIRST_BUILD: &str = include_str!("prompts/origin-first-build.md");
+const MODE_ASK: &str = include_str!("prompts/mode-ask.md");
 const EXPLAIN: &str = include_str!("prompts/explain.md");
 const TEACH: &str = include_str!("prompts/teach.md");
 const LEVEL_GUIDED: &str = include_str!("prompts/level-guided.md");
@@ -105,6 +107,7 @@ pub fn system_prompt(options: &TurnOptions, agents_md: Option<&str>) -> String {
 /// on (ends with a newline).
 pub fn turn_instructions(options: &TurnOptions) -> String {
     let plan = match (options.origin, options.plan_policy) {
+        (MessageOrigin::User, _) if options.mode == TurnMode::Ask => MODE_ASK,
         (MessageOrigin::User, PlanPolicy::AlwaysPlan) => PLAN_ALWAYS,
         (MessageOrigin::User, PlanPolicy::SmallChangesDirect) => PLAN_SMALL_CHANGES,
         (MessageOrigin::PlanApproval, _) => ORIGIN_PLAN_APPROVAL,
@@ -240,7 +243,23 @@ mod tests {
             model: None,
             effort: None,
             technical_level: TechnicalLevel::default(),
+            mode: Default::default(),
         }
+    }
+
+    #[test]
+    fn a_question_gets_the_ask_section_instead_of_a_plan() {
+        for policy in [PlanPolicy::AlwaysPlan, PlanPolicy::SmallChangesDirect] {
+            let mut o = options(policy, false, MessageOrigin::User);
+            o.mode = TurnMode::Ask;
+            let text = turn_instructions(&o);
+            assert!(text.contains("## This message is a question"), "{text}");
+            assert!(!text.contains("## Plans come first"), "{text}");
+        }
+        // An approval or an automatic fix always builds, whatever the mode.
+        let mut o = options(PlanPolicy::AlwaysPlan, false, MessageOrigin::PlanApproval);
+        o.mode = TurnMode::Ask;
+        assert!(!turn_instructions(&o).contains("## This message is a question"));
     }
 
     /// The sections a combination must get (and no others).
@@ -423,6 +442,7 @@ mod tests {
         ] {
             let o = TurnOptions {
                 technical_level: level,
+                mode: Default::default(),
                 ..TurnOptions::default()
             };
             let text = turn_instructions(&o);

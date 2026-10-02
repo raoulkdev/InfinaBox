@@ -21,6 +21,7 @@ import type {
   MessageOrigin,
   ProviderId,
   Role,
+  TurnMode,
   PendingTurn,
   ThreadSummary,
 } from "@/lib/studio-types";
@@ -129,6 +130,9 @@ export function ChatPanel({
   const [draft, setDraft] = useState("");
   const [composerHint, setComposerHint] = useState<string | null>(null);
   const [role, setRole] = useState<Role>("director");
+  const [mode, setMode] = useState<TurnMode>("build");
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   // The AI chosen in Settings (what the model/effort choice applies to).
   const [aiProvider, setAiProvider] = useState<ProviderId | null>(null);
   const [modelChoice, setModelChoice] = useState<ModelChoice>({ model: null, effort: null });
@@ -458,6 +462,8 @@ export function ChatPanel({
         roleOverride ?? roleRef.current,
         origin === "auto_fix" ? null : modelRef.current.model,
         origin === "auto_fix" ? null : modelRef.current.effort,
+        // Only a typed message can be a question; approvals and fixes build.
+        !origin || origin === "user" ? modeRef.current : "build",
       ).catch((err) => {
         markRunning(threadId, false);
         syncedTurns.current.delete(threadId);
@@ -743,6 +749,8 @@ export function ChatPanel({
             inputRef={composerRef}
             role={role}
             onRoleChange={setRole}
+            mode={mode}
+            onModeChange={setMode}
             provider={aiProvider}
             modelChoice={modelChoice}
             onModelChange={handleModelChange}
