@@ -7,7 +7,7 @@ import path from "node:path";
 import { clickWhenEnabled, textOf, tid, waitAttr, waitUntil, waitVisible } from "../lib/ui.mjs";
 import { createProjectFromHome, gamePids, tempParent } from "./common.mjs";
 
-const READY_LINE = "[infinabox] ready 1";
+const READY_LINE = "[infinabox] ready 2";
 
 // Godot-related files under `dir` (the webview keeps its own storage there too).
 function listFiles(dir) {

@@ -25,6 +25,9 @@ pub enum BridgeRequest {
     GameStatus,
     RecentErrors { limit: usize },
     RecentOutput { lines: usize },
+    /// Runs a list of playtest steps on the running game (see
+    /// `infinabox_core::godot::playtest`).
+    Playtest { steps: Vec<serde_json::Value> },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

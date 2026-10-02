@@ -77,7 +77,7 @@ const FIRST_SNAPSHOT_TITLE: &str = "New project";
 /// `[infinabox] ready <version>`. Must match `VERSION` in
 /// `godot-addon/infinabox/infinabox_runtime.gd` and `version` in its
 /// `plugin.cfg` (a test checks both).
-pub const ADDON_VERSION: u32 = 1;
+pub const ADDON_VERSION: u32 = 2;
 
 /// Where the addon lives inside a project.
 const ADDON_DIR: &str = "addons/infinabox";

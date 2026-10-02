@@ -97,6 +97,7 @@ pub fn summary(name: &str, args: &Value) -> String {
         "project_map" => "Looking at how the game is put together".into(),
         "find_symbol" => "Looking up where something is used".into(),
         "describe_scene" => "Reading a scene".into(),
+        "playtest" => "Playing the game to check it".into(),
         "list_snapshots" => "Looking at the project's history".into(),
         "propose_plan" => "Writing up a plan".into(),
         other => format!("Using {}", other.replace('_', " ")),

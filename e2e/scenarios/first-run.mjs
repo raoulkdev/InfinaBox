@@ -47,7 +47,7 @@ const ANSWERS = {
   idea: "A little robot who hops between floating islands to collect lost stars",
 };
 const PLAN_REQUEST = "add an Options button to the main menu";
-const READY_LINE = "[infinabox] ready 1";
+const READY_LINE = "[infinabox] ready 2";
 const NOT_CHAT = [".", ":(exclude).ibproject/chat", ":(exclude).ibproject/boards"];
 
 const chip = (text) => By.xpath(`//button[@data-chip][normalize-space()=${JSON.stringify(text)}]`);

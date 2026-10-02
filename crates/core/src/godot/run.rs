@@ -27,7 +27,7 @@ pub struct WindowHint {
 }
 
 impl WindowHint {
-    fn args(&self) -> Vec<String> {
+    pub fn args(&self) -> Vec<String> {
         vec![
             "--windowed".into(),
             "--position".into(),
@@ -75,6 +75,19 @@ impl GameProcess {
         Self::start_with_args(godot, project, &args, on_line, on_exit)
     }
 
+    /// Like [`GameProcess::start_with_args`], also setting `env` for the
+    /// game (the playtest channel's port and token).
+    pub fn start_with_env(
+        godot: &Path,
+        project: &Path,
+        extra_args: &[String],
+        env: &[(String, String)],
+        on_line: impl FnMut(GameOutputLine) + Send + 'static,
+        on_exit: impl FnOnce(GameState) + Send + 'static,
+    ) -> Result<Self> {
+        Self::spawn(godot, project, extra_args, env, on_line, on_exit)
+    }
+
     /// Like [`GameProcess::start`], with extra Godot arguments placed after
     /// `--path <project>` (e.g. `--headless --quit-after 30` for the boot
     /// check and for tests on machines without a display).
@@ -85,11 +98,23 @@ impl GameProcess {
         on_line: impl FnMut(GameOutputLine) + Send + 'static,
         on_exit: impl FnOnce(GameState) + Send + 'static,
     ) -> Result<Self> {
+        Self::spawn(godot, project, extra_args, &[], on_line, on_exit)
+    }
+
+    fn spawn(
+        godot: &Path,
+        project: &Path,
+        extra_args: &[String],
+        env: &[(String, String)],
+        on_line: impl FnMut(GameOutputLine) + Send + 'static,
+        on_exit: impl FnOnce(GameState) + Send + 'static,
+    ) -> Result<Self> {
         let mut command = Command::new(godot);
         command
             .arg("--path")
             .arg(project)
             .args(extra_args)
+            .envs(env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -562,7 +587,7 @@ mod tests {
             let line = rx
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 .expect("never saw the ready line");
-            if line.text == "[infinabox] ready 1" {
+            if line.text == "[infinabox] ready 2" {
                 break;
             }
         }

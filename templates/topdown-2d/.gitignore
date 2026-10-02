@@ -7,3 +7,4 @@
 
 # InfinaBox: files attached to chat messages (kept on this computer only).
 .ibproject/chat/attachments/
+.ibproject/playtest/

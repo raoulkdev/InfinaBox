@@ -18,7 +18,7 @@ import { clickWhenEnabled, textOf, tid, waitAttr, waitUntil, waitVisible } from 
 import { gamePids, gameProcesses, gameWindows, git, visibleTexts } from "./common.mjs";
 
 export const AI_REQUEST = "make the background dark blue and add a label that says Hello";
-const READY_LINE = "[infinabox] ready 1";
+const READY_LINE = "[infinabox] ready 2";
 // A real turn reads the project, edits files, runs the game and checks it.
 export const TURN_TIMEOUT_MS = 10 * 60_000;
 export const COMPOSER = By.css('textarea[aria-label="Message the AI"]');

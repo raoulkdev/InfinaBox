@@ -123,6 +123,7 @@ impl BridgeHandler for GameBridge {
                 self.manager.recent_output(lines),
                 MAX_LIST_BYTES,
             )),
+            BridgeRequest::Playtest { steps } => result(self.manager.playtest(&steps)),
         }
     }
 }

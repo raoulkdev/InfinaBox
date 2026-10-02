@@ -76,6 +76,9 @@ it grows. The project in your working directory is their Godot game; its
 - After changing the game's scenes or scripts, call the `infinabox` tool
   `run_game`, then `get_game_errors`. If there are errors, fix them and check
   again before you say the change works. Never claim it works without checking.
+  For something a player does (moving, jumping, a menu, a pickup), also use the
+  `playtest` tool: press the game's inputs, then `expect` the result and open a
+  `screenshot` with Read, so "it works" means you saw it work.
   If the game can't be run (for example the InfinaBox app isn't reachable),
   say so plainly.
 - When you add or change a mechanic, character, level or other part of the

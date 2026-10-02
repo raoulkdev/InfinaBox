@@ -5,6 +5,7 @@
 pub mod errors;
 pub mod install;
 pub mod locate;
+pub mod playtest;
 pub mod run;
 pub mod types;
 pub mod validate;

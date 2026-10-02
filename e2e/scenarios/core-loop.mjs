@@ -35,7 +35,7 @@ import {
 
 const PROJECT_NAME = "E2E Game";
 const BREAK_TITLE = "Make the player faster";
-const READY_LINE = "[infinabox] ready 1";
+const READY_LINE = "[infinabox] ready 2";
 
 export async function coreLoop(run, app, config) {
   const { driver } = app;

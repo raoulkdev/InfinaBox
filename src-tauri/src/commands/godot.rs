@@ -25,6 +25,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use infinabox_core::godot::errors::{ErrorParser, RecentLog};
+use infinabox_core::godot::playtest;
 use infinabox_core::godot::run::{GameProcess, WindowHint};
 use infinabox_core::godot::{
     install, locate, validate, GameError, GameOutputLine, GameState, GodotStatus, OutputStream,
@@ -99,6 +100,9 @@ struct Inner {
     import_errors: HashSet<String>,
     /// Project fingerprint after its last successful import, per project.
     imported: HashMap<PathBuf, u64>,
+    /// Where this run's game listens for playtest steps, when it could be
+    /// given a port.
+    playtest: Option<playtest::Endpoint>,
 }
 
 impl Inner {
@@ -176,6 +180,7 @@ impl Default for GameManager {
                 last_stderr: Instant::now(),
                 import_errors: HashSet::new(),
                 imported: HashMap::new(),
+                playtest: None,
             }),
             run_lock: Mutex::new(()),
         }
@@ -209,6 +214,37 @@ impl GameManager {
 
     pub fn recent_output(&self, lines: usize) -> Vec<GameOutputLine> {
         self.inner().log.recent_lines(lines)
+    }
+
+    /// Runs a playtest (see `infinabox_core::godot::playtest`) on the
+    /// running game. Errors the game printed while the test ran are added to
+    /// the report as `new_errors`.
+    pub fn playtest(&self, steps: &[serde_json::Value]) -> Result<serde_json::Value, String> {
+        let (endpoint, project) = {
+            let inner = self.inner();
+            match (inner.state, inner.playtest.clone(), inner.project_path.clone()) {
+                (GameState::Running | GameState::Starting, Some(endpoint), Some(project)) => (endpoint, project),
+                (GameState::Running | GameState::Starting, None, _) => {
+                    return Err("This run of the game can't be playtested (no port was available). \
+                        Run it again with run_game.".into());
+                }
+                _ => return Err("The game isn't running. Start it with run_game first.".into()),
+            }
+        };
+        let seen: HashSet<String> = self.recent_errors(usize::MAX).into_iter().map(|e| e.raw).collect();
+        let mut report = playtest::run_steps(&endpoint, Path::new(&project), steps)?;
+        // The game's error output is flushed once stderr has been quiet.
+        thread::sleep(STDERR_QUIET + FLUSH_POLL * 2);
+        let new_errors: Vec<GameError> = self
+            .recent_errors(usize::MAX)
+            .into_iter()
+            .filter(|e| !seen.contains(&e.raw))
+            .collect();
+        if !new_errors.is_empty() {
+            report["passed"] = serde_json::Value::Bool(false);
+        }
+        report["new_errors"] = serde_json::to_value(new_errors).unwrap_or_default();
+        Ok(report)
     }
 
     /// Starts `project`'s game, stopping whatever was running first. Returns
@@ -354,13 +390,17 @@ impl GameManager {
                 inner.set_state(state, exit_host.as_ref());
             }
         };
-        let process = match launch {
-            Launch::Window(hint) => GameProcess::start(godot, project, hint, on_line, on_exit),
-            Launch::Args(args) => {
-                GameProcess::start_with_args(godot, project, &args, on_line, on_exit)
-            }
-        }
-        .map_err(|e| format!("{e:#}"))?;
+        let args = match launch {
+            Launch::Window(hint) => hint.map(|h| h.args()).unwrap_or_default(),
+            Launch::Args(args) => args,
+        };
+        // A game that can't be given a playtest port still runs; the
+        // playtest tool then says it isn't available.
+        let endpoint = playtest::Endpoint::new(project).ok();
+        let env = endpoint.as_ref().map(playtest::Endpoint::env).unwrap_or_default();
+        let process = GameProcess::start_with_env(godot, project, &args, &env, on_line, on_exit)
+            .map_err(|e| format!("{e:#}"))?;
+        inner.playtest = endpoint;
         inner.process = Some(process);
         inner.set_state(GameState::Running, host.as_ref());
         drop(inner);
@@ -1461,6 +1501,32 @@ mod tests {
             .recent_output(MAX_RECENT_LINES)
             .iter()
             .all(|l| !l.text.contains('\u{1b}')));
+    }
+
+    /// A run through the manager gets a playtest port, and a test sent to it
+    /// reaches the real addon in the real game.
+    #[test]
+    #[ignore = "needs a real Godot (INFINABOX_GODOT); run with --ignored"]
+    fn a_real_game_run_by_the_manager_can_be_playtested() {
+        let project = fixture_project("clean");
+        let host = TestHost::new(Ok(real_godot()), &["--headless"]);
+        let manager = Arc::new(GameManager::default());
+        let path = project.path().to_str().unwrap().to_string();
+        // Nothing is running yet.
+        assert!(manager.playtest(&[serde_json::json!({"action": "info"})]).is_err());
+        manager.run(&host_of(&host), &path).unwrap();
+        let report = manager
+            .playtest(&[
+                serde_json::json!({"action": "info"}),
+                serde_json::json!({"action": "wait", "seconds": 0.2}),
+                serde_json::json!({"action": "expect", "node": "/root/InfinaBox", "op": "exists"}),
+            ])
+            .unwrap();
+        assert_eq!(report["passed"], true, "{report:#}");
+        assert_eq!(report["new_errors"], serde_json::json!([]));
+        manager.stop(&host_of(&host)).unwrap();
+        // Stopped: no more tests.
+        assert!(manager.playtest(&[serde_json::json!({"action": "info"})]).is_err());
     }
 
     /// Task C's finding: `godot --path` alone doesn't import a newly added

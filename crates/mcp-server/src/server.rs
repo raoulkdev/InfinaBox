@@ -12,7 +12,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::bridge_client::{self, BridgeConfig};
 use crate::bridge_protocol::BridgeRequest;
@@ -39,6 +39,7 @@ pub const TOOL_NAMES: &[&str] = &[
     "project_map",
     "find_symbol",
     "describe_scene",
+    "playtest",
 ];
 
 /// What the agent is told after a plan was accepted.
@@ -108,6 +109,55 @@ pub struct PlanParams {
 pub struct SymbolParams {
     /// One GDScript name: a function, signal, variable, constant, class or autoload, e.g. "player_died" or "Events".
     pub name: String,
+}
+
+/// One step of a playtest. Only `action` is always needed.
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct PlaytestStep {
+    /// What to do: "press" (hold an input action), "key" (hold a keyboard key), "click" (mouse click), "wait", "screenshot", "tree" (list the nodes of the running scene), "get" (read a property), "expect" (check a property or that a node exists) or "info" (input actions, scene, frame rate).
+    pub action: String,
+    /// For "press": an input action from the game's Input Map, e.g. "move_right" or "jump". For "key": a key name such as "Space", "Enter", "A", "Left".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+    /// For "press", "key" and "wait": how long, in seconds (default 0.1 for press/key, 0.5 for wait; at most 30).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seconds: Option<f64>,
+    /// For "click": the position in the game's window, in pixels from the top-left.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x: Option<f64>,
+    /// For "click": see x.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y: Option<f64>,
+    /// For "click": "left" (default) or "right".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub button: Option<String>,
+    /// For "tree", "get" and "expect": the node, as a path inside the running scene ("Player/Sprite"; empty means the scene's root) or an absolute one for an autoload ("/root/GameState").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
+    /// For "get" and "expect": the property or script variable to read, e.g. "position", "health".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub property: Option<String>,
+    /// For "expect": which part of a vector to compare, "x", "y" or "z".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component: Option<String>,
+    /// For "expect": "==" (default), "!=", ">", "<", ">=", "<=", or "exists" (just that the node exists).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub op: Option<String>,
+    /// For "expect": the value to compare with (a number, string, bool, or an array like [10, 20] for a position).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<serde_json::Value>,
+    /// For "tree": how many levels down to list (default 3, at most 8).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth: Option<u32>,
+    /// For "screenshot" and "expect": a short name that shows up in the report.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PlaytestParams {
+    /// The steps, run in order, at most 60 and about two minutes in all.
+    pub steps: Vec<PlaytestStep>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -374,6 +424,29 @@ scripts and scenes it loads."
         })
         .await?;
         Ok(to_json(&scene))
+    }
+
+    #[tool(
+        description = "Play the running game for real and report what happened: press its \
+input actions or keys, click, wait, take a screenshot, read a node's properties and check \
+them. Run the game with run_game first. Start with one {\"action\":\"info\"} step to see \
+the game's input actions and scene, then build the test from what a player would do (e.g. \
+press \"move_right\" for 1 second, then expect Player.position x > its old value). The \
+report lists each step's result, any errors the game printed while it ran (new_errors), \
+and screenshots as file paths in the project that you can open with Read to look at them. \
+A test only passes if every step passes and the game printed no new errors. Use it to \
+check a change you made, or when asked to playtest."
+    )]
+    async fn playtest(
+        &self,
+        Parameters(PlaytestParams { steps }): Parameters<PlaytestParams>,
+    ) -> Result<String, String> {
+        let steps: Vec<serde_json::Value> = steps
+            .iter()
+            .map(|s| serde_json::to_value(s).map_err(|e| e.to_string()))
+            .collect::<Result<_, _>>()?;
+        infinabox_core::godot::playtest::validate_steps(&steps)?;
+        self.bridge(BridgeRequest::Playtest { steps }).await
     }
 
     /// Nothing is stored here: the agent runtime sees this call in the
