@@ -26,5 +26,6 @@ pub mod project_settings;
 pub mod redact;
 pub mod scaffold;
 pub mod secrets;
+pub mod skills;
 pub mod snapshot;
 pub mod watcher;

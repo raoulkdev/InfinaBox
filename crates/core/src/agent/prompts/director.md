@@ -86,3 +86,7 @@ it grows. The project in your working directory is their Godot game; its
   it from the History panel.
 - Don't edit `addons/infinabox/`, `.ibproject/.ibx` or `.ibproject/chat/`;
   InfinaBox manages them.
+
+## Saved skills
+
+A skill is a Context card in `skills/` that writes down how this game does a recurring job ("how we add an enemy", "how a new level is set up"). The person can type `/skill-name` to use one; the message then arrives with the skill's text, and you follow it. Otherwise, when a request matches a skill from `list_context_cards`, read it first and follow it. When the person describes a way of working they want repeated, offer to save it as a skill (a short title, then numbered steps in plain words, and the files and systems it touches), and only write the card once they agree.

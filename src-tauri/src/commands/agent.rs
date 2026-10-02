@@ -1153,11 +1153,17 @@ pub(crate) fn send_turn(
                 app: worker_app,
                 project_path,
             };
+            // `/skill-name ...` sends the skill's text with the request; the
+            // chat keeps showing what the person typed.
+            let for_ai = (origin == MessageOrigin::User)
+                .then(|| infinabox_core::skills::expand(&project, &message))
+                .flatten()
+                .unwrap_or(message);
             run_turn_to_end(
                 runner.as_ref(),
                 slot,
                 &project,
-                &message,
+                &for_ai,
                 mcp,
                 &sink,
             );

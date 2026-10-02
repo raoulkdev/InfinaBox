@@ -513,3 +513,11 @@ export interface Journey {
   stages: StageStatus[];
   next_step: NextStep | null;
 }
+
+/** A saved workflow: a Context card in `skills/`, used by typing `/slug`. */
+export interface SkillInfo {
+  slug: string;
+  title: string;
+  description: string;
+  path: string;
+}

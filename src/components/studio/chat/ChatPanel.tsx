@@ -751,6 +751,7 @@ export function ChatPanel({
             onRoleChange={setRole}
             mode={mode}
             onModeChange={setMode}
+            projectPath={projectPath}
             provider={aiProvider}
             modelChoice={modelChoice}
             onModelChange={handleModelChange}

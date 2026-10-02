@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  SkillInfo,
   TurnMode,
   AgentEventPayload,
   AssetInfo,
@@ -339,3 +340,7 @@ export const boardWrite = (projectPath: string, id: string, json: string) =>
 export const boardDelete = (projectPath: string, id: string) => invoke<void>("board_delete", { projectPath, id });
 export const boardSaveFile = (projectPath: string, name: string, dataBase64: string) =>
   invoke<string>("board_save_file", { projectPath, name, dataBase64 });
+
+export const skillsList = (projectPath: string) => invoke<SkillInfo[]>("skills_list", { projectPath });
+export const skillCreate = (projectPath: string, name: string) =>
+  invoke<SkillInfo>("skill_create", { projectPath, name });

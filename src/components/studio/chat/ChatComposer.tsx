@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type RefObject } from "react";
 import { ArrowUp, FileText, Loader2, Paperclip, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { ProviderId, Role, TurnMode } from "@/lib/studio-types";
+import type { ProviderId, Role, SkillInfo, TurnMode } from "@/lib/studio-types";
+import { skillCreate, skillsList } from "@/lib/studio-api";
 import { ModelPicker, type ModelChoice } from "./ModelPicker";
 import { RolePicker } from "./RolePicker";
 
@@ -32,6 +33,8 @@ interface ChatComposerProps {
   /** Ask only reads and answers; Build may change the game. */
   mode: TurnMode;
   onModeChange: (mode: TurnMode) => void;
+  /** The open game, for its saved skills (`/name`). */
+  projectPath?: string | null;
   /** The AI in use, and the model/effort chosen for the next message. */
   provider: ProviderId | null;
   modelChoice: ModelChoice;
@@ -70,6 +73,7 @@ export function ChatComposer({
   onRoleChange,
   mode,
   onModeChange,
+  projectPath,
   provider,
   modelChoice,
   onModelChange,
@@ -83,6 +87,22 @@ export function ChatComposer({
   const [dragging, setDragging] = useState(false);
   const ownRef = useRef<HTMLTextAreaElement | null>(null);
   const textareaRef = inputRef ?? ownRef;
+  const [skills, setSkills] = useState<SkillInfo[]>([]);
+  const [naming, setNaming] = useState<string | null>(null);
+  const [skillError, setSkillError] = useState<string | null>(null);
+  const typingCommand = /^\/[a-z0-9-]*$/.test(value);
+  useEffect(() => {
+    if (!typingCommand || !projectPath) return;
+    let cancelled = false;
+    skillsList(projectPath).then(
+      (list) => !cancelled && setSkills(list),
+      () => !cancelled && setSkills([]),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [typingCommand, projectPath]);
+  const matches = typingCommand ? skills.filter((k) => `/${k.slug}`.startsWith(value)) : [];
   const canSend = !busy && !disabled && !uploading && (value.trim().length > 0 || attachments.length > 0);
 
   // Auto-grow: one row when empty, else fit the content (capped). Measured
@@ -124,6 +144,11 @@ export function ChatComposer({
     // reports the IME's confirming Enter with `isComposing` already false,
     // but still with the legacy keyCode 229, so check that too.
     const imeEnter = e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229;
+    if (e.key === "Tab" && matches.length > 0 && !e.shiftKey) {
+      e.preventDefault();
+      onChange(`/${matches[0]!.slug} `);
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey && !imeEnter) {
       e.preventDefault();
       if (canSend) onSend();
@@ -145,6 +170,76 @@ export function ChatComposer({
         dragging ? "border-ring bg-accent/40" : "border-border"
       }`}
     >
+      {typingCommand && !busy && (
+        <div data-testid="skill-menu" className="flex flex-col gap-0.5 rounded-lg border border-border bg-muted/40 p-1 text-sm">
+          {matches.map((k) => (
+            <button
+              key={k.slug}
+              type="button"
+              data-testid="skill-item"
+              onClick={() => {
+                onChange(`/${k.slug} `);
+                textareaRef.current?.focus();
+              }}
+              className="flex items-baseline gap-2 rounded px-2 py-1 text-left hover:bg-accent"
+            >
+              <span className="font-medium">/{k.slug}</span>
+              <span className="truncate text-xs text-muted-foreground">{k.description || k.title}</span>
+            </button>
+          ))}
+          {matches.length === 0 && skills.length === 0 && (
+            <span className="px-2 py-1 text-xs text-muted-foreground">No saved skills yet.</span>
+          )}
+          {naming === null ? (
+            <button
+              type="button"
+              data-testid="skill-new"
+              disabled={!projectPath}
+              onClick={() => {
+                setNaming("");
+                setSkillError(null);
+              }}
+              className="rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent"
+            >
+              New skill…
+            </button>
+          ) : (
+            <form
+              className="flex items-center gap-2 px-1"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!projectPath) return;
+                skillCreate(projectPath, naming).then(
+                  (made) => {
+                    setNaming(null);
+                    onChange(`/${made.slug} `);
+                  },
+                  (err) => setSkillError(String(err)),
+                );
+              }}
+            >
+              <input
+                autoFocus
+                data-testid="skill-name"
+                value={naming}
+                onChange={(e) => setNaming(e.target.value)}
+                placeholder="Name, e.g. Add an enemy"
+                className="min-w-0 flex-1 bg-transparent px-1 py-1 text-sm outline-none"
+              />
+              <button type="submit" className="text-xs text-muted-foreground hover:text-foreground">
+                Create
+              </button>
+              <button type="button" onClick={() => setNaming(null)} className="text-xs text-muted-foreground hover:text-foreground">
+                Cancel
+              </button>
+            </form>
+          )}
+          {skillError && <span className="px-2 text-xs text-destructive">{skillError}</span>}
+          {naming !== null && !skillError && (
+            <span className="px-2 pb-1 text-xs text-muted-foreground">Edit it in Documents, under skills.</span>
+          )}
+        </div>
+      )}
       {(attachments.length > 0 || uploading || attachError) && (
         <div className="flex flex-wrap items-center gap-1.5 px-1" data-testid="attachments">
           {attachments.map((a) => (

@@ -110,3 +110,15 @@ pub fn board_save_file(project_path: String, name: String, data_base64: String) 
         .map_err(|_| "That file couldn't be read.".to_string())?;
     boards::save_file(Path::new(&project_path), &name, &bytes).map_err(err)
 }
+
+// ---- Skills (`infinabox_core::skills`) ----
+
+#[tauri::command(async)]
+pub fn skills_list(project_path: String) -> Result<Vec<infinabox_core::skills::SkillInfo>, String> {
+    infinabox_core::skills::list(Path::new(&project_path)).map_err(err)
+}
+
+#[tauri::command(async)]
+pub fn skill_create(project_path: String, name: String) -> Result<infinabox_core::skills::SkillInfo, String> {
+    infinabox_core::skills::create(Path::new(&project_path), &name).map_err(err)
+}
