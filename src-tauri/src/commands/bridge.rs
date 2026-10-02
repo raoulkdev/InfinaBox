@@ -635,6 +635,34 @@ mod tests {
         assert_eq!(err, godot::NOT_A_GODOT_GAME);
     }
 
+    /// The playtest path the agent uses: bridge → GameManager → the addon in
+    /// a real Godot, headless (pictures are covered under a display).
+    #[test]
+    #[ignore = "needs a real Godot (INFINABOX_GODOT); run with --ignored"]
+    fn the_agent_can_playtest_the_real_game_over_the_bridge() {
+        let godot = std::env::var_os(infinabox_core::godot::locate::GODOT_PATH_ENV)
+            .map(std::path::PathBuf::from)
+            .expect("set INFINABOX_GODOT to a real Godot binary");
+        let project = fixture_project("clean");
+        let path = project.path().to_str().unwrap().to_string();
+        let host = TestHost::new(Ok(godot), &["--headless"]);
+        let manager = Arc::new(GameManager::default());
+        let (addr, token) = spawn_bridge(Arc::new(GameBridge {
+            manager: manager.clone(),
+            host: host_of(&host),
+        }));
+        // Not running yet: a plain error.
+        let steps = vec![json!({"action": "info"}), json!({"action": "expect", "node": "/root/InfinaBox", "op": "exists"})];
+        let err = call(&addr, &token, &path, BridgeRequest::Playtest { steps: steps.clone() }).unwrap_err();
+        assert!(err.contains("isn't running"), "{err}");
+
+        call(&addr, &token, &path, BridgeRequest::RunGame).unwrap();
+        let report = call(&addr, &token, &path, BridgeRequest::Playtest { steps }).unwrap();
+        assert_eq!(report["passed"], true, "{report:#}");
+        assert_eq!(report["steps"][0]["action"], "info");
+        call(&addr, &token, &path, BridgeRequest::StopGame).unwrap();
+    }
+
     /// Regression: sockets without the token dripping one byte at a time
     /// used to hold every connection slot indefinitely (a per-read timeout
     /// never fired), locking the real agent out. Now each gets
