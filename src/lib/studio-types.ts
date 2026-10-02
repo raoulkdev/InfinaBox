@@ -258,8 +258,8 @@ export interface AutoFixStatePayload {
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
 /** What a typed message is for: "ask" only reads and answers, "build" may
- * change the game. */
-export type TurnMode = "build" | "ask";
+ * change the game, "trial" builds in a separate copy that is reviewed first. */
+export type TurnMode = "build" | "ask" | "trial";
 
 export type Role =
   | "director"
@@ -520,4 +520,37 @@ export interface SkillInfo {
   title: string;
   description: string;
   path: string;
+}
+
+/** A PDF, Word file, spreadsheet or CSV read as Markdown. */
+export interface ImportedDocument {
+  title: string;
+  markdown: string;
+  /** What didn't come across. */
+  note: string | null;
+  /** Where the original file was kept. */
+  source: string;
+}
+
+export type TrialChangeKind = "added" | "modified" | "removed";
+
+export interface TrialChange {
+  path: string;
+  kind: TrialChangeKind;
+  /** The game itself changed this file after the copy was made. */
+  conflict: boolean;
+}
+
+/** A separate copy of the game the AI is trying a change in. */
+export interface Trial {
+  id: string;
+  title: string;
+  path: string;
+  created: number;
+  changes: TrialChange[];
+}
+
+export interface TrialApplied {
+  report: { applied: string[]; conflicts: string[] };
+  snapshot: Snapshot | null;
 }

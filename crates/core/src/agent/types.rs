@@ -126,13 +126,17 @@ pub struct TurnOptions {
 
 /// What a typed message is for. In `Ask` the AI only reads and answers: no
 /// file is written, no card saved, no plan proposed (each runtime takes the
-/// writing tools away, and the MCP server refuses its own writes).
+/// writing tools away, and the MCP server refuses its own writes). In `Trial`
+/// it builds, but in a separate copy of the game (`sandbox`) that the person
+/// reviews before anything reaches the real game; the copy stands in for the
+/// plan.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnMode {
     #[default]
     Build,
     Ask,
+    Trial,
 }
 
 /// How technical the conversation is: the person can be anywhere from

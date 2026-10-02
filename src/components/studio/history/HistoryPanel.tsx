@@ -24,6 +24,7 @@ import {
 } from "@/lib/studio-api";
 import type { Snapshot } from "@/lib/studio-types";
 import { GoBackDialog } from "./GoBackDialog";
+import { TrialsList } from "./TrialsList";
 import { absoluteTime, relativeTime } from "./relative-time";
 
 export interface HistoryPanelProps {
@@ -294,6 +295,7 @@ export function HistoryPanel({ projectPath, aiWorking = false }: HistoryPanelPro
       </AnimatePresence>
 
       <div className="min-h-0 flex-1 overflow-auto border-t border-border">
+        <TrialsList projectPath={projectPath} aiWorking={aiWorking} onNotice={(tone, text) => setNotice({ tone, text })} />
         {list.status === "loading" && (
           <div className="flex flex-col gap-2 p-3">
             <Skeleton className="h-4 w-full" />

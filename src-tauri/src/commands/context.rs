@@ -122,3 +122,31 @@ pub fn skills_list(project_path: String) -> Result<Vec<infinabox_core::skills::S
 pub fn skill_create(project_path: String, name: String) -> Result<infinabox_core::skills::SkillInfo, String> {
     infinabox_core::skills::create(Path::new(&project_path), &name).map_err(err)
 }
+
+#[derive(serde::Serialize)]
+pub struct ImportedDocument {
+    pub title: String,
+    pub markdown: String,
+    pub note: Option<String>,
+    /// Where the original file was kept (project-relative).
+    pub source: String,
+}
+
+/// Reads a PDF, Word file, spreadsheet or CSV dropped on a board as
+/// Markdown (`infinabox_core::doc_import`) and keeps the original beside
+/// the board's other files.
+#[tauri::command(async)]
+pub fn document_import(project_path: String, name: String, data_base64: String) -> Result<ImportedDocument, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_base64.as_bytes())
+        .map_err(|_| "That file couldn't be read.".to_string())?;
+    let imported = infinabox_core::doc_import::to_markdown(&name, &bytes).map_err(err)?;
+    let source = boards::save_file(Path::new(&project_path), &name, &bytes).map_err(err)?;
+    Ok(ImportedDocument {
+        title: imported.title,
+        markdown: imported.markdown,
+        note: imported.note,
+        source,
+    })
+}

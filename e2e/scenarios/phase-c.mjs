@@ -82,7 +82,21 @@ export async function startFakes() {
       if (req.url.endsWith("/models")) return res.end(JSON.stringify({ data: [{ id: "fake-model" }] }));
       const sawToolResult = (parsed.messages ?? []).some((m) => m.role === "tool");
       const wantsNote = JSON.stringify(parsed.messages ?? []).includes("save a note");
-      const message = !wantsNote
+      // A trial: judged by the newest message only, since one chat holds several.
+      const msgs = parsed.messages ?? [];
+      const lastUser = msgs.map((m) => m.role).lastIndexOf("user");
+      const lastText = typeof msgs[lastUser]?.content === "string" ? msgs[lastUser].content : JSON.stringify(msgs[lastUser]?.content ?? "");
+      const trialFile = /second trial note/.test(lastText) ? "trial-note-2.txt" : /trial note/.test(lastText) ? "trial-note.txt" : null;
+      const trialDone = msgs.slice(lastUser + 1).some((m) => m.role === "tool");
+      const message = trialFile
+        ? trialDone
+          ? { role: "assistant", content: "I made the trial note." }
+          : {
+              role: "assistant",
+              content: null,
+              tool_calls: [{ id: "call_t", type: "function", function: { name: "write_file", arguments: JSON.stringify({ path: trialFile, content: `from the trial ${trialFile}\n` }) } }],
+            }
+        : !wantsNote
         ? { role: "assistant", content: "hello" }
         : sawToolResult
         ? { role: "assistant", content: "I saved a note file for you." }
@@ -517,6 +531,17 @@ export async function phaseC(run, app, config, fakes) {
     await saved((b) => b.blocks.some((x) => x.type === "image" && x.src.startsWith(".ibproject/boards/files/")), "the image block to be saved");
     const imageBlock = readBoard().blocks.find((x) => x.type === "image");
     if (!fs.existsSync(path.join(state.project, imageBlock.src))) throw new Error("the picture file isn't in the project");
+    // A spreadsheet-like file dropped on the board is read into a document the AI can read.
+    await driver.executeScript(
+      `const input = document.querySelector('[data-testid="canvas-file-input"]');
+       const dt = new DataTransfer();
+       dt.items.add(new File(["name,hp\\nSlime,10\\nBat,6\\n"], "enemies.csv", { type: "text/csv" }));
+       input.files = dt.files;
+       input.dispatchEvent(new Event("change", { bubbles: true }));`,
+    );
+    await saved((b) => b.blocks.some((x) => x.type === "doc" && x.ref === "enemies.md"), "the imported CSV to become a document block");
+    const imported = fs.readFileSync(path.join(state.project, ".ibproject/context/enemies.md"), "utf8");
+    if (!imported.includes("| Slime | 10 |") || !imported.includes("Imported from enemies.csv")) throw new Error(`the CSV wasn't read into the document:\n${imported}`);
     // A link and a to-do list, a swatch and a table.
     for (const type of ["link", "todo", "swatch", "table", "text", "comment", "sketch"]) await clickWhenEnabled(driver, tid(`add-${type}`));
     await clickEmpty();
@@ -716,6 +741,87 @@ export async function phaseC(run, app, config, fakes) {
     await waitUntil(async () => (await driver.findElements(tid("message-attachments"))).length > 0, { what: "the attachment shown in the message" });
     await run.shot("message-with-attachment");
   }, { needs: ["c4"] });
+
+  await run.step("c7d", "Skills (/name) and Ask mode reach the AI as built", async () => {
+    await clickWhenEnabled(driver, tid("nav-studio"));
+    const box = await waitVisible(driver, By.css('[data-testid="chat-composer"] textarea'));
+    const idle = () => driver.findElements(By.css('[data-testid="chat-composer"] button[aria-label="Send"]')).then((e) => e.length > 0);
+    // "/" lists skills; "New skill…" makes one and fills the command in.
+    await box.sendKeys("/");
+    await waitVisible(driver, tid("skill-menu"));
+    await clickWhenEnabled(driver, tid("skill-new"));
+    const name = await waitVisible(driver, tid("skill-name"));
+    await name.sendKeys("Add an enemy\uE007");
+    await waitUntil(async () => (await box.getAttribute("value")) === "/add-an-enemy ", { what: "the new skill's command in the composer" });
+    await run.shot("skill-created");
+    const card = fs.readFileSync(path.join(state.project, ".ibproject/context/skills/add-an-enemy.md"), "utf8");
+    if (!card.includes("title: Add an enemy") && !card.includes('title: "Add an enemy"')) throw new Error(`the skill card has no title:\n${card}`);
+    // Using it sends the skill's text to the AI; the chat keeps what was typed.
+    await box.sendKeys("a slime that hops\uE007");
+    await waitUntil(async () => fakes.seen.chat.some((c) => JSON.stringify(c.parsed).includes("a slime that hops")), { timeoutMs: 60_000, what: "the model call carrying the skill" });
+    const withSkill = fakes.seen.chat.find((c) => JSON.stringify(c.parsed).includes("a slime that hops"));
+    if (!JSON.stringify(withSkill.parsed).includes('saved skill \\"Add an enemy\\"')) throw new Error("the skill's text didn't reach the model");
+    await waitUntil(idle, { timeoutMs: 60_000, what: "the turn to finish" });
+    const chatDir = path.join(state.project, ".ibproject/chat");
+    const typed = fs.readdirSync(chatDir).filter((f) => f.endsWith(".jsonl")).flatMap((f) => fs.readFileSync(path.join(chatDir, f), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+    if (!typed.some((r) => r.kind === "user" && r.text === "/add-an-enemy a slime that hops")) throw new Error("the chat didn't keep what was typed");
+    // Its snapshot is titled from what was typed, not from the skill's text.
+    await waitUntil(async () => snapshotSubjects(state.project).some((t) => t.startsWith("/add-an-enemy a slime that hops")), { what: "a snapshot titled from the typed message" });
+    // Ask mode: the model is offered no tool that changes files.
+    await clickWhenEnabled(driver, tid("mode-ask"));
+    await box.sendKeys("how does the player move?\uE007");
+    await waitUntil(async () => fakes.seen.chat.some((c) => JSON.stringify(c.parsed).includes("how does the player move?")), { timeoutMs: 60_000, what: "the question reaching the model" });
+    const asked = fakes.seen.chat.find((c) => JSON.stringify(c.parsed).includes("how does the player move?"));
+    const tools = JSON.stringify(asked.parsed.tools ?? []);
+    if (!tools.includes("read_file")) throw new Error("Ask mode took the reading tool away");
+    if (tools.includes("write_file") || tools.includes("edit_file")) throw new Error(`Ask mode still offered a writing tool: ${tools.slice(0, 300)}`);
+    if (!JSON.stringify(asked.parsed).includes("This message is a question")) throw new Error("the model wasn't told it's a question");
+    await waitUntil(idle, { timeoutMs: 60_000, what: "the question's turn to finish" });
+    await clickWhenEnabled(driver, tid("mode-build"));
+    await run.shot("ask-mode");
+  }, { needs: ["c7b"] });
+
+  await run.step("c7e", "A trial in a copy: reviewed, applied with an undoable snapshot, or thrown away", async () => {
+    await clickWhenEnabled(driver, tid("nav-studio"));
+    const box = await waitVisible(driver, By.css('[data-testid="chat-composer"] textarea'));
+    const idle = () => driver.findElements(By.css('[data-testid="chat-composer"] button[aria-label="Send"]')).then((e) => e.length > 0);
+    const textContentOf = (css) => driver.executeScript("return document.querySelector(arguments[0])?.textContent ?? ''", css);
+    const before = snapshotSubjects(state.project).length;
+    await clickWhenEnabled(driver, tid("mode-trial"));
+    await box.sendKeys("please make a trial note\uE007");
+    await waitVisible(driver, tid("trial"));
+    await waitUntil(async () => (await textContentOf(`[data-testid="trial-summary"]`)).includes("1 file changed"), { what: "the trial to show its one changed file" });
+    await waitUntil(idle, { timeoutMs: 60_000, what: "the trial's turn to finish" });
+    // The real game is untouched: no file, no snapshot, nothing uncommitted.
+    if (fs.existsSync(path.join(state.project, "trial-note.txt"))) throw new Error("the trial changed the real game");
+    if (snapshotSubjects(state.project).length !== before) throw new Error("the trial made a snapshot");
+    if (git(state.project, "status", "--porcelain").replace(/.*\.ibproject\/(chat|boards).*\n?/g, "").trim()) throw new Error("the trial left the real game's working tree dirty");
+    await clickWhenEnabled(driver, tid("trial-toggle"));
+    const files = await textContentOf(`[data-testid="trial-files"]`);
+    if (!files.includes("trial-note.txt") || !files.includes("new")) throw new Error(`trial files: ${files}`);
+    await run.shot("trial-review");
+    // The model was told it's a trial and wasn't asked for a plan.
+    const trialCall = fakes.seen.chat.find((c) => JSON.stringify(c.parsed).includes("please make a trial note"));
+    if (!JSON.stringify(trialCall.parsed.messages[0]).includes("trial in a separate copy")) throw new Error("the model wasn't told it's a trial");
+    // The AI worked in the copy, not in the project.
+    await clickWhenEnabled(driver, tid("trial-apply"));
+    await waitUntil(async () => fs.existsSync(path.join(state.project, "trial-note.txt")), { what: "the applied file in the real game" });
+    if (fs.readFileSync(path.join(state.project, "trial-note.txt"), "utf8") !== "from the trial trial-note.txt\n") throw new Error("applied file has the wrong content");
+    await waitUntil(async () => snapshotSubjects(state.project).some((t) => t.startsWith("Trial: please make a trial note")), { what: "the apply's snapshot" });
+    await waitUntil(async () => (await driver.findElements(tid("trial"))).length === 0, { what: "the applied trial to leave the list" });
+    // Undo takes it back out like any other change.
+    await clickWhenEnabled(driver, tid("undo-last"));
+    await waitUntil(async () => !fs.existsSync(path.join(state.project, "trial-note.txt")), { what: "Undo to remove the applied trial" });
+    // A second trial is thrown away: the game never sees it.
+    await box.sendKeys("please make a second trial note\uE007");
+    await waitVisible(driver, tid("trial"));
+    await waitUntil(async () => (await textContentOf(`[data-testid="trial-summary"]`)).includes("1 file changed"), { what: "the second trial's file" });
+    await waitUntil(idle, { timeoutMs: 60_000, what: "the second trial's turn to finish" });
+    await clickWhenEnabled(driver, tid("trial-discard"));
+    await waitUntil(async () => (await driver.findElements(tid("trial"))).length === 0, { what: "the discarded trial to leave the list" });
+    if (fs.existsSync(path.join(state.project, "trial-note-2.txt"))) throw new Error("a discarded trial reached the game");
+    await clickWhenEnabled(driver, tid("mode-build"));
+  }, { needs: ["c7d"] });
 
   await run.step("c8", "Code page and Settings from inside a game; Tasks tab", async () => {
     await clickWhenEnabled(driver, tid("nav-code"));

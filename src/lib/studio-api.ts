@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  ImportedDocument,
+  Trial,
+  TrialApplied,
   SkillInfo,
   TurnMode,
   AgentEventPayload,
@@ -344,3 +347,13 @@ export const boardSaveFile = (projectPath: string, name: string, dataBase64: str
 export const skillsList = (projectPath: string) => invoke<SkillInfo[]>("skills_list", { projectPath });
 export const skillCreate = (projectPath: string, name: string) =>
   invoke<SkillInfo>("skill_create", { projectPath, name });
+
+export const documentImport = (projectPath: string, name: string, dataBase64: string) =>
+  invoke<ImportedDocument>("document_import", { projectPath, name, dataBase64 });
+
+export const sandboxList = (projectPath: string) => invoke<Trial[]>("sandbox_list", { projectPath });
+export const sandboxApply = (projectPath: string, id: string, only?: string[]) =>
+  invoke<TrialApplied>("sandbox_apply", { projectPath, id, only: only ?? null });
+export const sandboxDiscard = (id: string) => invoke<void>("sandbox_discard", { id });
+export const sandboxPlay = (id: string) => invoke<void>("sandbox_play", { id });
+export const onSandboxesChanged = (cb: () => void) => subscribe<null>("sandboxes-changed", () => cb());

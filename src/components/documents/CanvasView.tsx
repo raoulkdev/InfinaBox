@@ -7,7 +7,7 @@ import { getLayout, setLayout } from "@/lib/layout-store";
 import type { CardSummary } from "@/lib/studio-types";
 import { cn } from "@/lib/utils";
 import { BlockContent, NOTE_BG, type BlockCtx } from "./blocks";
-import { collectDocRefs, copyDocs, createDocument, importMarkdown } from "./docs";
+import { IMPORTABLE, collectDocRefs, copyDocs, createDocument, importDocument, importMarkdown } from "./docs";
 import { imageSize } from "./media";
 import {
   addBoardBlock, cloneBlocks, deleteBlocks, freeBlock, moveToBoard, putInColumn,
@@ -307,6 +307,13 @@ export function CanvasView(props: CanvasViewProps) {
         try {
           if (/\.(md|markdown)$/i.test(file.name) && file.size < 2_000_000) {
             const path = await importMarkdown(projectPath, file.name, await file.text(), taken);
+            taken.add(path);
+            madeCards = true;
+            blocks.push(makeBlock("doc", pos, 0, { ref: path }));
+            continue;
+          }
+          if (IMPORTABLE.test(file.name)) {
+            const path = await importDocument(projectPath, file, await fileToBase64(file), taken);
             taken.add(path);
             madeCards = true;
             blocks.push(makeBlock("doc", pos, 0, { ref: path }));

@@ -66,6 +66,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::commands::autofix;
 use crate::commands::bridge::BridgeState;
+use crate::commands::sandbox;
 use crate::commands::snapshot::EVENT_SNAPSHOTS_CHANGED;
 
 /// Event names emitted by this module (frontend: `src/lib/studio-api.ts`).
@@ -342,8 +343,15 @@ pub(crate) struct TurnSlot {
     /// A model chosen for this message (already cleaned), and the effort.
     model: Option<String>,
     effort: Option<Effort>,
-    /// A question (Ask) or a request (Build).
+    /// A question (Ask), a request (Build) or a request tried in a copy.
     mode: infinabox_core::agent::TurnMode,
+    /// The folder the AI works in when it isn't the project: a trial's
+    /// separate copy (`infinabox_core::sandbox`). The chat is still the
+    /// project's, and nothing is snapshotted or restarted for a trial.
+    work_dir: Option<PathBuf>,
+    /// What the person typed, when the AI was sent something longer (a
+    /// skill's text around it): the snapshot is titled from this.
+    typed: Option<String>,
 }
 
 impl Drop for TurnSlot {
@@ -406,6 +414,8 @@ pub(crate) fn start_turn(
         model: None,
         effort: None,
         mode: Default::default(),
+        work_dir: None,
+        typed: None,
     };
     let record = ChatRecord::User {
         text: message.to_string(),
@@ -662,6 +672,11 @@ impl<'a> TurnLog<'a> {
     }
 }
 
+/// A message's first line with text in it (a trial copy's title).
+fn first_line(message: &str) -> &str {
+    message.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")
+}
+
 /// The project's settings for this turn, plus why it was sent. A settings
 /// file that can't be read doesn't stop the turn: it runs with the default
 /// settings (always plan first, no lessons) — the safe choice, since
@@ -775,7 +790,7 @@ fn drive(
         log.held = resumed.then(Vec::new);
         let req = TurnRequest {
             thread_id: thread_id.to_string(),
-            project_path: project.to_path_buf(),
+            project_path: slot.work_dir.clone().unwrap_or_else(|| project.to_path_buf()),
             message: message.to_string(),
             resume_provider_session_id: resume.take(),
             mcp: mcp.clone(),
@@ -969,10 +984,16 @@ pub(crate) fn run_turn_to_end(
         if let Some(e) = log.store_error.take() {
             log.error(format!("Part of this chat couldn't be saved: {e}"));
         }
-        if !log.may_have_changed_files() {
+        // A trial changed a copy, not the game: its result is reviewed
+        // (and snapshotted when applied) from the History panel.
+        if slot.work_dir.is_some() || !log.may_have_changed_files() {
             return None;
         }
-        let title = turn_snapshot_title(message, slot.origin, log.approved_plan.as_deref());
+        let title = turn_snapshot_title(
+            slot.typed.as_deref().unwrap_or(message),
+            slot.origin,
+            log.approved_plan.as_deref(),
+        );
         let origin = log.turn.map(|n| (thread_id.as_str(), n));
         // `create_snapshot` serializes itself with every other snapshot,
         // restore and undo in the app, and makes none when nothing outside
@@ -1001,7 +1022,7 @@ pub(crate) fn run_turn_to_end(
 
     // A snapshot that failed can't say whether a tool that may write did:
     // assume it did, so the running game isn't left on the old files.
-    let restart_game = log.restart_game(snapshotted.unwrap_or(log.used_writer));
+    let restart_game = slot.work_dir.is_none() && log.restart_game(snapshotted.unwrap_or(log.used_writer));
     // Free the thread before announcing the end, so a message sent in
     // reaction to `finished` isn't refused as "still working".
     drop(slot);
@@ -1016,6 +1037,9 @@ struct AppSink {
     app: AppHandle,
     /// The project folder, exactly as the frontend passed it.
     project_path: String,
+    /// A trial in a copy: not part of the auto-fix loop, and it changes the
+    /// list of trials when it ends.
+    sandboxed: bool,
 }
 
 impl TurnSink for AppSink {
@@ -1032,7 +1056,11 @@ impl TurnSink for AppSink {
     fn finished(&self, thread_id: &str, snapshot: Option<&Snapshot>, restart_game: bool) {
         // Before the frontend hears of it, so the auto-fix loop always sees
         // this turn end before any turn started in reaction to it.
-        autofix::note_turn_finished(&self.app, &self.project_path, thread_id);
+        if self.sandboxed {
+            sandbox::note_changed(&self.app);
+        } else {
+            autofix::note_turn_finished(&self.app, &self.project_path, thread_id);
+        }
         let _ = self.app.emit(
             EVENT_TURN_FINISHED,
             TurnFinishedPayload {
@@ -1126,19 +1154,53 @@ pub(crate) fn send_turn(
     // Before anything is saved: an API provider that isn't set up yet fails
     // here with what to finish, and the chat stays untouched.
     let runner = state.runtimes.runner(app, provider, &thread_id, model.as_deref())?;
-    let mut slot = start_turn(
+    // Only a typed message can be a question or a trial.
+    let mode = if origin == MessageOrigin::User { mode } else { Default::default() };
+    // A trial works on a separate copy; made before anything is saved, so a
+    // game too big to copy leaves the chat untouched.
+    let trial = if mode == infinabox_core::agent::TurnMode::Trial {
+        let base = sandbox::sandboxes_dir(app)?;
+        Some(
+            infinabox_core::sandbox::create(&base, &project, first_line(&message))
+                .map_err(|e| format!("The trial copy couldn't be made: {e:#}"))?,
+        )
+    } else {
+        None
+    };
+    let mut slot = match start_turn(
         &state.active_turns,
         &project,
         &thread_id,
         &message,
         origin,
         provider,
-    )?;
+    ) {
+        Ok(slot) => slot,
+        Err(e) => {
+            if let (Some(t), Ok(base)) = (&trial, sandbox::sandboxes_dir(app)) {
+                let _ = infinabox_core::sandbox::discard(&base, &t.id);
+            }
+            return Err(e);
+        }
+    };
     slot.role = role;
     slot.model = model;
     slot.effort = effort;
     slot.mode = mode;
-    autofix::note_turn_started(app, &project_path, &thread_id, origin);
+    slot.work_dir = trial.as_ref().map(|t| t.path.clone());
+    let work_path = trial.as_ref().map_or_else(|| project_path.clone(), |t| t.path.to_string_lossy().into_owned());
+    let sandboxed = trial.is_some();
+    if sandboxed {
+        sandbox::note_changed(app);
+    } else {
+        autofix::note_turn_started(app, &project_path, &thread_id, origin);
+    }
+    // `/skill-name ...` sends the skill's text with the request; the chat
+    // and the snapshot's title keep what the person typed.
+    let for_ai = (origin == MessageOrigin::User)
+        .then(|| infinabox_core::skills::expand(&project, &message))
+        .flatten();
+    slot.typed = for_ai.as_ref().map(|_| message.clone());
     let project_key = project_path.clone();
     let worker_app = app.clone();
     let spawned = std::thread::Builder::new()
@@ -1146,19 +1208,15 @@ pub(crate) fn send_turn(
         .spawn(move || {
             let mcp = mcp_launch(
                 &worker_app,
-                &project_path,
+                &work_path,
                 mode == infinabox_core::agent::TurnMode::Ask,
             );
             let sink = AppSink {
                 app: worker_app,
                 project_path,
+                sandboxed,
             };
-            // `/skill-name ...` sends the skill's text with the request; the
-            // chat keeps showing what the person typed.
-            let for_ai = (origin == MessageOrigin::User)
-                .then(|| infinabox_core::skills::expand(&project, &message))
-                .flatten()
-                .unwrap_or(message);
+            let for_ai = for_ai.unwrap_or(message);
             run_turn_to_end(
                 runner.as_ref(),
                 slot,
@@ -1170,7 +1228,9 @@ pub(crate) fn send_turn(
         });
     if let Err(e) = spawned {
         // The turn (and its slot) went away with the closure.
-        autofix::note_turn_finished(app, &project_key, &thread_id);
+        if !sandboxed {
+            autofix::note_turn_finished(app, &project_key, &thread_id);
+        }
         return Err(format!("The AI couldn't be started: {e}"));
     }
     Ok(())

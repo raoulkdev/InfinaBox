@@ -335,7 +335,7 @@ export function ChatComposer({
       </div>
       <div className="flex items-center gap-2 px-1">
         <div role="group" aria-label="Mode" className="flex rounded-md border border-border p-0.5 text-xs">
-          {(["build", "ask"] as const).map((m) => (
+          {(["build", "trial", "ask"] as const).map((m) => (
             <button
               key={m}
               type="button"
@@ -343,10 +343,16 @@ export function ChatComposer({
               aria-pressed={mode === m}
               disabled={busy}
               onClick={() => onModeChange(m)}
-              title={m === "ask" ? "Ask: the AI answers and changes nothing" : "Build: the AI can change the game"}
+              title={
+                m === "ask"
+                  ? "Ask: the AI answers and changes nothing"
+                  : m === "trial"
+                    ? "In a copy: the AI tries the change in a separate copy; you review it before it touches your game"
+                    : "Build: the AI can change the game"
+              }
               className={`rounded px-2 py-0.5 ${mode === m ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
             >
-              {m === "ask" ? "Ask" : "Build"}
+              {m === "ask" ? "Ask" : m === "trial" ? "In a copy" : "Build"}
             </button>
           ))}
         </div>

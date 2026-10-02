@@ -163,3 +163,9 @@ Things the parser must handle, all visible in these files:
 - `stderr` always starts with a `WARNING: proceeding, even though we could
   not create PATH aliases` line here (because `CODEX_HOME` is under `/tmp`),
   and `codex exec` (not `resume`) prints `Reading additional input from stdin...` even when stdin is `/dev/null`.
+
+## `import/` — made with openpyxl
+
+`balance.xlsx` is a small workbook (two sheets, a whole number, a decimal, a
+cell with a `|` in it, and a formula that was never calculated) saved by the
+real `openpyxl` library, for `doc_import`'s spreadsheet test.

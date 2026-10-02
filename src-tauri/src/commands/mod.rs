@@ -15,6 +15,7 @@ pub mod onboarding;
 pub mod overview;
 pub mod project;
 pub mod project_settings;
+pub mod sandbox;
 pub mod scaffold;
 pub mod settings;
 pub mod snapshot;

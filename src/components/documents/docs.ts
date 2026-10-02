@@ -1,4 +1,4 @@
-import { contextRead, contextWrite } from "@/lib/studio-api";
+import { contextRead, contextWrite, documentImport } from "@/lib/studio-api";
 import type { CardMeta } from "@/lib/studio-types";
 import { DOC_TEMPLATES, templateById, templatedCard } from "@/components/context/templates";
 import { safeName, uniquePath } from "./paths";
@@ -28,6 +28,20 @@ export async function importMarkdown(projectPath: string, fileName: string, text
   const title = fileName.replace(/\.(md|markdown)$/i, "").trim() || "Untitled";
   const path = uniquePath(safeName(title), ".md", taken);
   await contextWrite(projectPath, path, plainMeta(title), text);
+  return path;
+}
+
+/** Files whose text can be read into a document. */
+export const IMPORTABLE = /\.(pdf|docx|xlsx|xlsm|xls|ods|csv|tsv)$/i;
+
+/** A PDF, Word file, spreadsheet or CSV becomes a document; the original is
+ * kept and named at the top. Returns the new document's path. */
+export async function importDocument(projectPath: string, file: File, dataBase64: string, taken: Set<string>): Promise<string> {
+  const imported = await documentImport(projectPath, file.name, dataBase64);
+  const path = uniquePath(safeName(imported.title), ".md", taken);
+  const head = `*Imported from ${file.name}* (original kept at \`${imported.source}\`)\n\n`;
+  const note = imported.note ? `\n\n*${imported.note}*\n` : "";
+  await contextWrite(projectPath, path, plainMeta(imported.title), head + imported.markdown + note);
   return path;
 }
 

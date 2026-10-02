@@ -13,6 +13,7 @@
 //! | the person approved a plan | `origin-plan-approval.md` (never re-plans) |
 //! | an automatic error fix | `origin-auto-fix.md` (never plans) |
 //! | the onboarding's first build | `origin-first-build.md` (never plans) |
+//! | typed by the person as a trial (a separate copy) | `mode-trial.md` (no plan: the copy is the safety) |
 //! | typed by the person in Ask mode | `mode-ask.md` (a question: nothing is changed) |
 //!
 //! then the section for how technical the person wants things
@@ -38,6 +39,7 @@ const PLAN_SMALL_CHANGES: &str = include_str!("prompts/plan-small-changes.md");
 const ORIGIN_PLAN_APPROVAL: &str = include_str!("prompts/origin-plan-approval.md");
 const ORIGIN_AUTO_FIX: &str = include_str!("prompts/origin-auto-fix.md");
 const ORIGIN_FIRST_BUILD: &str = include_str!("prompts/origin-first-build.md");
+const MODE_TRIAL: &str = include_str!("prompts/mode-trial.md");
 const MODE_ASK: &str = include_str!("prompts/mode-ask.md");
 const EXPLAIN: &str = include_str!("prompts/explain.md");
 const TEACH: &str = include_str!("prompts/teach.md");
@@ -108,6 +110,7 @@ pub fn system_prompt(options: &TurnOptions, agents_md: Option<&str>) -> String {
 pub fn turn_instructions(options: &TurnOptions) -> String {
     let plan = match (options.origin, options.plan_policy) {
         (MessageOrigin::User, _) if options.mode == TurnMode::Ask => MODE_ASK,
+        (MessageOrigin::User, _) if options.mode == TurnMode::Trial => MODE_TRIAL,
         (MessageOrigin::User, PlanPolicy::AlwaysPlan) => PLAN_ALWAYS,
         (MessageOrigin::User, PlanPolicy::SmallChangesDirect) => PLAN_SMALL_CHANGES,
         (MessageOrigin::PlanApproval, _) => ORIGIN_PLAN_APPROVAL,
@@ -245,6 +248,16 @@ mod tests {
             technical_level: TechnicalLevel::default(),
             mode: Default::default(),
         }
+    }
+
+    #[test]
+    fn a_trial_gets_the_trial_section_instead_of_a_plan() {
+        let mut o = options(PlanPolicy::AlwaysPlan, false, MessageOrigin::User);
+        o.mode = TurnMode::Trial;
+        let text = turn_instructions(&o);
+        assert!(text.contains("## This message is a trial in a separate copy"), "{text}");
+        assert!(!text.contains("## Plans come first"), "{text}");
+        assert!(!text.contains("## This message is a question"), "{text}");
     }
 
     #[test]
