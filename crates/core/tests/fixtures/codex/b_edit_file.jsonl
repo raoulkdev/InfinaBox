@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a0e7bd-712b-7950-a641-4b9860bf3ee5"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"file_change","changes":[{"path":"<PROJECT>/notes.txt","kind":"update"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"file_change","changes":[{"path":"<PROJECT>/notes.txt","kind":"update"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"I added the line \"world\" to notes.txt."}}
+{"type":"turn.completed","usage":{"input_tokens":240,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":24,"reasoning_output_tokens":0}}

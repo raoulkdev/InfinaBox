@@ -1,0 +1,34 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_trceg"]
+[ext_resource type="Script" path="res://scripts/background.gd" id="2_a8y0u"]
+[ext_resource type="Script" path="res://scripts/board.gd" id="3_jkv2x"]
+[ext_resource type="PackedScene" path="res://scenes/player.tscn" id="4_jbj1t"]
+[ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="6_dp3eg"]
+[ext_resource type="PackedScene" path="res://scenes/ui/start_screen.tscn" id="8_gqmmt"]
+[ext_resource type="PackedScene" path="res://scenes/ui/level_complete.tscn" id="10_jscy8"]
+[ext_resource type="PackedScene" path="res://scenes/ui/ending_screen.tscn" id="12_y6deb"]
+
+[node name="Main" type="Node2D" unique_id=797455162]
+script = ExtResource("1_trceg")
+
+[node name="Background" type="Node2D" parent="." unique_id=1667988024]
+script = ExtResource("2_a8y0u")
+
+[node name="Board" type="Node2D" parent="." unique_id=1578800585]
+script = ExtResource("3_jkv2x")
+
+[node name="Player" type="Node2D" parent="Board" unique_id=937535717 instance=ExtResource("4_jbj1t")]
+
+[node name="Interface" type="CanvasLayer" parent="." unique_id=1680810431]
+
+[node name="HUD" type="Control" parent="Interface" unique_id=1364968658 instance=ExtResource("6_dp3eg")]
+
+[node name="Screens" type="CanvasLayer" parent="." unique_id=1061180761]
+layer = 2
+
+[node name="StartScreen" type="Control" parent="Screens" unique_id=517013944 instance=ExtResource("8_gqmmt")]
+
+[node name="LevelComplete" type="Control" parent="Screens" unique_id=1736066018 instance=ExtResource("10_jscy8")]
+
+[node name="EndingScreen" type="Control" parent="Screens" unique_id=985296958 instance=ExtResource("12_y6deb")]

@@ -1,0 +1,21 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://scenes/levels/level_1.tscn" id="2_level1"]
+[ext_resource type="PackedScene" path="res://scenes/background.tscn" id="3_background"]
+[ext_resource type="PackedScene" path="res://scenes/player.tscn" id="4_player"]
+[ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="5_hud"]
+[ext_resource type="PackedScene" path="res://scenes/ui/level_complete.tscn" id="6_complete"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+levels = Array[PackedScene]([ExtResource("2_level1")])
+
+[node name="Background" parent="." instance=ExtResource("3_background")]
+
+[node name="Player" parent="." instance=ExtResource("4_player")]
+position = Vector2(120, 600)
+
+[node name="HUD" parent="." instance=ExtResource("5_hud")]
+
+[node name="LevelComplete" parent="." instance=ExtResource("6_complete")]

@@ -1,0 +1,4 @@
+SCRIPT ERROR: Invalid call. Nonexistent function 'jump' in base 'Nil'.
+          at: _ready (res://main.gd:7)
+          GDScript backtrace (most recent call first):
+              [0] _ready (res://main.gd:7)

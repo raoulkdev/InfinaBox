@@ -1,0 +1,14 @@
+{
+  "id": "platformer-2d",
+  "name": "Platformer",
+  "description": "Run and jump through a side-on level: collect coins, dodge spikes and pits, and reach the flag.",
+  "dimension": "2d",
+  "controls": "Arrow keys or A/D to run, Space to jump (hold for higher), R to restart. Gamepads work too.",
+  "features": [
+    "Running and jumping that feels good",
+    "Coins and a coin counter",
+    "Spikes, pits and checkpoints",
+    "A goal flag and a \"Level complete!\" screen"
+  ],
+  "keywords": ["platformer", "platform", "platforms", "jump", "jumping", "side", "side-scroller", "sidescroller", "side-scrolling", "mario", "celeste", "levels", "coins", "spikes", "checkpoint", "climb"]
+}

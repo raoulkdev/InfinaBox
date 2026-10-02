@@ -50,6 +50,9 @@ enum Command {
         #[arg(long, default_value = "target/debug/mock_godot_mcp")]
         cmd: String,
     },
+    /// Serve the InfinaBox MCP server over stdio — the same server the app
+    /// runs as `<app exe> --mcp-server`, exposed here for development
+    McpServer,
 }
 
 #[derive(Subcommand)]
@@ -101,5 +104,6 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::GodotPing { cmd } => mcp_client::ping(&cmd),
+        Command::McpServer => infinabox_mcp_server::run_stdio(),
     }
 }

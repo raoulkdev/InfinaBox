@@ -1,0 +1,418 @@
+import type { AgentErrorKind, AgentEvent, ChatRecord, MessageOrigin } from "@/lib/studio-types";
+
+// The chat's view model, folded from two sources that describe the same
+// thing: `ChatRecord`s loaded from the thread's saved `.jsonl` file, and
+// live `AgentEvent`s streamed while a turn runs. Both go through the same
+// `applyEvent`, so a thread looks identical whether you watched it happen
+// or reopened it later.
+//
+// Deliberately plain TypeScript with no React in it — every function here is
+// pure (state in, new state out), so a test runner can exercise it directly
+// once the frontend has one.
+
+/** One tool the agent used, paired with its result once that arrives. */
+export interface WorkStep {
+  id: string;
+  /** The runtime's raw tool name (`Edit`, `Bash`, `mcp__infinabox__run_game`, ...). */
+  name: string;
+  /** The runtime's own one-line description of the call. */
+  summary: string;
+  /** `running` until a result arrives; `unfinished` if the turn ended first. */
+  status: "running" | "ok" | "failed" | "unfinished";
+  resultSummary: string | null;
+}
+
+export type ChatItem =
+  /** Something sent to the AI. `origin` says why — typed by the person,
+   * their plan approval, an automatic error fix, or the onboarding's first
+   * build — and changes how it's shown. */
+  | { kind: "user"; key: string; text: string; origin: MessageOrigin }
+  | { kind: "assistant"; key: string; text: string }
+  /** A plan the AI proposed; whether it's still waiting is `planStatuses`. */
+  | { kind: "plan"; key: string; title: string; steps: string[] }
+  /** The person pressed Stop: a neutral note, not an error. */
+  | { kind: "stopped"; key: string }
+  /** A run of consecutive tool uses, shown collapsed as one "working" row. */
+  | { kind: "work"; key: string; steps: WorkStep[]; filesChanged: string[] }
+  | { kind: "error"; key: string; errorKind: AgentErrorKind; message: string };
+
+export interface TurnError {
+  kind: AgentErrorKind;
+  message: string;
+}
+
+export interface ChatView {
+  items: ChatItem[];
+  /** True from a user message until that turn's `turn_completed` (or the
+   * backend's `agent-turn-finished`, via `endTurn`). */
+  turnInProgress: boolean;
+  /** The most recent error reported during the current/latest turn — what
+   * the status banner reacts to (sign-in needed, rate limited). Cleared when
+   * the user sends the next message. */
+  lastTurnError: TurnError | null;
+  /** Model name the runtime reported at session start, if it reported one. */
+  model: string | null;
+  /** Monotonic counter for React keys — deterministic, so re-folding the
+   * same records always produces the same keys (no remount on reload). */
+  nextKey: number;
+}
+
+export const emptyChatView: ChatView = {
+  items: [],
+  turnInProgress: false,
+  lastTurnError: null,
+  model: null,
+  nextKey: 0,
+};
+
+function withItem(view: ChatView, make: (key: string) => ChatItem): ChatView {
+  return {
+    ...view,
+    items: [...view.items, make(`i${view.nextKey}`)],
+    nextKey: view.nextKey + 1,
+  };
+}
+
+function replaceLast(view: ChatView, item: ChatItem): ChatView {
+  return { ...view, items: [...view.items.slice(0, -1), item] };
+}
+
+/** A message sent to the AI: typed, injected by "Ask AI to fix", a plan
+ * approval, or one the app sent itself (an auto-fix, the first build). */
+export function applyUserMessage(view: ChatView, text: string, origin: MessageOrigin = "user"): ChatView {
+  const next = withItem(view, (key) => ({ kind: "user", key, text, origin }));
+  return { ...next, turnInProgress: true, lastTurnError: null };
+}
+
+export function applyEvent(view: ChatView, event: AgentEvent): ChatView {
+  switch (event.type) {
+    case "session_started":
+      return { ...view, model: event.model ?? view.model };
+
+    case "plan_proposed":
+      return withItem(view, (key) => ({ kind: "plan", key, title: event.title, steps: event.steps }));
+
+    case "assistant_text": {
+      if (!event.text.trim()) return view;
+      // The CLI emits one text block per assistant message; back-to-back
+      // blocks with nothing in between read as one reply, not several.
+      const last = view.items[view.items.length - 1];
+      if (last?.kind === "assistant") {
+        return replaceLast(view, { ...last, text: `${last.text}\n\n${event.text}` });
+      }
+      return withItem(view, (key) => ({ kind: "assistant", key, text: event.text }));
+    }
+
+    case "tool_use": {
+      // The same tool use seen twice (a live copy the merge in
+      // `unsavedLiveEvents` couldn't match to its saved, redacted copy)
+      // updates its step instead of adding a second one with the same id.
+      if (view.items.some((i) => i.kind === "work" && i.steps.some((s) => s.id === event.id))) {
+        const items = view.items.map((item) =>
+          item.kind === "work" && item.steps.some((s) => s.id === event.id)
+            ? {
+                ...item,
+                steps: item.steps.map((s) =>
+                  s.id === event.id ? { ...s, name: event.name, summary: event.summary } : s,
+                ),
+              }
+            : item,
+        );
+        return { ...view, items };
+      }
+      const step: WorkStep = {
+        id: event.id,
+        name: event.name,
+        summary: event.summary,
+        status: "running",
+        resultSummary: null,
+      };
+      const last = view.items[view.items.length - 1];
+      if (last?.kind === "work") {
+        return replaceLast(view, { ...last, steps: [...last.steps, step] });
+      }
+      return withItem(view, (key) => ({ kind: "work", key, steps: [step], filesChanged: [] }));
+    }
+
+    case "tool_result": {
+      // Results can arrive after later text in principle, so search back
+      // through every work group rather than assuming the last one.
+      const items = view.items.map((item) => {
+        if (item.kind !== "work" || !item.steps.some((s) => s.id === event.id)) return item;
+        return {
+          ...item,
+          steps: item.steps.map((s) =>
+            s.id === event.id
+              ? { ...s, status: event.ok ? ("ok" as const) : ("failed" as const), resultSummary: event.summary }
+              : s,
+          ),
+        };
+      });
+      return { ...view, items };
+    }
+
+    case "files_changed": {
+      if (event.paths.length === 0) return view;
+      // The runtime reports a turn's changed files once, at its end, so the
+      // turn's last work group may be something else entirely (e.g. "ran
+      // the game"). Attach them to the most recent group of this turn that
+      // actually wrote files, falling back to the turn's last group. A
+      // files_changed with no tool use before it still gets its own row
+      // rather than being dropped, since the change on disk is real either
+      // way.
+      const turnStart = findLastIndex(view.items, (i) => i.kind === "user");
+      const writer = findLastIndex(
+        view.items,
+        (i) => i.kind === "work" && i.steps.some((s) => FILE_WRITING_TOOLS.has(s.name)),
+      );
+      const index =
+        writer > turnStart ? writer : findLastIndex(view.items, (i) => i.kind === "work" || i.kind === "user");
+      const target = index >= 0 ? view.items[index] : undefined;
+      if (target?.kind === "work") {
+        const merged = Array.from(new Set([...target.filesChanged, ...event.paths]));
+        const items = [...view.items];
+        items[index] = { ...target, filesChanged: merged };
+        return { ...view, items };
+      }
+      return withItem(view, (key) => ({ kind: "work", key, steps: [], filesChanged: [...event.paths] }));
+    }
+
+    case "turn_completed": {
+      let next = endTurn(view);
+      // A turn that ended in error without ever saying why still gets a
+      // card — the failure is real even though its reason wasn't reported,
+      // and we say exactly that instead of inventing one.
+      if (event.is_error && !turnHasError(view)) {
+        next = withItem(next, (key) => ({
+          kind: "error",
+          key,
+          errorKind: "other",
+          message: "The AI stopped with an error but didn't report what went wrong.",
+        }));
+      }
+      return next;
+    }
+
+    case "error":
+      // Stop is the person's own choice, not a failure: a quiet note, and
+      // nothing for the status banner to react to. (Its message is the
+      // runtime's fixed "Stopped." — the note says that itself.)
+      if (event.kind === "cancelled") return withItem(view, (key) => ({ kind: "stopped", key }));
+      return {
+        ...withItem(view, (key) => ({
+          kind: "error",
+          key,
+          errorKind: event.kind,
+          message: event.message,
+        })),
+        lastTurnError: { kind: event.kind, message: event.message },
+      };
+  }
+}
+
+/** Marks the current turn over: any tool still "running" never got a
+ * result, so it's shown as unfinished rather than spinning forever. */
+export function endTurn(view: ChatView): ChatView {
+  if (!view.turnInProgress && !view.items.some(hasRunningStep)) return view;
+  const items = view.items.map((item) =>
+    hasRunningStep(item) && item.kind === "work"
+      ? {
+          ...item,
+          steps: item.steps.map((s) => (s.status === "running" ? { ...s, status: "unfinished" as const } : s)),
+        }
+      : item,
+  );
+  return { ...view, items, turnInProgress: false };
+}
+
+/** A failure outside the agent's own event stream — e.g. the `agent_send`
+ * command itself rejecting — shown the same way as an agent error. */
+export function applyLocalError(view: ChatView, message: string): ChatView {
+  return endTurn(applyEvent(view, { type: "error", kind: "other", message }));
+}
+
+export function applyRecord(view: ChatView, record: ChatRecord): ChatView {
+  return record.kind === "user"
+    ? applyUserMessage(view, record.text, record.origin ?? "user")
+    : applyEvent(view, record.event);
+}
+
+/** Folds a whole saved thread. The file alone can't say whether its last
+ * turn is still running, so the caller does (`running`): if it is, its
+ * in-flight steps stay "running" instead of being marked unfinished.
+ *
+ * `lastTurnError` is always cleared here — an error saved from an earlier
+ * session is history (its card stays in the transcript), not the current
+ * state of the AI connection, so it must not drive the status banner. */
+export function buildChatView(records: ChatRecord[], { running = false } = {}): ChatView {
+  const folded = records.reduce(applyRecord, emptyChatView);
+  const view = running ? { ...folded, turnInProgress: true } : endTurn(folded);
+  return { ...view, lastTurnError: null };
+}
+
+/** The live events that arrived while a thread's file was being read and
+ * aren't in it yet. The backend saves each event before emitting it, so the
+ * file always ends somewhere inside the buffered run: the longest tail of
+ * the file's latest turn that matches the start of `live` is what both
+ * have, and only the rest is new. (A match is exact JSON equality, so at
+ * worst an event whose saved copy was redacted shows twice until the next
+ * reload — never one dropped.) */
+export function unsavedLiveEvents(records: ChatRecord[], live: AgentEvent[]): AgentEvent[] {
+  let tailStart = records.length;
+  while (tailStart > 0 && records[tailStart - 1].kind === "event") tailStart--;
+  const saved = records
+    .slice(tailStart)
+    .map((r) => (r.kind === "event" ? JSON.stringify(r.event) : ""));
+  const incoming = live.map((e) => JSON.stringify(e));
+  for (let k = Math.min(saved.length, incoming.length); k > 0; k--) {
+    const tail = saved.slice(saved.length - k);
+    if (tail.every((s, i) => s === incoming[i])) return live.slice(k);
+  }
+  return live;
+}
+
+// --- Derived per-item state (the same from live events or a reloaded file) ---
+
+/** `waiting` — the latest plan, with nothing sent since: the one the person
+ * can act on. Otherwise answered by the next message: `approved` if that was
+ * the plan approval, `changed` if it was anything else; `replaced` if a newer
+ * plan came before any reply. */
+export type PlanStatus = "waiting" | "approved" | "changed" | "replaced";
+
+export function planStatuses(items: ChatItem[]): Map<string, PlanStatus> {
+  const statuses = new Map<string, PlanStatus>();
+  // Walk backwards, remembering the nearest later user message and whether
+  // a later plan exists, so each plan's answer is found in one pass.
+  let nextUser: Extract<ChatItem, { kind: "user" }> | null = null;
+  let laterPlan = false;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.kind === "user") nextUser = item;
+    if (item.kind !== "plan") continue;
+    if (nextUser) statuses.set(item.key, nextUser.origin === "plan_approval" ? "approved" : "changed");
+    else statuses.set(item.key, laterPlan ? "replaced" : "waiting");
+    laterPlan = true;
+  }
+  return statuses;
+}
+
+/** For each turn that really changed files (a `files_changed` was reported
+ * in it), its final assistant reply — the AI's "what I did and why" — keyed
+ * to that turn's changed files, so it can be shown as a "What changed" card.
+ * Other replies aren't in the map and stay plain text. */
+export function changeExplanations(items: ChatItem[]): Map<string, string[]> {
+  const explained = new Map<string, string[]>();
+  let files = new Set<string>();
+  let lastReply: string | null = null;
+  const closeTurn = () => {
+    if (lastReply !== null && files.size > 0) explained.set(lastReply, [...files]);
+    files = new Set();
+    lastReply = null;
+  };
+  for (const item of items) {
+    if (item.kind === "user") closeTurn();
+    else if (item.kind === "assistant") lastReply = item.key;
+    else if (item.kind === "work") for (const path of item.filesChanged) files.add(path);
+  }
+  closeTurn();
+  return explained;
+}
+
+// --- Plain-language summaries for the collapsed "working" row ---
+
+/** "Edited 2 files, ran the game" — built only from what actually happened
+ * (the real tool uses and the real changed-file list), never estimated. */
+export function describeWork(item: Extract<ChatItem, { kind: "work" }>): string {
+  const phrases: string[] = [];
+  if (item.filesChanged.length > 0) {
+    const n = item.filesChanged.length;
+    phrases.push(`changed ${n} ${n === 1 ? "file" : "files"}`);
+  }
+  const seen = new Set<string>();
+  for (const step of item.steps) {
+    const phrase = describeTool(step.name);
+    // File edits are already counted above from the real changed-file list.
+    if (phrase === null || seen.has(phrase)) continue;
+    seen.add(phrase);
+    phrases.push(phrase);
+  }
+  // Nothing to say yet means every step was a file edit (the only tools
+  // `describeTool` leaves to the changed-file list) — and that list arrives
+  // at the end of the turn, joining only the turn's last file-writing
+  // group, not necessarily this one. Still say what these steps were.
+  if (phrases.length === 0) return item.steps.length > 0 ? "Edited files" : "Changed files";
+  const text = phrases.join(", ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// Claude Code's built-in tool names, plus the InfinaBox MCP tools matched by
+// what their names say rather than an exact list, since those names belong
+// to the MCP server and may grow. Anything unrecognised falls back to its
+// real name instead of a guess at what it did.
+function describeTool(name: string): string | null {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
+  const tool = (mcp ? mcp[2] : name).toLowerCase();
+  if (mcp) {
+    if (tool.includes("run_game") || tool === "run") return "ran the game";
+    if (tool.includes("stop_game")) return "stopped the game";
+    if (tool.includes("error")) return "checked the game for errors";
+    if (tool.includes("output") || tool.includes("log")) return "read the game's output";
+    if (tool.includes("snapshot")) return "looked at the history";
+    return `used ${mcp[2].replace(/_/g, " ")}`;
+  }
+  switch (tool) {
+    case "edit":
+    case "multiedit":
+    case "write":
+    case "notebookedit":
+      return null;
+    case "read":
+      return "read files";
+    case "glob":
+    case "grep":
+    case "ls":
+      return "searched the project";
+    case "bash":
+      return "ran commands";
+    case "webfetch":
+    case "websearch":
+      return "looked things up online";
+    case "todowrite":
+      return "made a to-do list";
+    case "task":
+    case "agent":
+      return "asked a helper";
+    default:
+      return `used ${name}`;
+  }
+}
+
+// The tools whose use writes files — Claude Code's edit tools plus the
+// InfinaBox MCP tool that saves a Context card — so the groups a turn's
+// `files_changed` belongs to. Mirrors the runtime's own list in
+// `crates/core/src/agent/claude_stream.rs`.
+const FILE_WRITING_TOOLS = new Set([
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit",
+  "mcp__infinabox__write_context_card",
+]);
+
+function hasRunningStep(item: ChatItem): boolean {
+  return item.kind === "work" && item.steps.some((s) => s.status === "running");
+}
+
+function turnHasError(view: ChatView): boolean {
+  for (let i = view.items.length - 1; i >= 0; i--) {
+    const item = view.items[i];
+    if (item.kind === "error" || item.kind === "stopped") return true;
+    if (item.kind === "user") return false;
+  }
+  return false;
+}
+
+function findLastIndex<T>(items: T[], predicate: (item: T) => boolean): number {
+  for (let i = items.length - 1; i >= 0; i--) if (predicate(items[i])) return i;
+  return -1;
+}

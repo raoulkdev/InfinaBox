@@ -1,3 +1,4 @@
+import { useContextMenu } from "@/lib/context-menu";
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -119,10 +120,29 @@ export function TerminalPanel({ projectPath }: TerminalPanelProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- spawn is keyed on mount only; projectPath changing later must not respawn/re-cwd the running session.
   }, []);
 
+  const menu = useContextMenu();
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card">
+    <div
+      onContextMenu={(e) =>
+        menu(e, [
+          { label: "Copy", shortcut: "⌘C", disabled: !terminalRef.current?.hasSelection(), onSelect: () => void navigator.clipboard.writeText(terminalRef.current?.getSelection() ?? "").catch(() => {}) },
+          {
+            label: "Paste",
+            shortcut: "⌘V",
+            onSelect: async () => {
+              const text = await navigator.clipboard.readText().catch(() => "");
+              if (text) terminalRef.current?.paste(text);
+            },
+          },
+          { label: "Select all", onSelect: () => terminalRef.current?.selectAll() },
+          "separator",
+          { label: "Clear", onSelect: () => terminalRef.current?.clear() },
+        ])
+      }
+      className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card"
+    >
       <div data-tauri-drag-region className="flex h-9 shrink-0 items-center px-3">
-        <span className="text-xs font-medium tracking-wide text-muted-foreground">Agent</span>
+        <span className="text-xs font-medium tracking-wide text-muted-foreground">Terminal</span>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden bg-card p-2">
         <div ref={hostRef} className="h-full w-full" />

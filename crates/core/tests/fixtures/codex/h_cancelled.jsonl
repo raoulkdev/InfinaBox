@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a0e7bd-890f-72c3-93e6-bdac723de3fd"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"file_change","changes":[{"path":"<PROJECT>/notes.txt","kind":"update"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"file_change","changes":[{"path":"<PROJECT>/notes.txt","kind":"update"}],"status":"completed"}}

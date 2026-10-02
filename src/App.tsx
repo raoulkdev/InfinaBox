@@ -1,37 +1,42 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { ContextMenuHost, type MenuEntry } from "@/lib/context-menu";
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
-import { Palette, Music2, LayoutTemplate, ShieldCheck, Radio } from "lucide-react";
-import { BuildRow } from "@/components/cockpit/BuildRow";
+import { Rocket } from "lucide-react";
 import { Sidebar, type Section } from "@/components/cockpit/Sidebar";
 import { DashboardSection } from "@/components/cockpit/DashboardSection";
-import { DesignSection } from "@/components/cockpit/DesignSection";
-import { GraphsSection } from "@/components/cockpit/GraphsSection";
-import { BusinessSection } from "@/components/cockpit/BusinessSection";
-import { MarketingSection } from "@/components/cockpit/MarketingSection";
-import { CommunitySection } from "@/components/cockpit/CommunitySection";
-import { ReleaseSection } from "@/components/cockpit/ReleaseSection";
 import { NotBuiltYetSection } from "@/components/cockpit/NotBuiltYetSection";
-import { fadeRise, fadeTransition, springTransition } from "@/lib/motion";
+import { CodeSection } from "@/components/code/CodeSection";
+import { ContextSection } from "@/components/context/ContextSection";
+import { AssetsSection } from "@/components/assets/AssetsSection";
+import { StudioSection } from "@/components/studio/StudioSection";
+import { fadeRise, fadeTransition } from "@/lib/motion";
 import { recordProjectOpened } from "@/lib/recent-projects";
+import { HomeSidebar } from "@/components/cockpit/HomeSidebar";
+import { SettingsSection } from "@/components/settings/SettingsSection";
+import { JourneyPanel } from "@/components/journey/JourneyPanel";
+import { chatCreateThread } from "@/lib/studio-api";
+import type { PendingTurn, Role } from "@/lib/studio-types";
 import { cn } from "@/lib/utils";
 
-// Every section besides Home/Build/Design/Graphs mounts only when
+// Every section besides Home/Studio/Context/Code mounts only when
 // selected — none of them own state worth preserving across a tab switch.
-// Build's live terminal, Design's unsaved draft, and Graphs' unsaved
-// canvas edits are the real exceptions, handled separately below by
-// staying permanently mounted. Real docs-backed sections and "not built
-// yet" placeholders share this one render map so adding another
-// discipline later doesn't mean copy-pasting another
-// `{section === "x" && (...)}` block into an ever-growing if-chain.
-type SimpleSection = Exclude<Section, "home" | "build" | "design" | "graphs">;
+// Studio's live AI turn stream and game tracking, Context's unsaved card
+// and graph edits, and the Code page's live terminal are the real exceptions,
+// handled separately below by staying permanently mounted. The rest (today
+// Assets, and Playtest & Launch, an honest "not built yet" placeholder)
+// share this one render map so adding a real one later doesn't mean
+// copy-pasting another `{section === "x" && (...)}` block into an
+// ever-growing if-chain.
+type SimpleSection = Exclude<Section, "home" | "studio" | "context" | "code">;
 
 // The three panels that stay permanently mounted (see the comment further
 // down) crossfade between each other via opacity instead of the instant
 // `hidden` swap every other section uses — the one place in this file
 // where a real DOM mount/unmount (what AnimatePresence needs) would lose
 // state, so the animation has to be opacity-driven instead.
-const PERSISTENT_SECTIONS = ["build", "design", "graphs"] as const;
+const PERSISTENT_SECTIONS = ["studio", "context", "code"] as const;
 type PersistentSection = (typeof PERSISTENT_SECTIONS)[number];
 
 function isPersistentSection(section: Section): section is PersistentSection {
@@ -42,15 +47,21 @@ function App() {
   // Home is the landing section — a project (and its terminal session)
   // only comes to life once the user actually opens one from there or via
   // the Sidebar's project button, rather than dropping straight into
-  // Build.
+  // Studio.
   const [section, setSection] = useState<Section>("home");
-  // The currently open project folder — shared by the Build tab's code
-  // browser and terminal starting directory, and every docs-style section.
+  // The currently open project folder — shared by Studio, Context, and
+  // the Code page's browser and terminal starting directory.
   // Starts `null` on every launch — no project is auto-restored, even if
   // one was open last time — so Home always lands with nothing selected;
   // it only becomes real, user-driven state once the user opens a project
   // via the Sidebar's picker or the Home dashboard.
   const [projectPath, setProjectPath] = useState<string | null>(null);
+  // A turn Studio should start as soon as it shows this project — the
+  // first build a brand-new game from the onboarding interview hands over
+  // (see DashboardSection). Kept with the project it belongs to, and only
+  // passed to Studio while that project is the open one, so opening some
+  // other project first can never send it to the wrong game.
+  const [pendingTurn, setPendingTurn] = useState<{ projectPath: string; turn: PendingTurn } | null>(null);
 
   // Every panel that reads from disk (file trees, open file content, git
   // Overview/Changes) listens for `project-fs-changed` — this is what
@@ -64,53 +75,82 @@ function App() {
   }, [projectPath]);
 
   // The Sidebar's project button keeps the user wherever they already
-  // are; opening a project from the Home dashboard also jumps to Build,
-  // since that's the whole point of picking one from there.
+  // are; opening (or creating) a project from the Home dashboard also
+  // jumps to Studio — an open project's default screen (product spec §11)
+  // — since that's the whole point of picking one from there.
   function handleOpenProject(path: string) {
     recordProjectOpened(path);
+    // Home is a small window; a game gets the whole screen.
+    void getCurrentWindow().maximize().catch(() => {});
     setProjectPath(path);
+    // Opening any project drops a first build Studio hasn't started yet —
+    // it belongs to the moment its game was created, not to a later visit.
+    setPendingTurn(null);
   }
 
-  function handleOpenProjectFromDashboard(path: string) {
+  function handleOpenProjectFromDashboard(path: string, turn?: PendingTurn) {
     handleOpenProject(path);
-    setSection("build");
+    setPendingTurn(turn ? { projectPath: path, turn } : null);
+    setSection("studio");
   }
+
+  // "Ask the Producer" on the journey and the Context studio's "Ask the AI":
+  // a new chat in Studio, sent in the given role. A failure to make the chat
+  // leaves the person where they are.
+  function handleAskAi(ask: { message: string; role: Role }, title = "Context") {
+    if (!projectPath) return;
+    const path = projectPath;
+    chatCreateThread(path, title)
+      .then((thread) => {
+        setPendingTurn({
+          projectPath: path,
+          turn: { threadId: thread.id, message: ask.message, origin: "user", role: ask.role },
+        });
+        setSection("studio");
+      })
+      .catch(() => {});
+  }
+
+  function handleAskProducer(message: string) {
+    handleAskAi({ message, role: "producer" }, "Producer");
+  }
+
+  // The Settings page is the same page from both sidebars; which sidebar
+  // frames it depends on where it was opened from.
+  const [settingsArea, setSettingsArea] = useState<"home" | "project">("home");
+  const inHomeArea = section === "home" || (section === "settings" && settingsArea === "home");
 
   const simpleSections: Record<SimpleSection, () => ReactNode> = {
-    art: () => (
-      <NotBuiltYetSection
-        icon={Palette}
-        description="Asset briefs and previews arrive once the file browser can render images, not just markdown."
-      />
-    ),
-    audio: () => (
-      <NotBuiltYetSection
-        icon={Music2}
-        description="Asset briefs and playback arrive once the file browser can render audio, not just markdown."
-      />
-    ),
-    uiux: () => (
-      <NotBuiltYetSection
-        icon={LayoutTemplate}
-        description="Flow docs and mockup previews arrive once the file browser can render images, not just markdown."
-      />
-    ),
-    qa: () => (
-      <NotBuiltYetSection
-        icon={ShieldCheck}
-        description="Bug tracking and grounded commit lookups arrive in a later phase, once the core agent loop is proven."
-      />
-    ),
-    release: () => <ReleaseSection projectPath={projectPath} />,
-    business: () => <BusinessSection projectPath={projectPath} />,
-    marketing: () => <MarketingSection projectPath={projectPath} />,
-    community: () => <CommunitySection projectPath={projectPath} />,
-    liveops: () => (
-      <NotBuiltYetSection
-        icon={Radio}
-        description="Analytics, crash triage, and live events connect once there's a shipped game generating real data."
-      />
-    ),
+    assets: () => <AssetsSection projectPath={projectPath} />,
+    settings: () => <SettingsSection projectPath={projectPath} />,
+    launch: () =>
+      projectPath ? (
+        <JourneyPanel projectPath={projectPath} onAskProducer={handleAskProducer} />
+      ) : (
+        <NotBuiltYetSection
+          icon={Rocket}
+          description="Open a game to see how far along it is. Sharing test builds, collecting feedback, release builds and publishing your game are coming in a later update."
+        />
+      ),
+  };
+
+  // Right-clicks no page claims: where to go.
+  const appMenu = (): MenuEntry[] => {
+    const go = (label: string, target: Section, area: "home" | "project" = "project"): MenuEntry => ({
+      label,
+      disabled: section === target && (target !== "settings" || settingsArea === area),
+      onSelect: () => {
+        if (target === "settings") setSettingsArea(area);
+        setSection(target);
+      },
+    });
+    return [
+      go("Home", "home"),
+      ...(projectPath
+        ? [go("Studio", "studio"), go("Documents", "context"), go("Assets", "assets"), go("Playtest & Launch", "launch"), go("Code", "code")]
+        : []),
+      go("Settings", "settings", projectPath && !inHomeArea ? "project" : "home"),
+    ];
   };
 
   return (
@@ -118,6 +158,7 @@ function App() {
     // tree respect the OS-level "reduce motion" accessibility setting
     // automatically — Motion shortens/skips transitions for users who have
     // it on, with no per-component opt-in needed.
+    <ContextMenuHost fallback={appMenu}>
     <MotionConfig reducedMotion="user">
       {/* No dedicated top bar — every block is the same full height it
           always was. macOS still draws the traffic lights at a fixed
@@ -146,25 +187,27 @@ function App() {
         data-tauri-drag-region
         className="flex h-screen w-screen gap-2 overflow-hidden bg-background p-2 text-foreground"
       >
-        <AnimatePresence initial={false}>
-          {section !== "home" && (
-            <motion.div
-              key="sidebar"
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -8 }}
-              transition={springTransition}
-              className="flex h-full"
-            >
-              <Sidebar
-                active={section}
-                onSelect={setSection}
-                projectPath={projectPath}
-                onOpenProject={handleOpenProject}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Home (your games, settings) is its own place with its own
+            sidebar; a game's screens have the game sidebar. */}
+        {inHomeArea ? (
+          <HomeSidebar
+            active={section === "settings" ? "settings" : "home"}
+            onSelect={(page) => {
+              if (page === "settings") setSettingsArea("home");
+              setSection(page);
+            }}
+          />
+        ) : (
+          <Sidebar
+            active={section}
+            onSelect={(next) => {
+              if (next === "settings") setSettingsArea("project");
+              setSection(next);
+            }}
+            projectPath={projectPath}
+            onOpenProject={handleOpenProject}
+          />
+        )}
 
         <AnimatePresence mode="wait" initial={false}>
           {section === "home" && (
@@ -179,17 +222,25 @@ function App() {
           )}
         </AnimatePresence>
 
-        {/* Build, Design, and Graphs stay mounted even when hidden — Build
-            owns the live terminal session (never respawn/re-cwd it, see
-            TerminalPanel's own comment), and Design/Graphs can each hold
-            an unsaved draft. Because none of the three ever actually
-            unmounts, AnimatePresence (which animates mount/unmount) can't
-            crossfade between them — instead all three sit absolutely
+        {/* Studio, Context, and Code stay mounted even when hidden —
+            Studio holds a live AI turn stream (events arrive only once; a
+            remounted chat would miss the rest of a turn) and the Play
+            panel's view of a running game, Context can hold an unsaved
+            card or graph edit, and Code owns the live terminal session
+            (never respawn/re-cwd it, see TerminalPanel's own comment).
+            Because none of the three ever actually unmounts, AnimatePresence
+            (which animates mount/unmount) can't crossfade between them —
+            instead all three sit absolutely
             stacked in this one slot, permanently mounted, and only their
             opacity/pointer-events toggle with `section`. The slot itself
             still collapses via `hidden` exactly like every other section
             when none of the three is active, so it never steals flex
-            space from Home or a simple section.
+            space from Home or a simple section. (With no project open,
+            Studio and Context just render their own "No project open"
+            card, so there's nothing to defer mounting for — unlike
+            the Code page's terminal, which CodeSection holds back itself.)
+            Context stacks its own tabs the same way
+            inside, for the same reasons.
 
             Each inactive wrapper also carries the `inert` HTML attribute,
             not just `pointer-events: none` — belt and suspenders. `inert`
@@ -212,35 +263,34 @@ function App() {
         >
           <motion.div
             className="absolute inset-0 flex min-h-0 min-w-0 overflow-hidden"
-            animate={{ opacity: section === "build" ? 1 : 0 }}
-            style={{ pointerEvents: section === "build" ? "auto" : "none" }}
+            animate={{ opacity: section === "studio" ? 1 : 0 }}
+            style={{ pointerEvents: section === "studio" ? "auto" : "none" }}
             transition={fadeTransition}
-            inert={section !== "build"}
+            inert={section !== "studio"}
           >
-            {/* TerminalPanel spawns its shell once, on mount, using
-                whatever projectPath it was given at that instant (see its
-                own comment on why it never re-cwds later) — so it must
-                not mount at all until a real project is chosen, or it'd
-                spawn in the user's home directory instead. */}
-            <BuildRow projectPath={projectPath} showTerminal={projectPath !== null} />
+            <StudioSection
+              projectPath={projectPath}
+              pendingTurn={pendingTurn && pendingTurn.projectPath === projectPath ? pendingTurn.turn : null}
+              onPendingTurnTaken={() => setPendingTurn(null)}
+            />
           </motion.div>
           <motion.div
             className="absolute inset-0 flex min-h-0 min-w-0 overflow-hidden"
-            animate={{ opacity: section === "design" ? 1 : 0 }}
-            style={{ pointerEvents: section === "design" ? "auto" : "none" }}
+            animate={{ opacity: section === "context" ? 1 : 0 }}
+            style={{ pointerEvents: section === "context" ? "auto" : "none" }}
             transition={fadeTransition}
-            inert={section !== "design"}
+            inert={section !== "context"}
           >
-            <DesignSection projectPath={projectPath} />
+            <ContextSection projectPath={projectPath} onAskAi={handleAskAi} />
           </motion.div>
           <motion.div
             className="absolute inset-0 flex min-h-0 min-w-0 overflow-hidden"
-            animate={{ opacity: section === "graphs" ? 1 : 0 }}
-            style={{ pointerEvents: section === "graphs" ? "auto" : "none" }}
+            animate={{ opacity: section === "code" ? 1 : 0 }}
+            style={{ pointerEvents: section === "code" ? "auto" : "none" }}
             transition={fadeTransition}
-            inert={section !== "graphs"}
+            inert={section !== "code"}
           >
-            <GraphsSection projectPath={projectPath} />
+            <CodeSection projectPath={projectPath} />
           </motion.div>
         </div>
 
@@ -258,6 +308,7 @@ function App() {
         </AnimatePresence>
       </div>
     </MotionConfig>
+    </ContextMenuHost>
   );
 }
 

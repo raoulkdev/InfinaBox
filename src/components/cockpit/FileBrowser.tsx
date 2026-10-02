@@ -621,7 +621,9 @@ export function FileBrowser({
             defaultPercent: 75,
             minPercent: 25,
             content: (
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card">
+              // `h-full`, like the list panel: the panel's content wrapper
+              // is a plain block, so `flex-1` alone doesn't stretch it.
+              <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card">
                 {inspectorArea}
               </div>
             ),

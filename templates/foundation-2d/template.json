@@ -1,0 +1,15 @@
+{
+  "id": "foundation-2d",
+  "name": "Foundation (2D)",
+  "description": "A clean, expandable base for a full 2D game: game flow, scene routing, saving, settings and an event bus, with no gameplay yet.",
+  "dimension": "2d",
+  "controls": "Esc pauses.",
+  "features": [
+    "Main menu and an empty level",
+    "Game flow, pause, scene routing",
+    "Save and load slots",
+    "Player settings",
+    "Folders and notes for growing a big game"
+  ],
+  "keywords": []
+}

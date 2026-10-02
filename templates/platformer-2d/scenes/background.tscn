@@ -1,0 +1,56 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/hills.gd" id="1_hills"]
+[ext_resource type="Script" path="res://scripts/clouds.gd" id="2_clouds"]
+
+[sub_resource type="Gradient" id="Gradient_sky"]
+offsets = PackedFloat32Array(0, 1)
+colors = PackedColorArray(0.49, 0.78, 0.97, 1, 0.88, 0.96, 1, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_sky"]
+gradient = SubResource("Gradient_sky")
+fill_to = Vector2(0, 1)
+
+[node name="Background" type="Node2D"]
+
+[node name="Sky" type="CanvasLayer" parent="."]
+layer = -100
+
+[node name="Gradient" type="TextureRect" parent="Sky"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = SubResource("GradientTexture2D_sky")
+expand_mode = 1
+
+[node name="Clouds" type="Parallax2D" parent="."]
+scroll_scale = Vector2(0.1, 1)
+repeat_size = Vector2(1280, 0)
+autoscroll = Vector2(-12, 0)
+repeat_times = 3
+
+[node name="Clouds" type="Node2D" parent="Clouds"]
+script = ExtResource("2_clouds")
+
+[node name="FarHills" type="Parallax2D" parent="."]
+scroll_scale = Vector2(0.25, 1)
+repeat_size = Vector2(1280, 0)
+repeat_times = 3
+
+[node name="Hills" type="Node2D" parent="FarHills"]
+script = ExtResource("1_hills")
+color = Color(0.7, 0.88, 0.77, 1)
+base_y = 470.0
+hill_height = 110.0
+
+[node name="NearHills" type="Parallax2D" parent="."]
+scroll_scale = Vector2(0.5, 1)
+repeat_size = Vector2(1280, 0)
+repeat_times = 3
+
+[node name="Hills" type="Node2D" parent="NearHills"]
+script = ExtResource("1_hills")
+color = Color(0.53, 0.79, 0.63, 1)
+base_y = 560.0
+hill_height = 80.0
+phase = 2.0

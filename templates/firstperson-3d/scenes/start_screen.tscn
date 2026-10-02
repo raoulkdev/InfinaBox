@@ -1,0 +1,90 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/start_screen.gd" id="1_start"]
+
+; Shown before the game starts and when it is paused. It works while the
+; game is paused (process_mode 3 = Always).
+[node name="StartScreen" type="Control"]
+process_mode = 3
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_start")
+
+[node name="Dim" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.02, 0.02, 0.04, 0.66)
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Rows" type="VBoxContainer" parent="Center"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 14
+
+[node name="Title" type="Label" parent="Center/Rows"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.84, 0.35, 1)
+theme_override_colors/font_outline_color = Color(0.08, 0.05, 0.02, 1)
+theme_override_constants/outline_size = 10
+theme_override_font_sizes/font_size = 76
+text = "Escape"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="Center/Rows"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.93, 0.88, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.8)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 28
+text = "Find 3 keys. Open 3 doors. Get out."
+horizontal_alignment = 1
+
+[node name="Gap" type="Control" parent="Center/Rows"]
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Action" type="Label" parent="Center/Rows"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.8)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 38
+text = "Click to start"
+horizontal_alignment = 1
+
+[node name="Gap2" type="Control" parent="Center/Rows"]
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Hint" type="Label" parent="Center/Rows"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.78, 0.82, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.8)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 19
+text = "WASD  walk      Mouse  look      Shift  sprint
+Space  jump      E  pick up / open      Esc  pause"
+horizontal_alignment = 1

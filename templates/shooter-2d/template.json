@@ -1,0 +1,9 @@
+{
+  "id": "shooter-2d",
+  "name": "Arena shooter",
+  "description": "Survive growing waves of enemies in a neon arena: move with one hand, aim and shoot with the other.",
+  "dimension": "2d",
+  "controls": "WASD or arrow keys to move, mouse to aim, hold left click to shoot, R to restart (gamepad: left stick to move, right stick to aim, right trigger to shoot)",
+  "features": ["Twin-stick movement and aiming", "Waves of enemies that grow and speed up", "Two enemy types: fast Chasers and tough Brutes", "Score, a health bar and a wave banner", "Muzzle flash, hit flash, screen shake and explosions", "A game-over screen with play again"],
+  "keywords": ["shooter", "shoot", "shooting", "shoot-em-up", "shmup", "gun", "guns", "blaster", "laser", "arena", "waves", "wave", "horde", "survive", "survival", "bullet", "bullets", "twin-stick", "space", "spaceship", "ship", "asteroids", "zombies", "aliens", "robots", "monsters", "enemies", "action", "blast", "arcade", "neon", "high score"]
+}

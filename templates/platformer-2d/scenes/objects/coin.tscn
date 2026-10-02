@@ -1,0 +1,50 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/coin.gd" id="1_coin"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_coin"]
+radius = 14.0
+
+[sub_resource type="Gradient" id="Gradient_fade"]
+offsets = PackedFloat32Array(0, 1)
+colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 0)
+
+[node name="Coin" type="Area2D" groups=["coins"]]
+collision_layer = 0
+collision_mask = 2
+script = ExtResource("1_coin")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_coin")
+
+[node name="Visual" type="Node2D" parent="."]
+
+[node name="Rim" type="Polygon2D" parent="Visual"]
+color = Color(0.88, 0.64, 0.11, 1)
+polygon = PackedVector2Array(14, 0, 13.31, 4.33, 11.33, 8.23, 8.23, 11.33, 4.33, 13.31, 0, 14, -4.33, 13.31, -8.23, 11.33, -11.33, 8.23, -13.31, 4.33, -14, 0, -13.31, -4.33, -11.33, -8.23, -8.23, -11.33, -4.33, -13.31, 0, -14, 4.33, -13.31, 8.23, -11.33, 11.33, -8.23, 13.31, -4.33)
+
+[node name="Face" type="Polygon2D" parent="Visual"]
+color = Color(1, 0.79, 0.24, 1)
+polygon = PackedVector2Array(10.5, 0, 9.99, 3.24, 8.49, 6.17, 6.17, 8.49, 3.24, 9.99, 0, 10.5, -3.24, 9.99, -6.17, 8.49, -8.49, 6.17, -9.99, 3.24, -10.5, 0, -9.99, -3.24, -8.49, -6.17, -6.17, -8.49, -3.24, -9.99, 0, -10.5, 3.24, -9.99, 6.17, -8.49, 8.49, -6.17, 9.99, -3.24)
+
+[node name="Shine" type="Polygon2D" parent="Visual"]
+color = Color(1, 0.95, 0.72, 1)
+polygon = PackedVector2Array(-0.5, -1, -0.83, 2, -1.75, 4.2, -3, 5, -4.25, 4.2, -5.17, 2, -5.5, -1, -5.17, -4, -4.25, -6.2, -3, -7, -1.75, -6.2, -0.83, -4)
+
+[node name="Sparkle" type="CPUParticles2D" parent="."]
+emitting = false
+amount = 10
+lifetime = 0.5
+one_shot = true
+explosiveness = 1.0
+local_coords = false
+spread = 180.0
+gravity = Vector2(0, 0)
+initial_velocity_min = 60.0
+initial_velocity_max = 130.0
+damping_min = 120.0
+damping_max = 160.0
+scale_amount_min = 2.0
+scale_amount_max = 4.0
+color = Color(1, 0.9, 0.54, 1)
+color_ramp = SubResource("Gradient_fade")

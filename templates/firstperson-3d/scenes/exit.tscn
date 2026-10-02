@@ -1,0 +1,60 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/exit.gd" id="1_exit"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_1"]
+size = Vector3(1.6, 2.4, 2.0)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_frame"]
+albedo_color = Color(0.3, 0.3, 0.34, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_portal"]
+shading_mode = 0
+albedo_color = Color(0.75, 1, 0.85, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_post"]
+size = Vector3(0.6, 2.7, 0.3)
+
+[sub_resource type="BoxMesh" id="BoxMesh_lintel"]
+size = Vector3(0.6, 0.3, 2.3)
+
+[sub_resource type="BoxMesh" id="BoxMesh_portal"]
+size = Vector3(0.08, 2.4, 1.9)
+
+; The exit only watches for the player (layer 2); it is not solid itself.
+[node name="Exit" type="Area3D"]
+collision_layer = 0
+collision_mask = 2
+monitorable = false
+script = ExtResource("1_exit")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.6, 1.2, 0)
+shape = SubResource("BoxShape3D_1")
+
+[node name="PostA" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.35, -1.1)
+mesh = SubResource("BoxMesh_post")
+surface_material_override/0 = SubResource("StandardMaterial3D_frame")
+
+[node name="PostB" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.35, 1.1)
+mesh = SubResource("BoxMesh_post")
+surface_material_override/0 = SubResource("StandardMaterial3D_frame")
+
+[node name="Lintel" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.85, 0)
+mesh = SubResource("BoxMesh_lintel")
+surface_material_override/0 = SubResource("StandardMaterial3D_frame")
+
+[node name="Portal" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.15, 1.2, 0)
+mesh = SubResource("BoxMesh_portal")
+surface_material_override/0 = SubResource("StandardMaterial3D_portal")
+
+[node name="Glow" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.9, 1.4, 0)
+light_color = Color(0.7, 1, 0.8, 1)
+light_energy = 2.2
+omni_range = 7.0

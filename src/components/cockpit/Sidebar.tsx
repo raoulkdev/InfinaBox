@@ -1,19 +1,14 @@
+import { useContextMenu } from "@/lib/context-menu";
 import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Home,
-  Hammer,
-  FileText,
-  Workflow,
-  Palette,
-  Music2,
-  LayoutTemplate,
-  ShieldCheck,
+  Sparkles,
+  BookOpen,
+  Images,
   Rocket,
-  Briefcase,
-  Megaphone,
-  Users,
-  Radio,
+  Wrench,
+  Settings as SettingsIcon,
   FolderOpen,
   PanelLeftClose,
   PanelLeftOpen,
@@ -24,6 +19,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { fadeTransition, springTransition, widthTransition } from "@/lib/motion";
+import { getLayout, setLayout } from "@/lib/layout-store";
 import { pickAndOpenExistingProject, projectFolderName } from "@/lib/project-picker";
 import { cn } from "@/lib/utils";
 
@@ -55,20 +51,11 @@ function FadeLabel({ show, children }: { show: boolean; children: ReactNode }) {
   );
 }
 
-export type Section =
-  | "home"
-  | "build"
-  | "design"
-  | "graphs"
-  | "art"
-  | "audio"
-  | "uiux"
-  | "qa"
-  | "release"
-  | "business"
-  | "marketing"
-  | "community"
-  | "liveops";
+// The six entries of the product spec's navigation (§11). The old
+// per-discipline sections (Documents, Business, Marketing, ...) are gone:
+// their docs now live as Context cards, and their tools arrive as parts of
+// Assets and Playtest & Launch.
+export type Section = "home" | "studio" | "context" | "assets" | "launch" | "code" | "settings";
 
 interface SectionItem {
   id: Section;
@@ -76,45 +63,27 @@ interface SectionItem {
   icon: LucideIcon;
 }
 
-// Home is pinned above the grouped list, unrelated to any discipline
-// grouping — it's the landing page, not part of "making" anything.
+// Home is pinned above the project button: it's the landing page (your
+// games, your AI, Godot) and the one entry that isn't about the open
+// project.
 const PINNED: SectionItem[] = [{ id: "home", label: "Home", icon: Home }];
 
-// Everything else grouped by discipline category. A flat icon-only rail
-// stopped scaling once Design/QA/Business/Live Ops grew into a dozen
-// named disciplines — labels plus grouping keep it scannable instead of
-// asking the user to memorize a dozen icon glyphs. Build leads Make: it's
-// the terminal/files/git workspace every other discipline in this group
-// ultimately produces or draws on.
-const GROUPS: { label: string; items: SectionItem[] }[] = [
-  {
-    label: "Make",
-    items: [
-      { id: "build", label: "Build", icon: Hammer },
-      { id: "design", label: "Documents", icon: FileText },
-      { id: "graphs", label: "Graphs", icon: Workflow },
-      { id: "art", label: "Art", icon: Palette },
-      { id: "audio", label: "Audio", icon: Music2 },
-      { id: "uiux", label: "UI / UX", icon: LayoutTemplate },
-    ],
-  },
-  {
-    label: "Ship",
-    items: [
-      { id: "qa", label: "QA / Testing", icon: ShieldCheck },
-      { id: "release", label: "Release", icon: Rocket },
-    ],
-  },
-  {
-    label: "Grow",
-    items: [
-      { id: "business", label: "Business", icon: Briefcase },
-      { id: "marketing", label: "Marketing", icon: Megaphone },
-      { id: "community", label: "Community", icon: Users },
-      { id: "liveops", label: "Live Ops", icon: Radio },
-    ],
-  },
+// Everything under the project button is a screen of the open project, in
+// the order a game gets made: Studio (chat + the running game) is where
+// it happens, Context is what InfinaBox and the AI know about the game,
+// then Assets and Playtest & Launch, and Code (files and a terminal) last, for people who grow into it. A flat list — six entries
+// don't need the discipline groups the old 13-entry sidebar did.
+const PROJECT_SECTIONS: SectionItem[] = [
+  { id: "studio", label: "Studio", icon: Sparkles },
+  { id: "context", label: "Documents", icon: BookOpen },
+  { id: "assets", label: "Assets", icon: Images },
+  { id: "launch", label: "Playtest & Launch", icon: Rocket },
+  { id: "code", label: "Code", icon: Wrench },
 ];
+
+// App settings, at the foot of the game sidebar: the same Settings page the
+// Home sidebar opens.
+const SETTINGS_ITEM: SectionItem = { id: "settings", label: "Settings", icon: SettingsIcon };
 
 interface SidebarProps {
   active: Section;
@@ -126,14 +95,10 @@ interface SidebarProps {
 // Persisted the same lightweight way recent-projects.ts persists its list —
 // per-machine UI state with no reason to round-trip through Tauri, and no
 // reason to lose it every time the app restarts.
-const COLLAPSED_STORAGE_KEY = "infinabox.sidebarCollapsed";
+const COLLAPSED_STORAGE_KEY = "sidebar.collapsed";
 
 function loadCollapsed(): boolean {
-  try {
-    return localStorage.getItem(COLLAPSED_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
+  return getLayout<boolean>(COLLAPSED_STORAGE_KEY) === true;
 }
 
 function SectionRow({
@@ -154,6 +119,7 @@ function SectionRow({
       variant="ghost"
       size="sm"
       aria-pressed={active}
+      data-testid={`nav-${item.id}`}
       onClick={onSelect}
       className={cn(
         "relative w-full gap-2 px-2 font-normal text-muted-foreground hover:text-foreground",
@@ -189,9 +155,9 @@ function SectionRow({
 }
 
 // Replaces the old top bar's "Open Project" button — now that there's no
-// dedicated header, it lives right under Home instead, in every section
-// that shows the sidebar (Home itself never renders the sidebar; its own
-// dashboard has its own project picker).
+// dedicated header, it lives right under the pinned Home row, heading the
+// open project's own screens, in every section
+// that shows the sidebar (Home has its own sidebar, `HomeSidebar`).
 function ProjectButtonRow({
   projectPath,
   collapsed,
@@ -255,18 +221,26 @@ function ProjectButtonRow({
 
 export function Sidebar({ active, onSelect, projectPath, onOpenProject }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(loadCollapsed);
+  const menu = useContextMenu();
 
   useEffect(() => {
-    try {
-      localStorage.setItem(COLLAPSED_STORAGE_KEY, String(collapsed));
-    } catch {
-      // Losing the preference just means it defaults back to expanded next
-      // launch — not worth surfacing as an error.
-    }
+    setLayout(COLLAPSED_STORAGE_KEY, collapsed);
   }, [collapsed]);
 
   return (
     <motion.div
+      onContextMenu={(e) =>
+        menu(e, [
+          ...[...PINNED, ...(projectPath ? PROJECT_SECTIONS : []), SETTINGS_ITEM].map((item) => ({
+            label: item.label,
+            icon: <item.icon />,
+            disabled: item.id === active,
+            onSelect: () => onSelect(item.id),
+          })),
+          "separator",
+          { label: collapsed ? "Expand sidebar" : "Collapse sidebar", onSelect: () => setCollapsed((c) => !c) },
+        ])
+      }
       // Collapsed width has a floor: the macOS traffic lights are drawn
       // by the OS at a fixed offset (see `trafficLightPosition` in
       // tauri.conf.json — x: 22px inset, and the cluster itself is
@@ -295,7 +269,10 @@ export function Sidebar({ active, onSelect, projectPath, onOpenProject }: Sideba
        * is purely a data attribute Tauri's JS layer reads on `pointerdown` —
        * it never touches the CSS pointer-events cascade, so there's nothing
        * to opt back into (see App.tsx's top comment). */}
-      <div className="relative z-10 flex h-full min-h-0 flex-col gap-1 px-2 pt-11 pb-2">
+      <div
+        data-tauri-drag-region
+        className="relative z-10 flex h-full min-h-0 flex-col gap-1 px-2 pt-11 pb-2"
+      >
         {PINNED.map((item) => (
           <SectionRow
             key={item.id}
@@ -310,29 +287,27 @@ export function Sidebar({ active, onSelect, projectPath, onOpenProject }: Sideba
         <Separator className="my-1" />
 
         <ScrollArea className="min-h-0 flex-1">
-          <div className={cn("flex flex-col gap-3", !collapsed && "pr-2")}>
-            {GROUPS.map((group) => (
-              <div key={group.label} className="flex flex-col gap-0.5">
-                <FadeLabel show={!collapsed}>
-                  <span className="px-2 py-1 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-                    {group.label}
-                  </span>
-                </FadeLabel>
-                {group.items.map((item) => (
-                  <SectionRow
-                    key={item.id}
-                    item={item}
-                    active={active === item.id}
-                    collapsed={collapsed}
-                    onSelect={() => onSelect(item.id)}
-                  />
-                ))}
-              </div>
+          <div className={cn("flex flex-col gap-0.5", !collapsed && "pr-2")}>
+            {PROJECT_SECTIONS.map((item) => (
+              <SectionRow
+                key={item.id}
+                item={item}
+                active={active === item.id}
+                collapsed={collapsed}
+                onSelect={() => onSelect(item.id)}
+              />
             ))}
           </div>
         </ScrollArea>
 
         <Separator className="my-1" />
+
+        <SectionRow
+          item={SETTINGS_ITEM}
+          active={active === "settings"}
+          collapsed={collapsed}
+          onSelect={() => onSelect("settings")}
+        />
 
         <AnimatePresence mode="wait" initial={false}>
           {collapsed ? (

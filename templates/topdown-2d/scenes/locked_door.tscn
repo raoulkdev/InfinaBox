@@ -1,0 +1,111 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/locked_door.gd" id="1_locked_door"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_1"]
+size = Vector2(128, 40)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_2"]
+size = Vector2(140, 64)
+
+[sub_resource type="Gradient" id="Gradient_3"]
+colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 0)
+
+[node name="LockedDoor" type="StaticBody2D"]
+script = ExtResource("1_locked_door")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_1")
+
+[node name="Visual" type="Node2D" parent="."]
+
+[node name="Left" type="Node2D" parent="Visual"]
+position = Vector2(-32, 0)
+
+[node name="Outline" type="Polygon2D" parent="Visual/Left"]
+color = Color(0.118, 0.106, 0.18, 1)
+polygon = PackedVector2Array(-32, -20, 32, -20, 32, 20, -32, 20)
+
+[node name="Wood" type="Polygon2D" parent="Visual/Left"]
+color = Color(0.725, 0.475, 0.247, 1)
+polygon = PackedVector2Array(-29, -17, 29, -17, 29, 17, -29, 17)
+
+[node name="Plank" type="Polygon2D" parent="Visual/Left"]
+color = Color(0.604, 0.384, 0.192, 1)
+polygon = PackedVector2Array(-29, -3, 29, -3, 29, 1, -29, 1)
+
+[node name="Band" type="Polygon2D" parent="Visual/Left"]
+color = Color(0.478, 0.294, 0.145, 1)
+polygon = PackedVector2Array(-29, -17, 29, -17, 29, -11, -29, -11)
+
+[node name="Right" type="Node2D" parent="Visual"]
+position = Vector2(32, 0)
+
+[node name="Outline" type="Polygon2D" parent="Visual/Right"]
+color = Color(0.118, 0.106, 0.18, 1)
+polygon = PackedVector2Array(-32, -20, 32, -20, 32, 20, -32, 20)
+
+[node name="Wood" type="Polygon2D" parent="Visual/Right"]
+color = Color(0.725, 0.475, 0.247, 1)
+polygon = PackedVector2Array(-29, -17, 29, -17, 29, 17, -29, 17)
+
+[node name="Plank" type="Polygon2D" parent="Visual/Right"]
+color = Color(0.604, 0.384, 0.192, 1)
+polygon = PackedVector2Array(-29, -3, 29, -3, 29, 1, -29, 1)
+
+[node name="Band" type="Polygon2D" parent="Visual/Right"]
+color = Color(0.478, 0.294, 0.145, 1)
+polygon = PackedVector2Array(-29, -17, 29, -17, 29, -11, -29, -11)
+
+[node name="LockOutline" type="Polygon2D" parent="Visual"]
+color = Color(0.118, 0.106, 0.18, 1)
+polygon = PackedVector2Array(13, 2, 12.7, 4.9, 11.7, 7.6, 10.2, 10.1, 8.1, 12.2, 5.6, 13.7, 2.9, 14.7, 0, 15, -2.9, 14.7, -5.6, 13.7, -8.1, 12.2, -10.2, 10.1, -11.7, 7.6, -12.7, 4.9, -13, 2, -12.7, -0.9, -11.7, -3.6, -10.2, -6.1, -8.1, -8.2, -5.6, -9.7, -2.9, -10.7, 0, -11, 2.9, -10.7, 5.6, -9.7, 8.1, -8.2, 10.2, -6.1, 11.7, -3.6, 12.7, -0.9)
+
+[node name="Lock" type="Polygon2D" parent="Visual"]
+color = Color(1, 0.835, 0.31, 1)
+polygon = PackedVector2Array(10, 2, 9.7, 4.2, 9, 6.3, 7.8, 8.2, 6.2, 9.8, 4.3, 11, 2.2, 11.7, 0, 12, -2.2, 11.7, -4.3, 11, -6.2, 9.8, -7.8, 8.2, -9, 6.3, -9.7, 4.2, -10, 2, -9.7, -0.2, -9, -2.3, -7.8, -4.2, -6.2, -5.8, -4.3, -7, -2.2, -7.7, 0, -8, 2.2, -7.7, 4.3, -7, 6.2, -5.8, 7.8, -4.2, 9, -2.3, 9.7, -0.2)
+
+[node name="Keyhole" type="Polygon2D" parent="Visual"]
+color = Color(0.118, 0.106, 0.18, 1)
+polygon = PackedVector2Array(-2, -2, 2, -2, 3, 9, -3, 9)
+
+[node name="TouchArea" type="Area2D" parent="."]
+collision_layer = 0
+collision_mask = 2
+monitorable = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="TouchArea"]
+shape = SubResource("RectangleShape2D_2")
+
+[node name="Hint" type="Label" parent="."]
+offset_left = -180.0
+offset_top = 40.0
+offset_right = 180.0
+offset_bottom = 76.0
+theme_override_colors/font_color = Color(1, 0.973, 0.925, 1)
+theme_override_colors/font_outline_color = Color(0.118, 0.106, 0.18, 1)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 22
+text = "Locked! Find the key."
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Dust" type="CPUParticles2D" parent="."]
+emitting = false
+amount = 24
+lifetime = 0.6
+one_shot = true
+explosiveness = 1.0
+direction = Vector2(0, -1)
+spread = 180.0
+gravity = Vector2(0, 0)
+initial_velocity_min = 60.0
+initial_velocity_max = 150.0
+damping_min = 60.0
+damping_max = 120.0
+scale_amount_min = 4.0
+scale_amount_max = 8.0
+color = Color(0.851, 0.776, 0.647, 1)
+color_ramp = SubResource("Gradient_3")
+emission_shape = 1
+emission_sphere_radius = 40.0

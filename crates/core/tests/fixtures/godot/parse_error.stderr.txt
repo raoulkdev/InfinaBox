@@ -1,0 +1,4 @@
+SCRIPT ERROR: Parse Error: Expected expression after "+" operator.
+          at: GDScript::reload (res://main.gd:4)
+ERROR: Failed to load script "res://main.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript_resource_format.cpp:46)

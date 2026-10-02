@@ -1,0 +1,14 @@
+{
+  "id": "puzzle-2d",
+  "name": "Puzzle",
+  "description": "Push blocks onto the targets to solve five short, tricky rooms. Undo any move, restart any time, and finish with an ending screen.",
+  "dimension": "2d",
+  "controls": "Arrow keys or WASD to move (d-pad works too), Z to undo, R to restart, Space to continue",
+  "features": [
+    "Sliding movement on a grid, pushing one block at a time",
+    "Five levels you can edit as plain text",
+    "Move counter, best moves and unlimited undo",
+    "Start screen, \"Level complete!\" panel and an ending"
+  ],
+  "keywords": ["puzzle", "puzzles", "sokoban", "block", "blocks", "push", "pushing", "logic", "brain", "solve", "grid", "tiles", "crate", "crates", "rooms", "undo"]
+}

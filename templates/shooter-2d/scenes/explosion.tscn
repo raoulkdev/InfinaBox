@@ -1,0 +1,31 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/explosion.gd" id="1_explosion"]
+
+[sub_resource type="Curve" id="Curve_shrink"]
+_data = [Vector2(0, 1), 0.0, 0.0, 0, 0, Vector2(1, 0), 0.0, 0.0, 0, 0]
+point_count = 2
+
+[sub_resource type="Gradient" id="Gradient_fade"]
+offsets = PackedFloat32Array(0, 0.55, 1)
+colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0)
+
+[node name="Explosion" type="CPUParticles2D"]
+emitting = false
+amount = 32
+lifetime = 0.6
+one_shot = true
+explosiveness = 1.0
+direction = Vector2(1, 0)
+spread = 180.0
+gravity = Vector2(0, 0)
+initial_velocity_min = 120.0
+initial_velocity_max = 380.0
+damping_min = 300.0
+damping_max = 500.0
+scale_amount_min = 5.0
+scale_amount_max = 10.0
+scale_amount_curve = SubResource("Curve_shrink")
+color = Color(1, 0.3, 0.45, 1)
+color_ramp = SubResource("Gradient_fade")
+script = ExtResource("1_explosion")

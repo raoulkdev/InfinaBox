@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { GripHorizontal } from "lucide-react";
 import { debounce } from "@/lib/debounce";
+import { getLayout, setLayout } from "@/lib/layout-store";
 import { cn } from "@/lib/utils";
 
 // Same settle window TerminalPanel's own resize handler uses, and for the
@@ -33,8 +33,8 @@ export interface PanelSpec {
 }
 
 interface ResizablePanelGroupProps {
-  /** Persists this group's sizes and order to `localStorage` under
-   * `infinabox.layout.<storageKey>` — unique per call site (e.g. "build",
+  /** Saves this group's sizes and order in the app's settings
+   * (`lib/layout-store.ts`) under `<storageKey>` — unique per call site (e.g. "build",
    * "filebrowser.documents") so unrelated panel groups never collide. */
   storageKey: string;
   panels: PanelSpec[];
@@ -57,14 +57,13 @@ const GAP = 8;
 // mine," which is where a swap starts feeling expected rather than early
 // or sticky.
 const SWAP_THRESHOLD_RATIO = 0.5;
+// Height of the reorder grip, in pixels — see where it's rendered for why
+// it has to stay within a header's top 4px.
+const GRIP_HEIGHT = 4;
 
 interface LayoutState {
   order: string[];
   sizes: Record<string, number>;
-}
-
-function storageFullKey(storageKey: string): string {
-  return `infinabox.layout.${storageKey}`;
 }
 
 function defaultLayout(panels: PanelSpec[]): LayoutState {
@@ -84,9 +83,8 @@ function defaultLayout(panels: PanelSpec[]): LayoutState {
 function loadLayout(storageKey: string, panels: PanelSpec[]): LayoutState {
   const fallback = defaultLayout(panels);
   try {
-    const raw = localStorage.getItem(storageFullKey(storageKey));
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw) as Partial<LayoutState> | null;
+    const parsed = getLayout<Partial<LayoutState>>(storageKey);
+    if (!parsed) return fallback;
     const ids = panels.map((p) => p.id);
     const order = parsed?.order;
     const sizes = parsed?.sizes;
@@ -107,12 +105,7 @@ function loadLayout(storageKey: string, panels: PanelSpec[]): LayoutState {
 }
 
 function saveLayout(storageKey: string, layout: LayoutState): void {
-  try {
-    localStorage.setItem(storageFullKey(storageKey), JSON.stringify(layout));
-  } catch {
-    // Losing a saved layout just means it resets to the default split next
-    // launch — not worth surfacing as an error.
-  }
+  setLayout(storageKey, layout);
 }
 
 /** The one system every multi-block row in the app uses to let its blocks
@@ -121,12 +114,16 @@ function saveLayout(storageKey: string, layout: LayoutState): void {
  * own (unrelated) collapse behavior. A single call site with N panels: N-1
  * drag handles for resizing, and a small grip strip on each panel for
  * reordering. Both the sizes and the order persist per `storageKey`, the
- * same `localStorage`-backed pattern the Sidebar's collapsed state uses. */
+ * same settings-backed store the Sidebar's collapsed state uses. */
 export function ResizablePanelGroup({ storageKey, panels, className }: ResizablePanelGroupProps) {
   const byId = useMemo(() => Object.fromEntries(panels.map((p) => [p.id, p])), [panels]);
   const idsKey = panels.map((p) => p.id).join("\u0000");
 
   const [layout, setLayout] = useState<LayoutState>(() => loadLayout(storageKey, panels));
+  // The latest layout for pointer handlers, which must compute the next one
+  // outside a state updater (updaters run twice in development and must be pure).
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
 
   useEffect(() => {
     setLayout((prev) => {
@@ -225,6 +222,7 @@ export function ResizablePanelGroup({ storageKey, panels, className }: Resizable
     window.removeEventListener("pointercancel", onResizePointerUp);
     document.body.style.removeProperty("cursor");
     document.body.style.removeProperty("user-select");
+    document.documentElement.classList.remove("is-dragging");
   }, [onResizePointerMove]);
 
   const startResize = useCallback(
@@ -246,6 +244,9 @@ export function ResizablePanelGroup({ storageKey, panels, className }: Resizable
       window.addEventListener("pointercancel", onResizePointerUp);
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
+      document.documentElement.classList.add("is-dragging");
+      window.getSelection()?.removeAllRanges();
+      e.preventDefault();
     },
     [layout.sizes, onResizePointerMove, onResizePointerUp],
   );
@@ -256,6 +257,9 @@ export function ResizablePanelGroup({ storageKey, panels, className }: Resizable
   // row actually has. Sizes stay keyed by panel id, so a panel keeps its
   // own width when it moves. ----
   const reorderDragRef = useRef<{ id: string; startX: number } | null>(null);
+  // How far the dragged panel sits from its slot: it follows the cursor, and
+  // the other panels step aside once it crosses half of one.
+  const [follow, setFollow] = useState<{ id: string; dx: number } | null>(null);
 
   const onReorderPointerMove = useCallback(
     (e: PointerEvent) => {
@@ -266,10 +270,11 @@ export function ResizablePanelGroup({ storageKey, panels, className }: Resizable
         onReorderPointerUp();
         return;
       }
-      setLayout((prev) => {
+      {
+        const prev = layoutRef.current;
         let order = prev.order;
         let index = order.indexOf(drag.id);
-        if (index === -1) return prev;
+        if (index === -1) return;
         // Consume the full pointer delta in one pass rather than a single
         // swap, so a large, fast motion that crosses more than one
         // neighbor's threshold in a single pointermove event (dragging a
@@ -301,10 +306,18 @@ export function ResizablePanelGroup({ storageKey, panels, className }: Resizable
           remaining += neighborWidthPx;
           swapped = true;
         }
-        if (!swapped) return prev;
-        reorderDragRef.current = { id: drag.id, startX: e.clientX };
-        return { ...prev, order };
-      });
+        // The panel can't be pulled past the first or last slot.
+        if (index === 0 && remaining < 0) remaining = 0;
+        if (index === order.length - 1 && remaining > 0) remaining = 0;
+        // What is left over is how far the panel is from its (new) slot.
+        reorderDragRef.current = { id: drag.id, startX: e.clientX - remaining };
+        setFollow({ id: drag.id, dx: remaining });
+        if (swapped) {
+          const next = { ...prev, order };
+          layoutRef.current = next;
+          setLayout(next);
+        }
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [availableWidth],
@@ -312,6 +325,8 @@ export function ResizablePanelGroup({ storageKey, panels, className }: Resizable
 
   const onReorderPointerUp = useCallback(() => {
     reorderDragRef.current = null;
+    setFollow(null);
+    document.documentElement.classList.remove("is-dragging");
     window.removeEventListener("pointermove", onReorderPointerMove);
     window.removeEventListener("pointerup", onReorderPointerUp);
     window.removeEventListener("pointercancel", onReorderPointerUp);
@@ -321,7 +336,11 @@ export function ResizablePanelGroup({ storageKey, panels, className }: Resizable
 
   const startReorder = useCallback(
     (id: string) => (e: React.PointerEvent) => {
+      e.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      document.documentElement.classList.add("is-dragging");
       reorderDragRef.current = { id, startX: e.clientX };
+      setFollow({ id, dx: 0 });
       window.addEventListener("pointermove", onReorderPointerMove);
       window.addEventListener("pointerup", onReorderPointerUp);
       window.addEventListener("pointercancel", onReorderPointerUp);
@@ -373,26 +392,33 @@ export function ResizablePanelGroup({ storageKey, panels, className }: Resizable
         const isLast = i === layout.order.length - 1;
         return (
           <Fragment key={id}>
-            <div className="group relative flex h-full min-w-0 flex-col" style={{ flex: `0 0 ${widthPx}px` }}>
+            <div
+              className={cn("group relative flex h-full min-w-0 flex-col", follow?.id === id && "z-30 rounded-xl shadow-2xl")}
+              style={{ flex: `0 0 ${widthPx}px`, transform: follow?.id === id ? `translateX(${follow.dx}px)` : undefined }}
+            >
               <div className="h-full min-h-0 flex-1 overflow-hidden">{panel.content}</div>
               {/* The reorder grip floats over the panel's own top edge
                * instead of taking a layout row of its own — blocks stay
                * exactly as tall as they'd be without this system, and the
                * grip only appears (and only accepts pointer input) while
-               * hovering the block. Small and centered on purpose: every
-               * content component already puts its own label/buttons at
-               * the left/right edges of its header, so a centered pill
-               * never sits on top of something else clickable. Deliberately
-               * NOT `data-tauri-drag-region`: that would hand the
-               * pointer-down to the OS window-drag handler before this
-               * component's own pointermove/pointerup ever sees it. */}
+               * hovering the block. It's a thin bar inside the top
+               * `GRIP_HEIGHT` pixels, above where any header's controls
+               * start: headers are `h-9` rows with vertically centered
+               * controls at most `h-7` tall, so their top edge sits 4px
+               * down. A taller, centered pill used to cover whatever a
+               * narrow header had in the middle (Studio's Play "Restart",
+               * Chat's "Conversations" picker). Deliberately NOT
+               * `data-tauri-drag-region`: that would hand the pointer-down
+               * to the OS window-drag handler before this component's own
+               * pointermove/pointerup ever sees it. */}
               <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center">
                 <div
+                  data-testid="panel-reorder-grip"
+                  title="Drag to move this panel"
                   onPointerDown={startReorder(id)}
-                  className="pointer-events-none mt-1 flex h-4 w-8 cursor-grab items-center justify-center rounded-full bg-border opacity-0 shadow-sm transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 active:cursor-grabbing"
-                >
-                  <GripHorizontal className="size-3 text-foreground" />
-                </div>
+                  style={{ height: GRIP_HEIGHT }}
+                  className="pointer-events-none w-32 cursor-grab touch-none rounded-b-full bg-muted-foreground/50 opacity-25  group-hover:pointer-events-auto group-hover:opacity-100 hover:bg-muted-foreground active:cursor-grabbing"
+                />
               </div>
               {!isLast && <ResizeHandle onPointerDown={startResize(id, layout.order[i + 1])} />}
             </div>

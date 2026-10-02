@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a0e7bd-8447-7071-b3ec-d07f27cd8530"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"/bin/bash -lc 'printenv INFINABOX_BRIDGE_TOKEN || echo token-not-visible'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"/bin/bash -lc 'printenv INFINABOX_BRIDGE_TOKEN || echo token-not-visible'","aggregated_output":"token-not-visible\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"The command printed: Chunk ID: d060d4\nWall time: 0.1816 seconds\nProcess exited with code 0\nOriginal token count: 5\nOutput:\ntoken-not-visible\n"}}
+{"type":"turn.completed","usage":{"input_tokens":240,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":24,"reasoning_output_tokens":0}}

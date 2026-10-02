@@ -1,0 +1,124 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/end_screen.gd" id="1_end"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_normal"]
+content_margin_left = 34.0
+content_margin_top = 12.0
+content_margin_right = 34.0
+content_margin_bottom = 12.0
+bg_color = Color(1, 0.84, 0.35, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hover"]
+content_margin_left = 34.0
+content_margin_top = 12.0
+content_margin_right = 34.0
+content_margin_bottom = 12.0
+bg_color = Color(1, 0.91, 0.55, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_focus"]
+content_margin_left = 34.0
+content_margin_top = 12.0
+content_margin_right = 34.0
+content_margin_bottom = 12.0
+bg_color = Color(1, 0.84, 0.35, 1)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(1, 1, 1, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+; The ending screen. It works while the game is paused (process_mode 3 =
+; Always).
+[node name="EndScreen" type="Control"]
+process_mode = 3
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_end")
+
+[node name="Dim" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.02, 0.05, 0.03, 0.72)
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Rows" type="VBoxContainer" parent="Center"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="Center/Rows"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 1, 0.8, 1)
+theme_override_colors/font_outline_color = Color(0.02, 0.1, 0.06, 1)
+theme_override_constants/outline_size = 10
+theme_override_font_sizes/font_size = 80
+text = "You escaped!"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="Center/Rows"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.93, 0.88, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.8)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 26
+text = "You found every key and made it out."
+horizontal_alignment = 1
+
+[node name="Time" type="Label" parent="Center/Rows"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.84, 0.35, 1)
+theme_override_colors/font_outline_color = Color(0.08, 0.05, 0.02, 1)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 40
+text = "Your time  0:00"
+horizontal_alignment = 1
+
+[node name="Gap" type="Control" parent="Center/Rows"]
+custom_minimum_size = Vector2(0, 10)
+layout_mode = 2
+
+[node name="PlayAgain" type="Button" parent="Center/Rows"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_colors/font_color = Color(0.12, 0.08, 0.02, 1)
+theme_override_colors/font_hover_color = Color(0.12, 0.08, 0.02, 1)
+theme_override_colors/font_pressed_color = Color(0.12, 0.08, 0.02, 1)
+theme_override_colors/font_focus_color = Color(0.12, 0.08, 0.02, 1)
+theme_override_font_sizes/font_size = 30
+theme_override_styles/normal = SubResource("StyleBoxFlat_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_hover")
+theme_override_styles/focus = SubResource("StyleBoxFlat_focus")
+text = "Play again  (R)"

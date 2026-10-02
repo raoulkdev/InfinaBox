@@ -1,0 +1,17 @@
+// WHO IS IN THE STORY
+//
+// One line per character:   Name: #color shape side
+//
+//   Name    exactly as it is written before the colon in the story files
+//   #color  their color (name plate and portrait), like #ffa45c
+//   shape   circle, square, triangle or diamond, or none for a character with
+//           no portrait (the person playing, for example)
+//   side    left, center or right: where the portrait stands on screen.
+//           Give characters who talk in the same scene different sides.
+//
+// A name that is not listed here still works in the story: it just gets a
+// plain grey name plate and no portrait.
+
+You: #9db8ff none left
+Mira: #ffa45c circle left
+Theo: #6fb7e9 square right

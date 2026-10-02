@@ -1,0 +1,24 @@
+// HOW STORY FILES WORK (you can edit these with any text editor, no code needed)
+//
+//   // text            a note to yourself; the game ignores it
+//   # scene: name      starts a scene. Names use letters, numbers and _ only.
+//   background: night  the backdrop: a name (night, day, dawn, sunset, cafe,
+//                      park, home, black), a color like #336699, or two colors
+//                      like #336699 #99ccff (top, bottom)
+//   Mira: Hello!       someone says something. The name must be in characters.txt
+//   > Rain taps.       narration: no speaker, no portrait
+//   ? Say hi -> hello  a choice. Put 2 to 4 of these in a row; each one jumps
+//                      to the scene named after the arrow
+//   set kind           remember something ("kind") for later
+//   if kind -> nice    jump to scene "nice" if "kind" was set (if not kind -> ... is the opposite)
+//   goto cafe          jump straight to another scene
+//   end: Good Ending   finish the story with this ending name
+//
+// Every scene has to finish with a choice, a goto or an end. Every scene
+// name used after an arrow must exist somewhere in the story folder.
+
+# scene: ending_passing
+background: night
+> You step back out into the drizzle. Behind you the lanterns glow through the foggy glass, and a bell jingles once.
+> Maybe you will come back on another rainy day.
+end: Just Passing Through

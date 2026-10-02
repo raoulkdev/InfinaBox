@@ -1,0 +1,13 @@
+{
+  "name": "infinabox-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "End-to-end tests that drive the real InfinaBox desktop app through tauri-driver.",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "dependencies": {
+    "selenium-webdriver": "^4.27.0"
+  }
+}
